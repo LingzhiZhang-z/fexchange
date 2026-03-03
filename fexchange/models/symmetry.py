@@ -643,16 +643,20 @@ def classify_with_multipoles(
     J: float,
     evecs: NDArray[np.complexfloating],
     point_group: str = "Oh",
+    n_f: int | None = None,
 ) -> dict[str, object]:
-    """Classify all states and attach ground-state multipole compatibility."""
-    labels = classify_irreps(J, evecs, point_group=point_group)
-    ground_irrep = labels[0]
+    """Classify all states and return the 02-07 single-branch metadata schema."""
+    labels = classify_irreps(J, evecs, point_group=point_group, n_f=n_f)
+    ground_irrep = labels[0] if labels else "unknown"
+    ground_meta = irrep_metadata(ground_irrep, point_group=point_group, J=J, n_f=n_f)
+    excited_irreps: list[dict[str, object]] = []
+    for i, irrep in enumerate(labels[1:], start=1):
+        meta = irrep_metadata(irrep, point_group=point_group, J=J, n_f=n_f)
+        excited_irreps.append({"energy_index": i, **meta})
     return {
-        "ground": {
-            "irrep": ground_irrep,
-            "multipoles": allowed_multipoles(ground_irrep, point_group=point_group),
-        },
-        "excited": [{"irrep": labels[i], "energy_index": i} for i in range(1, len(labels))],
+        **ground_meta,
+        "allowed_multipoles": allowed_multipoles(ground_irrep, point_group=point_group),
+        "excited_irreps": excited_irreps,
     }
 
 
@@ -662,33 +666,32 @@ def analyze_cef_symmetry(
     *,
     B_params: dict[str, float] | None = None,
     evecs: NDArray[np.complexfloating] | None = None,
-    symmetry: str = "Oh",
+    n_f: int | None = None,
+    symmetry: str | None = None,
     mode_q3: str = "cos",
 ) -> dict[str, object]:
     """
     Standalone symmetry analysis from either CEF parameters or precomputed eigenvectors.
     """
-    if B_params is None and evecs is None:
-        raise ValueError("Must provide either B_params or evecs")
-    if B_params is not None and evecs is not None:
-        raise ValueError("Provide B_params or evecs, not both")
+    if (B_params is None) == (evecs is None):
+        raise ValueError("Require exactly one of B_params and evecs")
 
     eigenvalues: NDArray[np.float64] | None = None
     if B_params is not None:
         from fexchange.models.hcef import build_hcef_matrix_J
 
-        H = build_hcef_matrix_J(J, B_params, symmetry=symmetry, mode_q3=mode_q3)
+        hcef_symmetry = symmetry or ("C3v" if point_group == "D3d" else point_group)
+        H = build_hcef_matrix_J(J, B_params, symmetry=hcef_symmetry, mode_q3=mode_q3)
         eigenvalues, evecs = np.linalg.eigh(H)
 
     assert evecs is not None
-    classification = classify_with_multipoles(J, evecs, point_group=point_group)
-    all_irreps = classify_irreps(J, evecs, point_group=point_group)
+    classification = classify_with_multipoles(J, evecs, point_group=point_group, n_f=n_f)
+    all_irreps = classify_irreps(J, evecs, point_group=point_group, n_f=n_f)
 
     out: dict[str, object] = {
         "J": float(J),
         "point_group": point_group,
-        "ground": classification["ground"],
-        "excited": classification["excited"],
+        **classification,
         "all_irreps": all_irreps,
     }
     if eigenvalues is not None:

@@ -158,6 +158,27 @@ def test_d3d_family_multipole_rules_exist():
     assert "octupole" in allowed_multipoles("Gamma2-", "D3d")
 
 
+def test_classify_with_multipoles_new_schema_single_branch():
+    h = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.001}, "Oh")
+    _, evecs = np.linalg.eigh(h)
+    out = classify_with_multipoles(4.0, evecs, point_group="Oh", n_f=2)
+    assert "irrep_display" in out
+    assert "irrep_primary" in out
+    assert "irrep_aliases" in out
+    assert "allowed_multipoles" in out
+    assert "excited_irreps" in out
+    assert "parity_unknown" not in out
+
+
+def test_analyze_cef_symmetry_requires_exactly_one_input():
+    with pytest.raises(ValueError):
+        analyze_cef_symmetry(4.0, "Oh")
+    h = build_hcef_matrix_J(4.0, {"B4": 0.01}, "Oh")
+    _, evecs = np.linalg.eigh(h)
+    with pytest.raises(ValueError):
+        analyze_cef_symmetry(4.0, "Oh", B_params={"B4": 0.01}, evecs=evecs)
+
+
 class TestCharacterTablesOh:
     def test_oh_exists(self):
         assert "Oh" in CHARACTER_TABLES
