@@ -10,6 +10,7 @@ from fexchange.models.symmetry import (
     parity_from_J,
     build_active_irrep_table,
     build_projectors,
+    irrep_metadata,
     build_representation_matrices,
     classify_irreps,
     allowed_multipoles,
@@ -131,6 +132,30 @@ def test_projector_completeness_on_j4_oh():
     for p in projectors.values():
         total += p
     np.testing.assert_allclose(total, np.eye(9, dtype=complex), atol=1e-6)
+
+
+def test_irrep_metadata_contains_display_primary_aliases():
+    meta = irrep_metadata("Gamma1", point_group="Oh", J=4.0)
+    assert meta["irrep_display"] == "Γ1"
+    assert meta["irrep_primary"] == "Gamma1"
+    assert "A1g" in meta["irrep_aliases"]
+    assert meta["mapping_unverified"] is False
+
+
+def test_spinor_aliases_default_empty():
+    meta = irrep_metadata("Gamma6", point_group="Oh", J=3.5)
+    assert meta["irrep_aliases"] == []
+    assert meta["mapping_unverified"] is True
+
+
+def test_oh_spinor_multipole_rules_exist():
+    assert "dipole" in allowed_multipoles("Gamma6", "Oh")
+    assert "quadrupole" in allowed_multipoles("Gamma8", "Oh")
+
+
+def test_d3d_family_multipole_rules_exist():
+    assert "dipole" in allowed_multipoles("Gamma5+", "D3d")
+    assert "octupole" in allowed_multipoles("Gamma2-", "D3d")
 
 
 class TestCharacterTablesOh:

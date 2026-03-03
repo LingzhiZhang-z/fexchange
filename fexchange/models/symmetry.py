@@ -156,17 +156,95 @@ MULTIPOLE_RULES: dict[str, dict[str, list[str]]] = {
     "Oh": {
         "Gamma1": ["octupole"],
         "Gamma2": ["octupole"],
-        "Gamma3": ["quadrupole"],
+        "Gamma3": ["quadrupole", "octupole"],
         "Gamma4": ["dipole", "octupole"],
         "Gamma5": ["quadrupole", "octupole"],
+        "Gamma6": ["dipole", "octupole"],
+        "Gamma7": ["dipole", "octupole"],
+        "Gamma8": ["dipole", "quadrupole", "octupole"],
     },
     "D3d": {
+        # Legacy aliases retained for backward compatibility with older tests/callers.
         "A1g": [],
-        "A2g": ["dipole"],
-        "Eg": ["dipole", "quadrupole"],
+        "A2g": ["dipole", "octupole"],
+        "Eg": ["dipole", "quadrupole", "octupole"],
         "A1u": [],
         "A2u": ["octupole"],
         "Eu": ["quadrupole", "octupole"],
+        # 02-07 contract labels (single-valued parity-tagged)
+        "Gamma1+": [],
+        "Gamma2+": ["dipole", "octupole"],
+        "Gamma3+": ["dipole", "quadrupole", "octupole"],
+        "Gamma1-": [],
+        "Gamma2-": ["octupole"],
+        "Gamma3-": ["quadrupole", "octupole"],
+        # 02-07 contract labels (spinor parity-tagged)
+        "Gamma4+": ["dipole", "octupole"],
+        "Gamma5+": ["dipole", "quadrupole", "octupole"],
+        "Gamma6+": ["dipole", "quadrupole", "octupole"],
+        "Gamma4-": ["dipole", "octupole"],
+        "Gamma5-": ["dipole", "quadrupole", "octupole"],
+        "Gamma6-": ["dipole", "quadrupole", "octupole"],
+    },
+    "C3v": {
+        "Gamma1": [],
+        "Gamma2": [],
+        "Gamma3": ["dipole", "quadrupole", "octupole"],
+        "Gamma4": ["dipole", "octupole"],
+        "Gamma5": ["dipole", "quadrupole", "octupole"],
+        "Gamma6": ["dipole", "quadrupole", "octupole"],
+    },
+}
+
+
+IRREP_DISPLAY: dict[str, str] = {
+    "Gamma1": "Γ1",
+    "Gamma2": "Γ2",
+    "Gamma3": "Γ3",
+    "Gamma4": "Γ4",
+    "Gamma5": "Γ5",
+    "Gamma6": "Γ6",
+    "Gamma7": "Γ7",
+    "Gamma8": "Γ8",
+    "Gamma1+": "Γ1+",
+    "Gamma2+": "Γ2+",
+    "Gamma3+": "Γ3+",
+    "Gamma4+": "Γ4+",
+    "Gamma5+": "Γ5+",
+    "Gamma6+": "Γ6+",
+    "Gamma1-": "Γ1-",
+    "Gamma2-": "Γ2-",
+    "Gamma3-": "Γ3-",
+    "Gamma4-": "Γ4-",
+    "Gamma5-": "Γ5-",
+    "Gamma6-": "Γ6-",
+}
+
+
+ALIAS_MAP: dict[tuple[str, int], dict[str, list[str]]] = {
+    ("Oh", +1): {
+        "Gamma1": ["A1g"],
+        "Gamma2": ["A2g"],
+        "Gamma3": ["Eg"],
+        "Gamma4": ["T1g"],
+        "Gamma5": ["T2g"],
+    },
+    ("Oh", -1): {
+        "Gamma1": ["A1u"],
+        "Gamma2": ["A2u"],
+        "Gamma3": ["Eu"],
+        "Gamma4": ["T1u"],
+        "Gamma5": ["T2u"],
+    },
+    ("D3d", +1): {
+        "Gamma1+": ["A1g"],
+        "Gamma2+": ["A2g"],
+        "Gamma3+": ["Eg"],
+    },
+    ("D3d", -1): {
+        "Gamma1-": ["A1u"],
+        "Gamma2-": ["A2u"],
+        "Gamma3-": ["Eu"],
     },
 }
 
@@ -541,6 +619,24 @@ def classify_irreps(
 def allowed_multipoles(irrep: str, point_group: str = "Oh") -> list[str]:
     """Return multipole channels carried by the given irrep."""
     return MULTIPOLE_RULES[point_group][irrep]
+
+
+def irrep_metadata(
+    irrep_primary: str,
+    point_group: str,
+    J: float,
+    n_f: int | None = None,
+) -> dict[str, object]:
+    """Build output metadata for one irrep label."""
+    p = parity_from_J(J, n_f=n_f) if point_group in {"Oh", "D3d"} else 0
+    aliases = ALIAS_MAP.get((point_group, p), {}).get(irrep_primary, [])
+    display = IRREP_DISPLAY.get(irrep_primary, irrep_primary.replace("Gamma", "Γ"))
+    return {
+        "irrep_display": display,
+        "irrep_primary": irrep_primary,
+        "irrep_aliases": aliases,
+        "mapping_unverified": len(aliases) == 0,
+    }
 
 
 def classify_with_multipoles(
