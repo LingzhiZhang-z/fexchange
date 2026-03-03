@@ -9,6 +9,7 @@ from fexchange.models.symmetry import (
     ROTATIONAL_CORE_TABLES,
     parity_from_J,
     build_active_irrep_table,
+    build_projectors,
     build_representation_matrices,
     classify_irreps,
     allowed_multipoles,
@@ -107,6 +108,29 @@ def test_d3d_labels_follow_j_parity():
 def test_n_f_inconsistency_raises():
     with pytest.raises(ValueError):
         build_active_irrep_table(J=3.5, point_group="Oh", n_f=4)
+
+
+def test_projector_set_covers_all_active_irreps():
+    _h = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.001}, "Oh")
+    projectors = build_projectors(4.0, point_group="Oh")
+    assert set(projectors.keys()) == {
+        "Gamma1",
+        "Gamma2",
+        "Gamma3",
+        "Gamma4",
+        "Gamma5",
+        "Gamma6",
+        "Gamma7",
+        "Gamma8",
+    }
+
+
+def test_projector_completeness_on_j4_oh():
+    projectors = build_projectors(4.0, point_group="Oh")
+    total = np.zeros((9, 9), dtype=complex)
+    for p in projectors.values():
+        total += p
+    np.testing.assert_allclose(total, np.eye(9, dtype=complex), atol=1e-6)
 
 
 class TestCharacterTablesOh:

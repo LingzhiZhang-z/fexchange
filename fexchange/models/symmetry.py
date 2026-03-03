@@ -401,6 +401,87 @@ def _build_class_operator_sums(J: float, point_group: str) -> dict[str, NDArray[
     raise ValueError(f"Unsupported point group for class sums: {point_group}")
 
 
+def _rotation_R_matrix(J: float, dim: int) -> NDArray[np.complexfloating]:
+    """Central 2pi rotation in double-group representation."""
+    twoJ = int(round(2.0 * float(J)))
+    phase = -1.0 if (twoJ % 2 == 1) else 1.0
+    return (phase * np.eye(dim, dtype=DTYPE_COMPLEX)).astype(DTYPE_COMPLEX, copy=False)
+
+
+def _build_o_star_class_representatives(J: float) -> dict[str, NDArray[np.complexfloating]]:
+    """One representative matrix per O* rotational-core class."""
+    dim = int(round(2 * J + 1))
+    I = np.eye(dim, dtype=DTYPE_COMPLEX)
+    R = _rotation_R_matrix(J, dim)
+    C3 = _rotation_D_matrix(J, [1.0, 1.0, 1.0], 2.0 * np.pi / 3.0)
+    C2_mix = _rotation_D_matrix(J, [1.0, 1.0, 0.0], np.pi)
+    C4 = _rotation_D_matrix(J, [0.0, 0.0, 1.0], np.pi / 2.0)
+    C2p_mix = _rotation_D_matrix(J, [1.0, 0.0, 0.0], np.pi)
+    return {
+        "E": I,
+        "R": R,
+        "C2_mix": C2_mix,
+        "C4": C4,
+        "RC4": R @ C4,
+        "C2p_mix": C2p_mix,
+        "C3": C3,
+        "RC3": R @ C3,
+    }
+
+
+def _build_c3v_star_class_representatives(J: float) -> dict[str, NDArray[np.complexfloating]]:
+    """One representative matrix per C3v* rotational-core class."""
+    dim = int(round(2 * J + 1))
+    I = np.eye(dim, dtype=DTYPE_COMPLEX)
+    R = _rotation_R_matrix(J, dim)
+    C3 = _rotation_D_matrix(J, [0.0, 0.0, 1.0], 2.0 * np.pi / 3.0)
+    sigma_v = _rotation_D_matrix(J, [1.0, 0.0, 0.0], np.pi)
+    return {
+        "E": I,
+        "R": R,
+        "2C3": C3,
+        "2RC3": R @ C3,
+        "3sigma_v": sigma_v,
+        "3Rsigma_v": R @ sigma_v,
+    }
+
+
+def _build_rotational_core_class_representatives(
+    J: float,
+    point_group: str,
+) -> dict[str, NDArray[np.complexfloating]]:
+    """Return class representatives keyed by active rotational-core class names."""
+    if point_group == "Oh":
+        return _build_o_star_class_representatives(J)
+    if point_group in {"D3d", "C3v"}:
+        return _build_c3v_star_class_representatives(J)
+    raise ValueError(f"Unsupported point group for class representatives: {point_group}")
+
+
+def build_projectors(
+    J: float,
+    point_group: str = "Oh",
+    n_f: int | None = None,
+) -> dict[str, NDArray[np.complexfloating]]:
+    """Build projection operators for all active irreps of the selected point group."""
+    active = build_active_irrep_table(J=J, point_group=point_group, n_f=n_f)
+    class_sizes = active["class_sizes"]  # type: ignore[index]
+    rows = active["rows"]  # type: ignore[index]
+    reps = _build_rotational_core_class_representatives(J, point_group=point_group)
+
+    order = int(sum(class_sizes.values()))
+    dim = int(round(2 * J + 1))
+    out: dict[str, NDArray[np.complexfloating]] = {}
+    for irrep_name, chars in rows.items():
+        d_irrep = int(np.real(chars["E"]))
+        P = np.zeros((dim, dim), dtype=DTYPE_COMPLEX)
+        for class_name, n_c in class_sizes.items():
+            chi = chars[class_name]
+            P += n_c * np.conj(chi) * reps[class_name]
+        out[irrep_name] = (d_irrep / order) * P
+    return out
+
+
 def _build_oh_rep_matrices(J: float) -> dict[str, NDArray[np.complexfloating]]:
     """One representative matrix per Oh conjugacy class."""
     dim = int(round(2 * J + 1))
@@ -435,26 +516,12 @@ def classify_irreps(
     J: float,
     evecs: NDArray[np.complexfloating],
     point_group: str = "Oh",
+    n_f: int | None = None,
 ) -> list[str]:
     """
     Classify each eigenvector column into an irrep via character projection operators.
     """
-    table = CHARACTER_TABLES[point_group]
-    class_sizes = table["_class_sizes"]  # type: ignore[index]
-    order = int(sum(class_sizes.values()))
-    class_sums = _build_class_operator_sums(J, point_group=point_group)
-
-    dim = int(round(2 * J + 1))
-    projectors: dict[str, NDArray[np.complexfloating]] = {}
-    for irrep_name, chars in table.items():
-        if irrep_name == "_class_sizes":
-            continue
-        d_irrep = int(chars["E"])  # type: ignore[index]
-        P = np.zeros((dim, dim), dtype=DTYPE_COMPLEX)
-        for class_name in class_sizes:
-            chi = chars[class_name]  # type: ignore[index]
-            P += np.conj(chi) * class_sums[class_name]
-        projectors[irrep_name] = (d_irrep / order) * P
+    projectors = build_projectors(J, point_group=point_group, n_f=n_f)
 
     labels: list[str] = []
     eps_proj = 1e-6
