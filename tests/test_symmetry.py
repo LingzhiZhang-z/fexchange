@@ -55,6 +55,34 @@ def test_active_table_is_single_branch_for_oh_and_d3d():
     assert all("+" not in k for k in d3d["rows"].keys()) is False
 
 
+def test_o_star_row_norms_are_48():
+    tbl = ROTATIONAL_CORE_TABLES["O_star"]
+    sizes = tbl["class_sizes"]
+    rows = tbl["rows"]
+    for required in ("Gamma6", "Gamma7", "Gamma8"):
+        assert required in rows
+    for row in rows.values():
+        norm2 = sum(sizes[c] * abs(row[c]) ** 2 for c in sizes)
+        assert abs(norm2 - 48.0) < 1e-10
+
+
+def test_c3v_star_row_norms_are_12():
+    tbl = ROTATIONAL_CORE_TABLES["C3v_star"]
+    sizes = tbl["class_sizes"]
+    rows = tbl["rows"]
+    for required in ("Gamma4", "Gamma5", "Gamma6"):
+        assert required in rows
+    for row in rows.values():
+        norm2 = sum(sizes[c] * abs(row[c]) ** 2 for c in sizes)
+        assert abs(norm2 - 12.0) < 1e-10
+
+
+def test_o_star_spinor_r_sign():
+    rows = ROTATIONAL_CORE_TABLES["O_star"]["rows"]
+    for name in ("Gamma6", "Gamma7", "Gamma8"):
+        assert rows[name]["R"] == -rows[name]["E"]
+
+
 class TestCharacterTablesOh:
     def test_oh_exists(self):
         assert "Oh" in CHARACTER_TABLES

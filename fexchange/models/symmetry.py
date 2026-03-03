@@ -183,7 +183,32 @@ ROTATIONAL_CORE_TABLES: dict[str, dict[str, dict[str, int] | dict[str, complex]]
             "C3": 8,
             "RC3": 8,
         },
-        "rows": {},
+        "rows": {
+            "Gamma1": {
+                "E": 1, "R": 1, "C2_mix": 1, "C4": 1, "RC4": 1, "C2p_mix": 1, "C3": 1, "RC3": 1,
+            },
+            "Gamma2": {
+                "E": 1, "R": 1, "C2_mix": 1, "C4": -1, "RC4": -1, "C2p_mix": -1, "C3": 1, "RC3": 1,
+            },
+            "Gamma3": {
+                "E": 2, "R": 2, "C2_mix": 2, "C4": 0, "RC4": 0, "C2p_mix": 0, "C3": -1, "RC3": -1,
+            },
+            "Gamma4": {
+                "E": 3, "R": 3, "C2_mix": -1, "C4": 1, "RC4": 1, "C2p_mix": -1, "C3": 0, "RC3": 0,
+            },
+            "Gamma5": {
+                "E": 3, "R": 3, "C2_mix": -1, "C4": -1, "RC4": -1, "C2p_mix": 1, "C3": 0, "RC3": 0,
+            },
+            "Gamma6": {
+                "E": 2, "R": -2, "C2_mix": 0, "C4": np.sqrt(2), "RC4": -np.sqrt(2), "C2p_mix": 0, "C3": 1, "RC3": -1,
+            },
+            "Gamma7": {
+                "E": 2, "R": -2, "C2_mix": 0, "C4": -np.sqrt(2), "RC4": np.sqrt(2), "C2p_mix": 0, "C3": 1, "RC3": -1,
+            },
+            "Gamma8": {
+                "E": 4, "R": -4, "C2_mix": 0, "C4": 0, "RC4": 0, "C2p_mix": 0, "C3": -1, "RC3": 1,
+            },
+        },
     },
     "C3v_star": {
         "class_sizes": {
@@ -194,7 +219,26 @@ ROTATIONAL_CORE_TABLES: dict[str, dict[str, dict[str, int] | dict[str, complex]]
             "3sigma_v": 3,
             "3Rsigma_v": 3,
         },
-        "rows": {},
+        "rows": {
+            "Gamma1": {
+                "E": 1, "R": 1, "2C3": 1, "2RC3": 1, "3sigma_v": 1, "3Rsigma_v": 1,
+            },
+            "Gamma2": {
+                "E": 1, "R": 1, "2C3": 1, "2RC3": 1, "3sigma_v": -1, "3Rsigma_v": -1,
+            },
+            "Gamma3": {
+                "E": 2, "R": 2, "2C3": -1, "2RC3": -1, "3sigma_v": 0, "3Rsigma_v": 0,
+            },
+            "Gamma4": {
+                "E": 2, "R": -2, "2C3": 1, "2RC3": -1, "3sigma_v": 0, "3Rsigma_v": 0,
+            },
+            "Gamma5": {
+                "E": 1, "R": -1, "2C3": -1, "2RC3": 1, "3sigma_v": 1j, "3Rsigma_v": -1j,
+            },
+            "Gamma6": {
+                "E": 1, "R": -1, "2C3": -1, "2RC3": 1, "3sigma_v": -1j, "3Rsigma_v": 1j,
+            },
+        },
     },
 }
 
