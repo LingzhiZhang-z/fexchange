@@ -255,12 +255,41 @@ def parity_from_J(J: float, n_f: int | None = None) -> int:
 
 
 def build_active_irrep_table(J: float, point_group: str, n_f: int | None = None) -> dict[str, object]:
-    """Minimal active-table scaffolding for single-branch parity contract."""
-    _ = parity_from_J(J, n_f=n_f)
+    """Return single-branch active irrep rows for Oh/D3d/C3v."""
+    p = parity_from_J(J, n_f=n_f)
+
+    if point_group == "Oh":
+        rows = dict(ROTATIONAL_CORE_TABLES["O_star"]["rows"])  # type: ignore[index]
+        return {
+            "branch_mode": "single",
+            "parity": p,
+            "core": "O_star",
+            "class_sizes": dict(ROTATIONAL_CORE_TABLES["O_star"]["class_sizes"]),  # type: ignore[index]
+            "rows": rows,
+        }
+
+    if point_group == "C3v":
+        rows = dict(ROTATIONAL_CORE_TABLES["C3v_star"]["rows"])  # type: ignore[index]
+        return {
+            "branch_mode": "single",
+            "parity": None,
+            "core": "C3v_star",
+            "class_sizes": dict(ROTATIONAL_CORE_TABLES["C3v_star"]["class_sizes"]),  # type: ignore[index]
+            "rows": rows,
+        }
+
     if point_group == "D3d":
-        return {"branch_mode": "single", "rows": {"Gamma1+": {}}}
-    if point_group in {"Oh", "C3v"}:
-        return {"branch_mode": "single", "rows": {"Gamma1": {}}}
+        tag = "+" if p > 0 else "-"
+        core_rows = ROTATIONAL_CORE_TABLES["C3v_star"]["rows"]  # type: ignore[index]
+        rows = {f"{name}{tag}": dict(chars) for name, chars in core_rows.items()}
+        return {
+            "branch_mode": "single",
+            "parity": p,
+            "core": "C3v_star",
+            "class_sizes": dict(ROTATIONAL_CORE_TABLES["C3v_star"]["class_sizes"]),  # type: ignore[index]
+            "rows": rows,
+        }
+
     raise ValueError(f"Unsupported point group: {point_group}")
 
 

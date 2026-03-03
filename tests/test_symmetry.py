@@ -83,6 +83,32 @@ def test_o_star_spinor_r_sign():
         assert rows[name]["R"] == -rows[name]["E"]
 
 
+def test_d3d_labels_follow_j_parity():
+    even_tbl = build_active_irrep_table(J=4.0, point_group="D3d")
+    odd_tbl = build_active_irrep_table(J=3.5, point_group="D3d")
+    assert set(even_tbl["rows"].keys()) == {
+        "Gamma1+",
+        "Gamma2+",
+        "Gamma3+",
+        "Gamma4+",
+        "Gamma5+",
+        "Gamma6+",
+    }
+    assert set(odd_tbl["rows"].keys()) == {
+        "Gamma1-",
+        "Gamma2-",
+        "Gamma3-",
+        "Gamma4-",
+        "Gamma5-",
+        "Gamma6-",
+    }
+
+
+def test_n_f_inconsistency_raises():
+    with pytest.raises(ValueError):
+        build_active_irrep_table(J=3.5, point_group="Oh", n_f=4)
+
+
 class TestCharacterTablesOh:
     def test_oh_exists(self):
         assert "Oh" in CHARACTER_TABLES
