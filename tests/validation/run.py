@@ -146,11 +146,6 @@ class Reporter:
                 f"{_triple(row['L2_num'], row['L2_ana'], row['L2_spr']):>28} "
                 f"{_triple(row['S2_num'], row['S2_ana'], row['S2_spr']):>28}"
             )
-            tuples = "  ".join(
-                f"({ml},{lz:+.4f},{ms:g},{sz:+.4f})"
-                for ml, lz, ms, sz in sorted(row["lzsz_tuples"], key=lambda item: (item[0], item[2]))
-            )
-            self.line(f"    Lz/Sz: {tuples}")
 
     def lsjm_operator_table(self, rows: list[dict]):
         def _fhi(two_x: int) -> str:
@@ -181,11 +176,54 @@ class Reporter:
                 f"{_triple(row['H4_num'], row['H4_ana'], row['H4_spr']):>24} "
                 f"{_triple(row['H6_num'], row['H6_ana'], row['H6_spr']):>24}"
             )
-            tuples = "  ".join(
-                f"({m:g},{jz:+.4f})"
-                for m, jz in sorted(row["jz_tuples"], key=lambda item: item[0])
+
+    def lsms_m_table(self, rows: list[dict]):
+        def _fhi(two_x: int) -> str:
+            return f"{two_x}/2" if two_x % 2 else f"{two_x // 2}"
+
+        self.line(
+            f"  {'alpha':>5} {'L':>2} {'S':>5} {'ML':>4} {'MS':>5} {'Lz_num':>10} {'Sz_num':>10}"
+        )
+        self.line(f"  {'-'*5} {'-'*2} {'-'*5} {'-'*4} {'-'*5} {'-'*10} {'-'*10}")
+        for row in rows:
+            self.line(
+                f"  {row['alpha']:>5} {row['L']:>2} {_fhi(row['twoS']):>5} "
+                f"{row['ML']:>4} {row['MS']:>5g} {row['Lz_num']:>+10.6f} {row['Sz_num']:>+10.6f}"
             )
-            self.line(f"    Jz: {tuples}")
+
+    def lsjm_m_table(self, rows: list[dict]):
+        def _fhi(two_x: int) -> str:
+            return f"{two_x}/2" if two_x % 2 else f"{two_x // 2}"
+
+        self.line(
+            f"  {'alpha':>5} {'L':>2} {'S':>5} {'J':>5} {'M':>5} {'Jz_num':>10}"
+        )
+        self.line(f"  {'-'*5} {'-'*2} {'-'*5} {'-'*5} {'-'*5} {'-'*10}")
+        for row in rows:
+            self.line(
+                f"  {row['alpha']:>5} {row['L']:>2} {_fhi(row['twoS']):>5} "
+                f"{_fhi(row['twoJ']):>5} {_fhi(row['twoM']):>5} {row['Jz_num']:>+10.6f}"
+            )
+
+    def lsjm_soc_term_table(self, rows: list[dict]):
+        def _fhi(two_x: int) -> str:
+            return f"{two_x}/2" if two_x % 2 else f"{two_x // 2}"
+
+        self.line(
+            f"  {'Term':<6} {'a':>2} {'L':>2} {'S':>5} {'n':>3} | "
+            f"{'O_soc(max_imag|max_offdiag)':>28}"
+        )
+        for row in rows:
+            name = TERM_NAMES.get((row["L"], row["twoS"]), f"L={row['L']}")
+            self.line(
+                f"  {name:<6} {row['alpha']:>2} {row['L']:>2} {_fhi(row['twoS']):>5} {row['n_states']:>3} | "
+                f"{row['soc_max_imag']:.1e}|{row['soc_max_offdiag']:.1e}"
+            )
+            blocks = "  ".join(
+                f"({_fhi(block['twoJ'])},{block['n_states']},{block['zeta_num']:+.4f},{block['zeta_ana']:+.4f},{block['zeta_spr']:.1e})"
+                for block in row["zeta_blocks"]
+            )
+            self.line(f"    J blocks: {blocks}")
 
     def angular_table_lsms(self, rows: list[dict]):
         def _fhi(two_x: int) -> str:
@@ -279,11 +317,19 @@ def _render_payload(rpt: Reporter, ctype: str, data: Any):
         rpt.angular_table_lsjm(data)
     elif ctype == "lsms_operator_table":
         rpt.lsms_operator_table(data)
+    elif ctype == "lsms_m_table":
+        rpt.lsms_m_table(data)
     elif ctype == "lsjm_operator_table":
         rpt.lsjm_operator_table(data)
+    elif ctype == "lsjm_m_table":
+        rpt.lsjm_m_table(data)
+    elif ctype == "lsjm_soc_term_table":
+        rpt.lsjm_soc_term_table(data)
     elif ctype == "analytic_fk_list":
         rpt.line(data)
     elif ctype == "analytic_soc_list":
+        rpt.line(data)
+    elif ctype == "lsjm_soc_global_reference":
         rpt.line(data)
     elif ctype == "ref0_table":
         rpt.ref0_table(data)

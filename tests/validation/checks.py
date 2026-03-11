@@ -336,7 +336,7 @@ def compute_lsms_checks_and_table(
     lsms: dict,
     n_ele: int,
     angular_ops: dict[str, np.ndarray],
-) -> tuple[list[dict], list[dict], str | None]:
+) -> tuple[list[dict], list[dict], list[dict], str | None]:
     del n_ele
 
     V = lsms["V_fock"]
@@ -380,6 +380,7 @@ def compute_lsms_checks_and_table(
             )
 
     table_rows: list[dict] = []
+    m_rows: list[dict] = []
     term_blocks = _term_blocks(labels)
     for key in sorted(term_blocks):
         alpha, L, twoS = key
@@ -402,18 +403,19 @@ def compute_lsms_checks_and_table(
             row[f"{op_key}_num"] = float(np.mean(values))
             row[f"{op_key}_ana"] = float(lsms[stored_key][idxs[0]]) if stored_key.startswith("coef_") else float(stored_angular[stored_key][idxs[0]])
             row[f"{op_key}_spr"] = float(np.max(values) - np.min(values))
-
-        tuples = sorted(
-            (
-                int(labels[idx]["ML"]),
-                float(diag_real["Lz"][idx]),
-                float(labels[idx]["MS"]),
-                float(diag_real["Sz"][idx]),
-            )
-            for idx in idxs
-        )
-        row["lzsz_tuples"] = tuples
         table_rows.append(row)
+        for idx in idxs:
+            m_rows.append(
+                {
+                    "alpha": alpha,
+                    "L": L,
+                    "twoS": twoS,
+                    "ML": int(labels[idx]["ML"]),
+                    "MS": float(labels[idx]["MS"]),
+                    "Lz_num": float(diag_real["Lz"][idx]),
+                    "Sz_num": float(diag_real["Sz"][idx]),
+                }
+            )
 
     analytic_text = None
     if analytic_fk is not None:
@@ -441,7 +443,8 @@ def compute_lsms_checks_and_table(
             )
         analytic_text = "\n".join(lines)
 
-    return checks, table_rows, analytic_text
+    m_rows.sort(key=lambda row: (row["alpha"], row["L"], row["twoS"], row["ML"], row["MS"]))
+    return checks, table_rows, m_rows, analytic_text
 
 
 def compute_lsjm_checks_and_table(
@@ -449,7 +452,7 @@ def compute_lsjm_checks_and_table(
     n_ele: int,
     angular_ops: dict[str, np.ndarray],
     hsoc_unit: np.ndarray,
-) -> tuple[list[dict], list[dict], str | None]:
+) -> tuple[list[dict], list[dict], list[dict], list[dict], str | None, str | None]:
     del n_ele
 
     V = lsjm["V_fock"]
@@ -463,7 +466,6 @@ def compute_lsjm_checks_and_table(
         ("S2", "S2", angular_ops["S2"], stored_angular["S2"], None),
         ("J2", "J2", angular_ops["J2"], stored_angular["J2"], None),
         ("Jz", "Jz", angular_ops["Jz"], stored_angular["Jz"], None),
-        ("O_soc", "zeta", hsoc_unit, np.asarray(lsjm["coef_zeta"], dtype=float), analytic_zeta),
         ("H0", "H0", lsjm["hint_rank_matrix_map"][0], np.asarray(lsjm["coef_F0"], dtype=float), analytic_fk[0] if analytic_fk else None),
         ("H2", "H2", lsjm["hint_rank_matrix_map"][2], np.asarray(lsjm["coef_F2"], dtype=float), analytic_fk[2] if analytic_fk else None),
         ("H4", "H4", lsjm["hint_rank_matrix_map"][4], np.asarray(lsjm["coef_F4"], dtype=float), analytic_fk[4] if analytic_fk else None),
@@ -494,12 +496,88 @@ def compute_lsjm_checks_and_table(
                 )
             )
 
+    zeta_diag_real = np.zeros(len(labels), dtype=float)
+    soc_term_rows: list[dict] = []
+    term_blocks = _term_blocks(labels)
+    for key in sorted(term_blocks):
+        alpha, L, twoS = key
+        idxs = term_blocks[key]
+        V_term = V[:, idxs]
+        hsoc_term = V_term.conj().T @ hsoc_unit @ V_term
+        diag, max_imag, max_offdiag = eigenstate_check(np.eye(len(idxs), dtype=complex), hsoc_term)
+        diag_real_term = diag.real
+        zeta_diag_real[idxs] = diag_real_term
+
+        stored_expected = np.asarray(lsjm["coef_zeta"], dtype=float)[idxs]
+        stored_err = float(np.max(np.abs(diag_real_term - stored_expected)))
+        checks.extend(
+            [
+                _r(
+                    f"LSJM O_soc term alpha={alpha} L={L} twoS={twoS} diagonal imaginary part",
+                    max_imag < EPS_CHECK,
+                    f"max |Im diag| = {max_imag:.2e}",
+                ),
+                _r(
+                    f"LSJM O_soc term alpha={alpha} L={L} twoS={twoS} off-diagonal residual",
+                    max_offdiag < EPS_DIAG,
+                    f"max residual = {max_offdiag:.2e}",
+                ),
+                _r(
+                    f"LSJM O_soc term alpha={alpha} L={L} twoS={twoS} vs stored",
+                    stored_err < EPS_CHECK,
+                    f"max |Re diag - expected| = {stored_err:.2e}",
+                ),
+            ]
+        )
+        if analytic_zeta is not None:
+            analytic_expected = analytic_zeta[idxs]
+            analytic_err = float(np.max(np.abs(diag_real_term - analytic_expected)))
+            checks.append(
+                _r(
+                    f"LSJM O_soc term alpha={alpha} L={L} twoS={twoS} vs analytic",
+                    analytic_err < EPS_CHECK,
+                    f"max |Re diag - analytic| = {analytic_err:.2e}",
+                )
+            )
+
+        j_blocks: dict[int, list[int]] = {}
+        for pos, idx in enumerate(idxs):
+            j_blocks.setdefault(labels[idx]["twoJ"], []).append(pos)
+
+        zeta_blocks: list[dict] = []
+        for twoJ in sorted(j_blocks):
+            local_positions = j_blocks[twoJ]
+            values = diag_real_term[local_positions]
+            first_global_idx = idxs[local_positions[0]]
+            zeta_blocks.append(
+                {
+                    "twoJ": twoJ,
+                    "n_states": len(local_positions),
+                    "zeta_num": float(np.mean(values)),
+                    "zeta_ana": float(lsjm["coef_zeta"][first_global_idx]),
+                    "zeta_spr": float(np.max(values) - np.min(values)),
+                }
+            )
+
+        soc_term_rows.append(
+            {
+                "alpha": alpha,
+                "L": L,
+                "twoS": twoS,
+                "n_states": len(idxs),
+                "soc_max_imag": max_imag,
+                "soc_max_offdiag": max_offdiag,
+                "zeta_blocks": zeta_blocks,
+            }
+        )
+
     multiplets: dict[tuple[int, int, int, int], list[int]] = {}
     for idx, lab in enumerate(labels):
         key = (lab["alpha"], lab["L"], lab["twoS"], lab["twoJ"])
         multiplets.setdefault(key, []).append(idx)
 
     table_rows: list[dict] = []
+    m_rows: list[dict] = []
     for key in sorted(multiplets):
         alpha, L, twoS, twoJ = key
         idxs = multiplets[key]
@@ -514,7 +592,6 @@ def compute_lsjm_checks_and_table(
             ("L2", "L2"),
             ("S2", "S2"),
             ("J2", "J2"),
-            ("zeta", "coef_zeta"),
             ("H0", "coef_F0"),
             ("H2", "coef_F2"),
             ("H4", "coef_F4"),
@@ -525,11 +602,22 @@ def compute_lsjm_checks_and_table(
             row[f"{op_key}_ana"] = float(lsjm[stored_key][idxs[0]]) if stored_key.startswith("coef_") else float(stored_angular[stored_key][idxs[0]])
             row[f"{op_key}_spr"] = float(np.max(values) - np.min(values))
 
-        row["jz_tuples"] = sorted(
-            (float(labels[idx]["twoM"]) / 2, float(diag_real["Jz"][idx]))
-            for idx in idxs
-        )
+        zeta_values = zeta_diag_real[idxs]
+        row["zeta_num"] = float(np.mean(zeta_values))
+        row["zeta_ana"] = float(lsjm["coef_zeta"][idxs[0]])
+        row["zeta_spr"] = float(np.max(zeta_values) - np.min(zeta_values))
         table_rows.append(row)
+        for idx in idxs:
+            m_rows.append(
+                {
+                    "alpha": alpha,
+                    "L": L,
+                    "twoS": twoS,
+                    "twoJ": twoJ,
+                    "twoM": int(labels[idx]["twoM"]),
+                    "Jz_num": float(diag_real["Jz"][idx]),
+                }
+            )
 
     analytic_text = None
     if analytic_zeta is not None:
@@ -553,7 +641,22 @@ def compute_lsjm_checks_and_table(
             )
         analytic_text = "\n".join(lines)
 
-    return checks, table_rows, analytic_text
+    global_diag, global_max_imag, global_max_offdiag = eigenstate_check(V, hsoc_unit)
+    preview_items = "  ".join(
+        f"(state_{idx + 1},{value.real:+.6f})"
+        for idx, value in enumerate(global_diag[: min(len(global_diag), 8)])
+    )
+    soc_reference_text = "\n".join(
+        [
+            "Reference O_soc (global LSJM basis):",
+            f"  max_imag     {global_max_imag:.1e}",
+            f"  max_offdiag  {global_max_offdiag:.1e}",
+            f"  diag preview: {preview_items}",
+        ]
+    )
+
+    m_rows.sort(key=lambda row: (row["alpha"], row["L"], row["twoS"], row["twoJ"], row["twoM"]))
+    return checks, table_rows, m_rows, soc_term_rows, analytic_text, soc_reference_text
 
 
 # ===================================================================
@@ -575,12 +678,15 @@ def mod_structural(ctx: ValidationContext) -> list[SectionPayload]:
 
 
 def mod_lsms_operators(ctx: ValidationContext) -> list[SectionPayload]:
-    checks, table_rows, analytic_text = compute_lsms_checks_and_table(
+    checks, table_rows, m_rows, analytic_text = compute_lsms_checks_and_table(
         ctx.lsms,
         ctx.n_ele,
         angular_ops=ctx.angular_ops,
     )
-    payloads: list[SectionPayload] = [(LSMS_OPS_SECTION, "lsms_operator_table", table_rows)]
+    payloads: list[SectionPayload] = [
+        (LSMS_OPS_SECTION, "lsms_operator_table", table_rows),
+        (LSMS_OPS_SECTION, "lsms_m_table", m_rows),
+    ]
     if analytic_text is not None:
         payloads.append((LSMS_OPS_SECTION, "analytic_fk_list", analytic_text))
     payloads.append((LSMS_OPS_SECTION, "checks", checks))
@@ -590,15 +696,21 @@ def mod_lsms_operators(ctx: ValidationContext) -> list[SectionPayload]:
 def mod_lsjm_operators(ctx: ValidationContext) -> list[SectionPayload]:
     lsjm = dict(ctx.lsjm)
     lsjm["hint_rank_matrix_map"] = ctx.lsms["hint_rank_matrix_map"]
-    checks, table_rows, analytic_text = compute_lsjm_checks_and_table(
+    checks, table_rows, m_rows, soc_term_rows, analytic_text, soc_reference_text = compute_lsjm_checks_and_table(
         lsjm,
         ctx.n_ele,
         angular_ops=ctx.angular_ops,
         hsoc_unit=ctx.hsoc_unit,
     )
-    payloads: list[SectionPayload] = [(LSJM_OPS_SECTION, "lsjm_operator_table", table_rows)]
+    payloads: list[SectionPayload] = [
+        (LSJM_OPS_SECTION, "lsjm_soc_term_table", soc_term_rows),
+        (LSJM_OPS_SECTION, "lsjm_operator_table", table_rows),
+        (LSJM_OPS_SECTION, "lsjm_m_table", m_rows),
+    ]
     if analytic_text is not None:
         payloads.append((LSJM_OPS_SECTION, "analytic_soc_list", analytic_text))
+    if soc_reference_text is not None:
+        payloads.append((LSJM_OPS_SECTION, "lsjm_soc_global_reference", soc_reference_text))
     payloads.append((LSJM_OPS_SECTION, "checks", checks))
     return payloads
 
