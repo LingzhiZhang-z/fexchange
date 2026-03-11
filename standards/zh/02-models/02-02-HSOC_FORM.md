@@ -1,0 +1,76 @@
+# 02-02-HSOC_FORM
+
+本文件定义自旋轨道耦合项 $H_{\mathrm{soc}}$。
+参考链接仅在 `./standards/en/02-models/02-00-MODEL_LOCAL_HAMILTONIAN.md` 开头统一给出。
+
+## 1) 文献对应形式
+
+Math:
+$$
+H_{\mathrm{SOC},i}
+= \frac{\lambda}{2}
+\sum_{m=-\ell}^{\ell}\sum_{\sigma}
+m\sigma\,c^{\dagger}_{i m \sigma}c_{i m \sigma}
++ \frac{\lambda}{2}
+\sum_{m=-\ell}^{\ell-1}
+\sqrt{\ell+m+1}\sqrt{\ell-m}
+\left(
+ c^{\dagger}_{i,m+1,-}\,c_{i,m,+}
++ c^{\dagger}_{i,m,+}\,c_{i,m+1,-}
+\right).
+$$
+
+对 f 壳层取 $\ell=3$。
+
+说明（MUST）：
+- 上述显式公式中 $\sigma\in\{+1,-1\}$（$\sigma_z$ 本征值，非物理自旋量子数 $s_z=\pm\tfrac{1}{2}$）。
+- 此约定与 `./standards/en/01-physics/01-00-FOUNDATIONS_FOCK_SLATER.md` 中轨道索引使用的 $\sigma\in\{-\tfrac{1}{2},+\tfrac{1}{2}\}$ 不同。
+- 采用此约定后对角项 $\frac{\lambda}{2}m\sigma = \lambda\,m\cdot\frac{\sigma}{2} = \zeta\,l_z s_z$，与紧凑形式 $\zeta\,\mathbf l\cdot\mathbf s$ 一致。
+- 实现中 **必须** 使用第 5 节的一体矩阵路线，而非本节的显式公式。
+
+## 2) 与本项目记号映射
+- 文献符号：$\lambda$
+- 项目/代码符号：$\zeta$
+- 映射关系：$\zeta \equiv \lambda$
+
+紧凑等价写法：
+
+Math:
+$$
+H_{\mathrm{soc}} = \zeta\sum_i \mathbf{l}_i\cdot\mathbf{s}_i.
+$$
+
+## 3) LS 耦合能量公式
+
+Math:
+$$
+E_{\mathrm{soc}} = \frac{\zeta}{2}\left[J(J+1)-L(L+1)-S(S+1)\right].
+$$
+
+## 4) 说明
+- 本模型版本在库仑分裂后施加 SOC。
+- SOC 对角化在固定 $LS$ 子空间内进行。
+
+## 5) 实现契约（MUST）
+实现顺序固定如下：
+1. 在固定轨道顺序下构造单体 SOC 矩阵 $h^{\mathrm{soc}}_{pq}$。
+2. 应用符号映射 $\zeta \equiv \lambda$，并保持统一能量单位。
+3. 通过二次量子化构造多体算符：
+
+Math:
+$$
+H_{\mathrm{soc}}=\sum_{p,q} h^{\mathrm{soc}}_{pq}\,c_p^\dagger c_q.
+$$
+
+4. 按 `01-02-OPERATOR_IMPLEMENTATION` 的一体算符元数据导出
+   （`basis_id_from = basis_id_to`，`sector_from = sector_to`）。
+
+Code form:
+```text
+build h_soc[p,q] in fixed orbital order
+H_soc_many = sum_{p,q} h_soc[p,q] * cdag(p) * c(q)
+```
+
+Validation:
+- $H_{\mathrm{soc}}$ 必须是厄米算符。
+- 固定 $(L,S,J)$ 时，CEF 前 SOC 能移按第 3 节且与 $M$ 无关。

@@ -1,0 +1,76 @@
+# 02-02-HSOC_FORM
+
+This file defines the spin-orbit coupling term $H_{\mathrm{soc}}$.
+Reference links are defined once in `./standards/en/02-models/02-00-MODEL_LOCAL_HAMILTONIAN.md`.
+
+## 1) Paper-Aligned Form
+
+Math:
+$$
+H_{\mathrm{SOC},i}
+= \frac{\lambda}{2}
+\sum_{m=-\ell}^{\ell}\sum_{\sigma}
+m\sigma\,c^{\dagger}_{i m \sigma}c_{i m \sigma}
++ \frac{\lambda}{2}
+\sum_{m=-\ell}^{\ell-1}
+\sqrt{\ell+m+1}\sqrt{\ell-m}
+\left(
+ c^{\dagger}_{i,m+1,-}\,c_{i,m,+}
++ c^{\dagger}_{i,m,+}\,c_{i,m+1,-}
+\right).
+$$
+
+For f shell, use $\ell=3$.
+
+Note (MUST):
+- In the explicit expression above, $\sigma\in\{+1,-1\}$ (eigenvalues of $\sigma_z$, not the physical spin quantum number $s_z=\pm\tfrac{1}{2}$).
+- This convention differs from $\sigma\in\{-\tfrac{1}{2},+\tfrac{1}{2}\}$ used in `./standards/en/01-physics/01-00-FOUNDATIONS_FOCK_SLATER.md` for orbital indexing.
+- With this convention the diagonal term is $\frac{\lambda}{2}m\sigma = \lambda\,m\cdot\frac{\sigma}{2} = \zeta\,l_z s_z$, consistent with the compact form $\zeta\,\mathbf l\cdot\mathbf s$.
+- Implementation MUST use the one-body matrix route from Section 5, not this explicit display formula.
+
+## 2) Notation Mapping to This Project
+- Paper symbol: $\lambda$
+- Project/code symbol: $\zeta$
+- Mapping: $\zeta \equiv \lambda$
+
+Compact equivalent form:
+
+Math:
+$$
+H_{\mathrm{soc}} = \zeta\sum_i \mathbf{l}_i\cdot\mathbf{s}_i.
+$$
+
+## 3) LS-Coupling Energy Formula
+
+Math:
+$$
+E_{\mathrm{soc}} = \frac{\zeta}{2}\left[J(J+1)-L(L+1)-S(S+1)\right].
+$$
+
+## 4) Notes
+- This model version applies SOC after Coulomb splitting.
+- SOC diagonalization is done in fixed-$LS$ subspaces.
+
+## 5) Implementation Contract (MUST)
+Use this order:
+1. Build single-particle SOC matrix $h^{\mathrm{soc}}_{pq}$ in the fixed orbital order.
+2. Apply symbol mapping $\zeta \equiv \lambda$ and keep one energy unit system.
+3. Build many-body operator by second quantization:
+
+Math:
+$$
+H_{\mathrm{soc}}=\sum_{p,q} h^{\mathrm{soc}}_{pq}\,c_p^\dagger c_q.
+$$
+
+4. Export with one-body operator metadata from `01-02-OPERATOR_IMPLEMENTATION`
+   (`basis_id_from = basis_id_to`, `sector_from = sector_to`).
+
+Code form:
+```text
+build h_soc[p,q] in fixed orbital order
+H_soc_many = sum_{p,q} h_soc[p,q] * cdag(p) * c(q)
+```
+
+Validation:
+- $H_{\mathrm{soc}}$ must be Hermitian.
+- For fixed $(L,S,J)$, SOC shift follows Section 3 and is $M$-independent before CEF.

@@ -1,12 +1,10 @@
-"""Tests for models/symmetry.py - irrep classification."""
+"""Tests for core/symmetry.py - irrep classification."""
 
 import pytest
 import numpy as np
 
-from fexchange.models.symmetry import (
-    CHARACTER_TABLES,
+from fexchange.core.symmetry import (
     MULTIPOLE_RULES,
-    ROTATIONAL_CORE_TABLES,
     parity_from_J,
     build_active_irrep_table,
     build_projectors,
@@ -17,31 +15,25 @@ from fexchange.models.symmetry import (
     classify_with_multipoles,
     analyze_cef_symmetry,
 )
+from fexchange.core.symmetry_tables import (
+    C3V_STAR_CHI,
+    C3V_STAR_CLASSES,
+    C3V_STAR_IRREPS,
+    C3V_STAR_SIZES,
+    O_STAR_CHI,
+    O_STAR_CLASSES,
+    O_STAR_IRREPS,
+    O_STAR_SIZES,
+)
 from fexchange.models.hcef import build_hcef_matrix_J
 
 
 def test_o_star_class_sizes_match_standard():
-    assert ROTATIONAL_CORE_TABLES["O_star"]["class_sizes"] == {
-        "E": 1,
-        "R": 1,
-        "C2_mix": 6,
-        "C4": 6,
-        "RC4": 6,
-        "C2p_mix": 12,
-        "C3": 8,
-        "RC3": 8,
-    }
+    assert O_STAR_SIZES == (1, 1, 3, 3, 6, 6, 6, 6, 8, 8)
 
 
 def test_c3v_star_class_sizes_match_standard():
-    assert ROTATIONAL_CORE_TABLES["C3v_star"]["class_sizes"] == {
-        "E": 1,
-        "R": 1,
-        "2C3": 2,
-        "2RC3": 2,
-        "3sigma_v": 3,
-        "3Rsigma_v": 3,
-    }
+    assert C3V_STAR_SIZES == (1, 1, 2, 2, 3, 3)
 
 
 def test_parity_is_determined_by_j_only():
@@ -54,35 +46,74 @@ def test_active_table_is_single_branch_for_oh_and_d3d():
     assert oh["branch_mode"] == "single"
     d3d = build_active_irrep_table(J=3.5, point_group="D3d")
     assert d3d["branch_mode"] == "single"
-    assert all("+" not in k for k in d3d["rows"].keys()) is False
+    assert all("+" not in k for k in d3d["rows"].keys())
+    assert all("-" in k for k in d3d["rows"].keys())
 
 
 def test_o_star_row_norms_are_48():
-    tbl = ROTATIONAL_CORE_TABLES["O_star"]
-    sizes = tbl["class_sizes"]
-    rows = tbl["rows"]
     for required in ("Gamma6", "Gamma7", "Gamma8"):
-        assert required in rows
-    for row in rows.values():
-        norm2 = sum(sizes[c] * abs(row[c]) ** 2 for c in sizes)
+        assert required in O_STAR_IRREPS
+    for row in O_STAR_CHI:
+        norm2 = sum(size * abs(char) ** 2 for size, char in zip(O_STAR_SIZES, row, strict=True))
         assert abs(norm2 - 48.0) < 1e-10
 
 
 def test_c3v_star_row_norms_are_12():
-    tbl = ROTATIONAL_CORE_TABLES["C3v_star"]
-    sizes = tbl["class_sizes"]
-    rows = tbl["rows"]
     for required in ("Gamma4", "Gamma5", "Gamma6"):
-        assert required in rows
-    for row in rows.values():
-        norm2 = sum(sizes[c] * abs(row[c]) ** 2 for c in sizes)
+        assert required in C3V_STAR_IRREPS
+    for row in C3V_STAR_CHI:
+        norm2 = sum(size * abs(char) ** 2 for size, char in zip(C3V_STAR_SIZES, row, strict=True))
         assert abs(norm2 - 12.0) < 1e-10
 
 
+def test_o_star_column_orthogonality():
+    """Column orthogonality holds for O* at parent-class level after sub-class split."""
+    idx = {name: i for i, name in enumerate(O_STAR_CLASSES)}
+    np.testing.assert_allclose(O_STAR_CHI[:, idx["3C2"]], O_STAR_CHI[:, idx["3RC2"]], atol=1e-12)
+    np.testing.assert_allclose(O_STAR_CHI[:, idx["6C2p"]], O_STAR_CHI[:, idx["6RC2p"]], atol=1e-12)
+
+    grouped = (
+        ("E", ("E",)),
+        ("R", ("R",)),
+        ("C2_mix", ("3C2", "3RC2")),
+        ("C4", ("C4",)),
+        ("RC4", ("RC4",)),
+        ("C2p_mix", ("6C2p", "6RC2p")),
+        ("C3", ("C3",)),
+        ("RC3", ("RC3",)),
+    )
+    for i, (c, sub_c) in enumerate(grouped):
+        col_c = O_STAR_CHI[:, idx[sub_c[0]]]
+        n_c = sum(O_STAR_SIZES[idx[name]] for name in sub_c)
+        for j, (cp, sub_cp) in enumerate(grouped):
+            col_cp = O_STAR_CHI[:, idx[sub_cp[0]]]
+            total = np.vdot(col_c, col_cp)
+            if i == j:
+                expected = 48.0 / n_c
+                assert abs(total - expected) < 1e-10, f"O* col orth ({c},{cp}): {total} != {expected}"
+            else:
+                assert abs(total) < 1e-10, f"O* col orth ({c},{cp}): {total} != 0"
+
+
+def test_c3v_star_column_orthogonality():
+    """Column orthogonality for C3v*."""
+    classes = list(C3V_STAR_CLASSES)
+    for i, c in enumerate(classes):
+        for j, cp in enumerate(classes):
+            total = np.vdot(C3V_STAR_CHI[:, i], C3V_STAR_CHI[:, j])
+            if i == j:
+                expected = 12.0 / C3V_STAR_SIZES[i]
+                assert abs(total - expected) < 1e-10, f"C3v* col orth ({c},{cp}): {total} != {expected}"
+            else:
+                assert abs(total) < 1e-10, f"C3v* col orth ({c},{cp}): {total} != 0"
+
+
 def test_o_star_spinor_r_sign():
-    rows = ROTATIONAL_CORE_TABLES["O_star"]["rows"]
+    idx = {name: i for i, name in enumerate(O_STAR_CLASSES)}
+    irrep_idx = {name: i for i, name in enumerate(O_STAR_IRREPS)}
     for name in ("Gamma6", "Gamma7", "Gamma8"):
-        assert rows[name]["R"] == -rows[name]["E"]
+        row = O_STAR_CHI[irrep_idx[name], :]
+        assert row[idx["R"]] == -row[idx["E"]]
 
 
 def test_d3d_labels_follow_j_parity():
@@ -134,6 +165,18 @@ def test_projector_completeness_on_j4_oh():
     np.testing.assert_allclose(total, np.eye(9, dtype=complex), atol=1e-6)
 
 
+def test_projector_idempotency_oh_j4():
+    """P_Gamma^2 = P_Gamma for all active irreps."""
+    projectors = build_projectors(4.0, point_group="Oh")
+    for name, P in projectors.items():
+        np.testing.assert_allclose(
+            P @ P,
+            P,
+            atol=1e-10,
+            err_msg=f"P_{name} not idempotent",
+        )
+
+
 def test_irrep_metadata_contains_display_primary_aliases():
     meta = irrep_metadata("Gamma1", point_group="Oh", J=4.0)
     assert meta["irrep_display"] == "Γ1"
@@ -149,13 +192,43 @@ def test_spinor_aliases_default_empty():
 
 
 def test_oh_spinor_multipole_rules_exist():
-    assert "dipole" in allowed_multipoles("Gamma6", "Oh")
-    assert "quadrupole" in allowed_multipoles("Gamma8", "Oh")
+    assert "magnetic_dipole" in allowed_multipoles("Gamma6", "Oh")
+    assert "electric_quadrupole" in allowed_multipoles("Gamma8", "Oh")
 
 
 def test_d3d_family_multipole_rules_exist():
-    assert "dipole" in allowed_multipoles("Gamma5+", "D3d")
-    assert "octupole" in allowed_multipoles("Gamma2-", "D3d")
+    assert "magnetic_dipole" in allowed_multipoles("Gamma5+", "D3d")
+    assert "magnetic_octupole" in allowed_multipoles("Gamma2-", "D3d")
+
+
+def test_oh_multipole_rules_match_tensor_product_theory():
+    """
+    Verify Oh single-valued multipole rules against the 02-07 contract table.
+    """
+    expected = {
+        "Gamma1": {"magnetic_octupole"},
+        "Gamma2": {"magnetic_octupole"},
+        "Gamma3": {"electric_quadrupole", "magnetic_octupole"},
+        "Gamma4": {"magnetic_dipole", "magnetic_octupole"},
+        "Gamma5": {"electric_quadrupole", "magnetic_octupole"},
+    }
+
+    for irrep, allowed in expected.items():
+        assert set(MULTIPOLE_RULES["Oh"][irrep]) == allowed
+
+
+def test_oh_spinor_multipole_rules_match_tensor_product_theory():
+    """
+    Verify Oh spinor multipole rules against the 02-07 contract table.
+    """
+    expected = {
+        "Gamma6": {"magnetic_dipole", "magnetic_octupole"},
+        "Gamma7": {"magnetic_dipole", "magnetic_octupole"},
+        "Gamma8": {"magnetic_dipole", "electric_quadrupole", "magnetic_octupole"},
+    }
+
+    for irrep, allowed in expected.items():
+        assert set(MULTIPOLE_RULES["Oh"][irrep]) == allowed
 
 
 def test_classify_with_multipoles_new_schema_single_branch():
@@ -179,34 +252,13 @@ def test_analyze_cef_symmetry_requires_exactly_one_input():
         analyze_cef_symmetry(4.0, "Oh", B_params={"B4": 0.01}, evecs=evecs)
 
 
-class TestCharacterTablesOh:
-    def test_oh_exists(self):
-        assert "Oh" in CHARACTER_TABLES
-
-    def test_oh_irrep_names(self):
-        expected = {"Gamma1", "Gamma2", "Gamma3", "Gamma4", "Gamma5"}
-        assert set(CHARACTER_TABLES["Oh"].keys()) - {"_class_sizes"} == expected
-
-    def test_oh_dimensions(self):
-        """Gamma1=1, Gamma2=1, Gamma3=2, Gamma4=3, Gamma5=3 (Bethe notation)."""
-        dims = {
-            name: row["E"]
-            for name, row in CHARACTER_TABLES["Oh"].items()
-            if name != "_class_sizes"
-        }
-        assert dims == {"Gamma1": 1, "Gamma2": 1, "Gamma3": 2, "Gamma4": 3, "Gamma5": 3}
-
-    def test_oh_orthogonality(self):
-        """Character orthogonality: sum_g chi_i(g)* chi_j(g) = |G| delta_ij."""
-        table = CHARACTER_TABLES["Oh"]
-        for name, row in table.items():
-            if name == "_class_sizes":
-                continue
-            norm_sq = sum(
-                size * abs(row[op]) ** 2
-                for op, size in table["_class_sizes"].items()
-            )
-            assert abs(norm_sq - 48) < 1e-10, f"{name} norm failed"
+def test_legacy_dual_parity_keys_are_absent():
+    h = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.001}, "Oh")
+    _, evecs = np.linalg.eigh(h)
+    out = analyze_cef_symmetry(4.0, "Oh", evecs=evecs, n_f=2)
+    assert "parity_unknown" not in out
+    assert "even_branch" not in out
+    assert "odd_branch" not in out
 
 
 class TestMultipoleRulesOh:
@@ -215,58 +267,32 @@ class TestMultipoleRulesOh:
 
     def test_gamma4_carries_dipole(self):
         """Gamma4 (T1) carries magnetic dipole in Oh."""
-        assert "dipole" in MULTIPOLE_RULES["Oh"]["Gamma4"]
+        assert "magnetic_dipole" in MULTIPOLE_RULES["Oh"]["Gamma4"]
 
     def test_gamma3_carries_quadrupole(self):
         """Gamma3 (E) carries electric quadrupole in Oh."""
-        assert "quadrupole" in MULTIPOLE_RULES["Oh"]["Gamma3"]
+        assert "electric_quadrupole" in MULTIPOLE_RULES["Oh"]["Gamma3"]
 
     def test_gamma1_no_dipole(self):
         """Gamma1 (A1) singlet cannot carry dipole."""
-        assert "dipole" not in MULTIPOLE_RULES["Oh"]["Gamma1"]
-
-
-class TestCharacterTablesD3d:
-    def test_d3d_exists(self):
-        assert "D3d" in CHARACTER_TABLES
-
-    def test_d3d_irrep_names(self):
-        expected = {"A1g", "A2g", "Eg", "A1u", "A2u", "Eu"}
-        assert set(CHARACTER_TABLES["D3d"].keys()) - {"_class_sizes"} == expected
-
-    def test_d3d_dimensions(self):
-        dims = {
-            name: row["E"]
-            for name, row in CHARACTER_TABLES["D3d"].items()
-            if name != "_class_sizes"
-        }
-        assert dims == {"A1g": 1, "A2g": 1, "Eg": 2, "A1u": 1, "A2u": 1, "Eu": 2}
-
-    def test_d3d_orthogonality(self):
-        table = CHARACTER_TABLES["D3d"]
-        order = sum(table["_class_sizes"].values())
-        assert order == 12
-        for name, row in table.items():
-            if name == "_class_sizes":
-                continue
-            norm_sq = sum(
-                size * abs(row[op]) ** 2
-                for op, size in table["_class_sizes"].items()
-            )
-            assert abs(norm_sq - 12) < 1e-10, f"{name} norm failed"
+        assert "magnetic_dipole" not in MULTIPOLE_RULES["Oh"]["Gamma1"]
 
 
 class TestMultipoleRulesD3d:
     def test_d3d_rules_exist(self):
         assert "D3d" in MULTIPOLE_RULES
 
-    def test_a2g_carries_dipole(self):
-        """A2g carries z-component of magnetic dipole in D3d."""
-        assert "dipole" in MULTIPOLE_RULES["D3d"]["A2g"]
+    def test_gamma2_plus_carries_dipole(self):
+        """Gamma2+ carries z-component of magnetic dipole in D3d."""
+        assert "magnetic_dipole" in MULTIPOLE_RULES["D3d"]["Gamma2+"]
 
-    def test_eg_carries_dipole(self):
-        """Eg carries xy-component of magnetic dipole in D3d."""
-        assert "dipole" in MULTIPOLE_RULES["D3d"]["Eg"]
+    def test_gamma3_plus_carries_dipole(self):
+        """Gamma3+ carries xy-component of magnetic dipole in D3d."""
+        assert "magnetic_dipole" in MULTIPOLE_RULES["D3d"]["Gamma3+"]
+
+    def test_d3d_legacy_alias_keys_are_absent(self):
+        for key in ("A1g", "A2g", "Eg", "A1u", "A2u", "Eu"):
+            assert key not in MULTIPOLE_RULES["D3d"]
 
 
 class TestRepresentationMatrices:
@@ -337,19 +363,29 @@ class TestClassifyIrreps:
         assert len(labels) == 9
         assert all(label.startswith("Gamma") for label in labels)
 
-    def test_oh_j3_5_half_integer(self):
-        """Half-integer J needs the Oh double group; deferred."""
-        pass
+
+def test_oh_j3_5_half_integer_decomposition():
+    """J=7/2 in Oh decomposes as Gamma6 + Gamma7 + Gamma8 (dimensions 2+2+4=8)."""
+    from collections import Counter
+
+    H = build_hcef_matrix_J(3.5, {"B4": 0.01, "B6": 0.001}, "Oh")
+    _, evecs = np.linalg.eigh(H)
+    labels = classify_irreps(3.5, evecs, point_group="Oh")
+    counts = Counter(labels)
+    assert counts["Gamma6"] == 2
+    assert counts["Gamma7"] == 2
+    assert counts["Gamma8"] == 4
+    assert sum(counts.values()) == 8
 
 
 class TestAllowedMultipoles:
     def test_gamma4_oh(self):
         result = allowed_multipoles("Gamma4", "Oh")
-        assert "dipole" in result
+        assert "magnetic_dipole" in result
 
     def test_gamma1_oh(self):
         result = allowed_multipoles("Gamma1", "Oh")
-        assert "dipole" not in result
+        assert "magnetic_dipole" not in result
 
     def test_unknown_irrep_raises(self):
         with pytest.raises(KeyError):
@@ -361,19 +397,21 @@ class TestClassifyWithMultipoles:
         H = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.001}, "Oh")
         _, evecs = np.linalg.eigh(H)
         result = classify_with_multipoles(4.0, evecs, "Oh")
-        assert "ground" in result
-        assert "excited" in result
-        assert "irrep" in result["ground"]
-        assert "multipoles" in result["ground"]
-        assert len(result["excited"]) == 8
+        assert "irrep_display" in result
+        assert "irrep_primary" in result
+        assert "irrep_aliases" in result
+        assert "allowed_multipoles" in result
+        assert "excited_irreps" in result
+        assert len(result["excited_irreps"]) == 8
 
 
 class TestAnalyzeCefSymmetry:
     def test_from_b_params(self):
         """Standalone: J + B_params -> classification."""
         result = analyze_cef_symmetry(4.0, "Oh", B_params={"B4": 0.01, "B6": 0.001})
-        assert "ground" in result
+        assert "irrep_primary" in result
         assert "eigenvalues" in result
+        assert "excited_irreps" in result
         assert len(result["all_irreps"]) == 9
 
     def test_from_evecs(self):
@@ -381,7 +419,8 @@ class TestAnalyzeCefSymmetry:
         H = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.0}, "Oh")
         _, evecs = np.linalg.eigh(H)
         result = analyze_cef_symmetry(4.0, "Oh", evecs=evecs)
-        assert "ground" in result
+        assert "irrep_primary" in result
+        assert "excited_irreps" in result
 
     def test_must_provide_one_input(self):
         with pytest.raises(ValueError):

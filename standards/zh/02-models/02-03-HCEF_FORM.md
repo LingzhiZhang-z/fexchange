@@ -1,0 +1,222 @@
+# 02-03-HCEF_FORM
+
+本文件定义晶体场项 $H_{\mathrm{cef}}$。
+参考链接只在 `./standards/en/02-models/02-00-MODEL_LOCAL_HAMILTONIAN.md` 保留。
+Kramers 双重态规范化与 g-tensor 规则由
+`./standards/en/02-models/02-05-KRAMERS_DOUBLET_G_TENSOR.md` 定义。
+
+## 1) 通用 Stevens 形式（MUST）
+MUST:
+- 使用 Stevens 算符展开。
+- 所有 $B_k^q$ 使用统一能量单位。
+
+Math:
+$$
+H_{\mathrm{cef}} = \sum_{k,q} B_k^q O_k^q.
+$$
+
+Code form:
+```text
+H_cef = sum_{k,q} B[k,q] * O[k,q]
+```
+
+Index:
+- `B_k^q`：CEF 系数。
+- `O_k^q`：Stevens 算符。
+
+Validation:
+- 输出矩阵必须厄米。
+
+## 2) Oh 分支（MUST）
+MUST:
+- 仅允许下列立方对称组合。
+
+Math:
+$$
+H_{\mathrm{cef}}^{Oh}
+= B_4\left(O_4^0 + 5 O_4^{4,c}\right)
++ B_6\left(O_6^0 - 21 O_6^{4,c}\right).
+$$
+
+等价参数映射：
+Math:
+$$
+B_{40}=B_4,\quad B_{44}=5B_4,\quad B_{60}=B_6,\quad B_{64}=-21B_6.
+$$
+
+Code form:
+```text
+H_cef_Oh = B4*(O40 + 5*O44c) + B6*(O60 - 21*O64c)
+```
+
+Validation:
+- 不允许引入额外 Oh 项。
+
+## 3) C3v 分支（MUST）
+MUST:
+- 严格只允许六项：
+  $O_2^0, O_4^0, O_6^0, O_6^6, O_4^{3,\eta}, O_6^{3,\eta}$。
+- 对 $q=3$ 项，`eta` 只能取余弦 (`c`) 或正弦 (`s`)。
+- 本项目的投影轴约定固定为：
+  `c -> z`，`a -> y`。
+
+Math:
+$$
+H_{\mathrm{cef}}^{C3v}
+= B_{20} O_2^0 + B_{40} O_4^0 + B_{60} O_6^0
++ B_{66} O_6^6 + B_{43} O_4^{3,\eta} + B_{63} O_6^{3,\eta},
+\quad \eta\in\{c,s\}.
+$$
+
+Code form:
+```text
+H_cef_C3v = B20*O20 + B40*O40 + B60*O60 + B66*O66 + B43*O43_eta + B63*O63_eta
+```
+
+Validation:
+- 本规范下只允许上述六项。
+
+## 4) Cos/Sin 接口规则（MUST）
+MUST:
+- 规范默认表示为 `cos` 形式（针对 $q=3$ 项）。
+- 运行时允许显式切换到 `sin`。
+- 项目运行调用可按输入参数打开 `sin` 模式。
+
+Code form:
+```text
+mode_q3 in {"cos", "sin"}
+# interface default: cos
+# runtime call may set sin mode explicitly
+```
+
+Validation:
+- `mode_q3` 必须写入 metadata。
+
+## 5) 实现契约（MUST）
+按以下顺序实现：
+1. 选择对称分支（`Oh` 或 `C3v`）。
+2. 若为 `C3v`，选择 `mode_q3`（`cos` 或 `sin`）。
+3. 构造单体 CEF 矩阵 $h^{\mathrm{cef}}_{pq}$。
+4. 提升为多体算符：
+
+Math:
+$$
+H_{\mathrm{cef}} = \sum_{p,q} h^{\mathrm{cef}}_{pq}\,c_p^\dagger c_q.
+$$
+
+Code form:
+```text
+H_cef_many = sum_{p,q} h_cef[p,q] * cdag(p) * c(q)
+```
+
+Validation:
+- 导出 metadata 必须满足 `./standards/en/01-physics/01-02-OPERATOR_IMPLEMENTATION.md` 的单体算符契约。
+
+## 6) Stevens 算符计算方法（MUST）
+Stevens 算符 $O_k^q$ 是在 $(2J+1)$ 维 $\lvert J,M\rangle$ 基中由 $J_z,J_+,J_-$
+构造的厄米算符。
+约定：Hutchings 1964（Solid State Physics vol. 16），采用 Condon-Shortley 相位。
+
+交叉引用：
+- 本节只定义 CEF 所需的 Stevens 子集。
+- 通用定义以 `01-physics/01-03-STEVENS_OPERATORS.md` 为规范来源。
+
+### 6.1 基础矩阵
+在 $\lvert J,M\rangle$ 基（$M=-J,\ldots,J$ 升序）中构建 $J_z,J_+,J_-$：
+
+Math:
+$$
+(J_z)_{MM'}=M\,\delta_{MM'},\qquad
+(J_+)_{M+1,M}=\sqrt{J(J+1)-M(M+1)},\qquad
+J_-=J_+^\dagger.
+$$
+
+定义 $X\equiv J(J+1)$，$\mathbf 1$ 为单位矩阵。
+
+### 6.2 对角 Stevens 算符（$q=0$）
+
+Math:
+$$
+O_2^0 = 3J_z^2-X\mathbf1,
+$$
+
+$$
+O_4^0 = 35J_z^4-(30X-25)J_z^2+(3X^2-6X)\mathbf1,
+$$
+
+$$
+O_6^0 = 231J_z^6-(315X-735)J_z^4+(105X^2-525X+294)J_z^2
+       -(5X^3-40X^2+60X)\mathbf1.
+$$
+
+### 6.3 非对角 Stevens 算符（$q\neq0$）
+采用 tesseral（余弦/正弦）形式。
+对 $q>0$，定义对称化积 $\{A,B\}_+=AB+BA$。
+
+Oh 分支算符：
+
+Math:
+$$
+O_4^{4,c}=\tfrac{1}{2}(J_+^4+J_-^4),
+$$
+
+$$
+O_6^{4,c}=\tfrac{1}{4}\bigl\{(11J_z^2-X\mathbf1-38\mathbf1),\;J_+^4+J_-^4\bigr\}_+.
+$$
+
+C3v 附加算符：
+
+Math:
+$$
+O_4^{3,c}=\tfrac{1}{4}\bigl\{J_z,\;J_+^3+J_-^3\bigr\}_+,
+\qquad
+O_4^{3,s}=\tfrac{1}{4i}\bigl\{J_z,\;J_+^3-J_-^3\bigr\}_+,
+$$
+
+$$
+O_6^{3,c}=\tfrac{1}{4}\bigl\{(11J_z^3-(3X+59)J_z),\;
+J_+^3+J_-^3\bigr\}_+,
+$$
+
+$$
+O_6^{3,s}=\tfrac{1}{4i}\bigl\{(11J_z^3-(3X+59)J_z),\;
+J_+^3-J_-^3\bigr\}_+,
+$$
+
+$$
+O_6^{6}=\tfrac{1}{2}(J_+^6+J_-^6).
+$$
+
+### 6.4 实现方案
+
+Code form:
+```text
+Jz, Jp, Jm = build_J_matrices(J)
+X = J*(J+1)
+
+# 对角
+O20 = 3*Jz@Jz - X*I
+O40 = 35*Jz4 - (30*X-25)*Jz2 + (3*X**2-6*X)*I
+O60 = 231*Jz6 - (315*X-735)*Jz4 + (105*X**2-525*X+294)*Jz2 - (5*X**3-40*X**2+60*X)*I
+
+# Oh 非对角
+Jp4 = Jp@Jp@Jp@Jp;  Jm4 = Jm@Jm@Jm@Jm
+O44c = 0.5*(Jp4 + Jm4)
+P4 = 11*Jz@Jz - X*I - 38*I
+O64c = 0.25*(P4@(Jp4+Jm4) + (Jp4+Jm4)@P4)
+
+# C3v 非对角
+Jp3 = Jp@Jp@Jp;  Jm3 = Jm@Jm@Jm
+O43c = 0.25*(Jz@(Jp3+Jm3) + (Jp3+Jm3)@Jz)
+O43s = 0.25/1j*(Jz@(Jp3-Jm3) + (Jp3-Jm3)@Jz)
+P3 = 11*Jz@Jz@Jz - (3*X+59)*Jz
+O63c = 0.25*(P3@(Jp3+Jm3) + (Jp3+Jm3)@P3)
+O63s = 0.25/1j*(P3@(Jp3-Jm3) + (Jp3-Jm3)@P3)
+Jp6 = Jp@Jp@Jp@Jp@Jp@Jp;  Jm6 = Jm@Jm@Jm@Jm@Jm@Jm
+O66 = 0.5*(Jp6 + Jm6)
+```
+
+Validation:
+- 所有 Stevens 算符必须厄米：$O_k^{q}=(O_k^{q})^\dagger$。
+- $O_k^0$ 在 $\lvert J,M\rangle$ 基中必须对角。
+- 矩阵维度须为 $(2J+1)\times(2J+1)$。

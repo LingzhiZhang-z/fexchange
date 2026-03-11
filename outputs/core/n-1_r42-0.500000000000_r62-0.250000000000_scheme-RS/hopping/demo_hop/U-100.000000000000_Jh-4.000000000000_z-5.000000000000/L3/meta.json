@@ -1,0 +1,56 @@
+{
+  "schema_version": "fxe.io.v1",
+  "module": "sopt.contraction",
+  "level": "L3",
+  "key": "L3|keyL2=L2|keyL1=L1|keyLSJM=LSJM|keyLMSM=LMSM|n=1|r42=0.500000000000|r62=0.250000000000|sv=2026-02|sv=2026-02|sv=2026-02|hop=demo_hop|sv=2026-02|U=100.000000000000|Jh=4.000000000000|z=5.000000000000|sv=2026-02",
+  "inputs_summary": {
+    "n": 1,
+    "hopping_name": "demo_hop",
+    "U": 100.0,
+    "Jh": 4.0,
+    "zeta": 5.0
+  },
+  "tensor_name": "h_pre_j_mu",
+  "physical_meaning": "Intermediate projected kernel before W projection",
+  "basis_id": "fock14_n1_lex_v1",
+  "index_definition": "(j3,j4,j1,j2)",
+  "unit": "eV",
+  "storage_layout": "dense",
+  "dtype": "complex128",
+  "logical_shape": [
+    6,
+    6,
+    6,
+    6
+  ],
+  "payload_files": [
+    "data.npz"
+  ],
+  "created_at": "2026-02-26T07:55:15.543500+00:00",
+  "numerics_meta": {
+    "dtype_real": "<class 'numpy.float64'>",
+    "dtype_complex": "<class 'numpy.complex128'>",
+    "eps_zero": 1e-12,
+    "eps_norm": 1e-10,
+    "eps_orth": 1e-10,
+    "eps_diag": 1e-09,
+    "eps_eig_cluster": 1e-10,
+    "eps_svd_rel": 1e-12,
+    "eps_map": 1e-08,
+    "eps_herm": 1e-10,
+    "eps_unitary": 1e-10,
+    "eps_nk_split": 1e-06,
+    "eps_mag_ab": 0.1,
+    "density_sparse_switch": 0.15,
+    "peak_memory_budget_gb": 8.0
+  },
+  "parallel_meta": {
+    "parallel_enabled": false,
+    "parallel_backend": "serial",
+    "world_size": 1,
+    "rank": 0,
+    "root_rank": 0,
+    "local_rank": 0,
+    "gather_policy": "gather_to_root"
+  }
+}

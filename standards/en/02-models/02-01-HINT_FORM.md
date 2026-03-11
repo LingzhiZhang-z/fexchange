@@ -1,0 +1,140 @@
+# 02-01-HINT_FORM
+
+This file defines the Coulomb interaction term $H_{\mathrm{int}}$.
+Reference links are defined once in `./standards/en/02-models/02-00-MODEL_LOCAL_HAMILTONIAN.md`.
+
+## 1) Authoritative Form (Implementation-Aligned)
+
+Math:
+$$
+H_{\mathrm{int}}
+= \frac{1}{2}\sum_i
+\sum_{m_1,m_2,m_3,m_4}
+\sum_{\sigma_1,\sigma_2}
+\delta_{m_1+m_2,\,m_3+m_4}
+\sum_{k=0,2,4,6}
+F^k\,C^{(k)}(m_1,m_4)\,C^{(k)}(m_3,m_2)
+\,c^{\dagger}_{i m_1 \sigma_1}
+\,c^{\dagger}_{i m_2 \sigma_2}
+\,c_{i m_3 \sigma_2}
+\,c_{i m_4 \sigma_1}.
+$$
+
+Project convention (MUST):
+- prefactor $\tfrac{1}{2}$ is required;
+- second $C^{(k)}$ factor uses $(m_3,m_2)$.
+
+If literature writing differs from these two points, this standard prevails.
+
+## 2) Slater-Integral Relations (Paper Convention)
+
+Math:
+$$
+U = F^0,
+$$
+
+Math:
+$$
+J_H = \frac{1}{6435}\left(286F^2 + 195F^4 + 250F^6\right).
+$$
+
+## 3) Notes
+- $F^0, F^2, F^4, F^6$ are Slater-Condon parameters.
+- $C^{(k)}$ are Gaunt-coefficient factors in this notation.
+
+## 4) Definition of $C^{(k)}$ (MUST)
+For fixed shell $l=3$:
+
+Math:
+$$
+q = m_a - m_b,
+\qquad
+C^{(k)}(m_a,m_b)
+=
+(-1)^{m_a}
+\sqrt{\frac{4\pi}{2k+1}}
+\int d\Omega\,
+Y_{l,-m_a}(\Omega)\,
+Y_{k,q}(\Omega)\,
+Y_{l,m_b}(\Omega).
+$$
+
+Use the spherical-harmonic triple-product identity:
+
+Math:
+$$
+\int d\Omega\,
+Y_{l,-m_a}(\Omega)\,
+Y_{k,q}(\Omega)\,
+Y_{l,m_b}(\Omega)
+=
+\sqrt{\frac{(2l+1)(2k+1)(2l+1)}{4\pi}}
+\begin{pmatrix} l & k & l \\ 0 & 0 & 0 \end{pmatrix}
+\begin{pmatrix} l & k & l \\ -m_a & q & m_b \end{pmatrix}.
+$$
+
+Substituting this identity into the definition above gives:
+
+Math:
+$$
+C^{(k)}(m_a,m_b)
+=
+(-1)^{m_a}
+\, (2l+1)
+\, \begin{pmatrix} l & k & l \\ 0 & 0 & 0 \end{pmatrix}
+\, \begin{pmatrix} l & k & l \\ -m_a & q & m_b \end{pmatrix}.
+$$
+
+Note:
+- The project uses this fixed normalization/phase convention.
+- Alternative literature conventions may differ by phase/normalization factors.
+
+Selection rules (MUST):
+- $q=m_a-m_b$.
+- $|q|\le k$.
+- $m_1+m_2=m_3+m_4$ for nonzero two-body matrix element.
+
+## 5) Implementation Contract (MUST)
+Use the following implementation order:
+1. Build rank-resolved coefficients with $k=0,2,4,6$ from the $C^{(k)}$ definition.
+2. Build unsymmetrized two-body coefficients in orbital-spin indices.
+3. Antisymmetrize two-body coefficients.
+4. Accumulate $H_{\mathrm{int}}=\sum_k F^k H^{(k)}$.
+5. Export operator terms in the canonical quartic form of `01-02-OPERATOR_IMPLEMENTATION`
+   (`i<j`, `k<l`).
+
+Code form:
+```text
+hint = sum_{k in {0,2,4,6}} F[k] * H_rank[k]
+H_rank[k] <- antisymmetrized(Ck products with spin/orbital constraints)
+```
+
+## 6) Wigner 3j / CG Coefficient Implementation (MUST)
+The $C^{(k)}$ coefficients (Section 4) require Wigner 3j symbols.
+CG coefficients are also used in module 03-01 (LSJM construction, validation path).
+
+MUST:
+- Use the Condon-Shortley phase convention throughout.
+- Use `sympy.physics.wigner` as the sole 3j/CG implementation.
+  It provides exact rational arithmetic with guaranteed phase conventions.
+- `scipy` does not include 3j/CG; do not assume availability.
+
+CG ↔ 3j relation (MUST use consistently):
+
+Math:
+$$
+\langle j_1 m_1;\,j_2 m_2 \mid j_3 m_3\rangle
+=
+(-1)^{-j_1+j_2-m_3}\sqrt{2j_3+1}
+\begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & -m_3 \end{pmatrix}.
+$$
+
+Code form:
+```text
+from sympy.physics.wigner import wigner_3j, clebsch_gordan
+```
+
+Validation:
+- Symmetry check: column-permutation phases must hold.
+- Selection-rule check: vanishing when $m_1+m_2+m_3\neq0$ or triangle inequality fails.
+- Cross-check known tabulated values for small $j$ (e.g., $j=3$).
