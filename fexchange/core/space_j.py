@@ -8,6 +8,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fexchange.utils.checks import check_hermitian
+from fexchange.utils.constants import (
+    Q_3Z2R2,
+    Q_X2Y2,
+    Q_XY,
+    Q_YZ,
+    Q_ZX,
+    S1_X,
+    S1_Y,
+    S1_Z,
+    SIGMA_X,
+    SIGMA_Y,
+    SIGMA_Z,
+)
 from fexchange.utils.errors import PhysError
 from fexchange.utils.numerics import DTYPE_COMPLEX
 
@@ -165,12 +178,37 @@ def pauli_decompose(M: NDArray[np.complexfloating]) -> dict[str, complex]:
             module="space_j",
             actual={"shape": list(M.shape)},
         )
-    sigma_x = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=DTYPE_COMPLEX)
-    sigma_y = np.array([[0.0, -1.0j], [1.0j, 0.0]], dtype=DTYPE_COMPLEX)
-    sigma_z = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=DTYPE_COMPLEX)
     return {
         "o0": 0.5 * np.trace(M),
-        "ox": 0.5 * np.trace(sigma_x @ M),
-        "oy": 0.5 * np.trace(sigma_y @ M),
-        "oz": 0.5 * np.trace(sigma_z @ M),
+        "ox": 0.5 * np.trace(SIGMA_X @ M),
+        "oy": 0.5 * np.trace(SIGMA_Y @ M),
+        "oz": 0.5 * np.trace(SIGMA_Z @ M),
+    }
+
+
+def spin1_decompose(M: NDArray[np.complexfloating]) -> dict[str, float]:
+    """
+    Decompose a 3x3 Hermitian matrix into S=1 irreducible tensor components.
+
+    Returns coefficients {s0, sx, sy, sz, qx2y2, qxy, qzx, qyz, q3z2r2} such that
+    M = s0*I + sx*Sx + sy*Sy + sz*Sz + qx2y2*Qx2y2 + qxy*Qxy + qzx*Qzx + qyz*Qyz + q3z2r2*Q3z2r2.
+    """
+    if M.shape != (3, 3):
+        raise PhysError(
+            "FXE-PHYS-001",
+            "spin1_decompose supports 3x3 matrices only",
+            module="space_j",
+            actual={"shape": list(M.shape)},
+        )
+    trace = np.trace
+    return {
+        "s0": float(np.real(trace(M) / 3)),
+        "sx": float(np.real(trace(S1_X @ M) / 2)),
+        "sy": float(np.real(trace(S1_Y @ M) / 2)),
+        "sz": float(np.real(trace(S1_Z @ M) / 2)),
+        "qx2y2": float(np.real(trace(Q_X2Y2 @ M) / 2)),
+        "qxy": float(np.real(trace(Q_XY @ M) / 2)),
+        "qzx": float(np.real(trace(Q_ZX @ M) / 2)),
+        "qyz": float(np.real(trace(Q_YZ @ M) / 2)),
+        "q3z2r2": float(np.real(trace(Q_3Z2R2 @ M) / 2)),
     }
