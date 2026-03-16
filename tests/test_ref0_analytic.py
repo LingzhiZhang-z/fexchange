@@ -19,11 +19,14 @@ SOC convention:
 """
 from __future__ import annotations
 
+import importlib
+import sys
+
 import numpy as np
 import pytest
 
-from fexchange.representations.lsms import build_lsms, build_lsms_spectrum
-from fexchange.representations.lsjm import build_lsjm, build_lsjm_spectrum
+from fexchange.spectrum.lsms import build_lsms, build_lsms_spectrum
+from fexchange.spectrum.lsjm import build_lsjm, build_lsjm_spectrum
 
 # ---------------------------------------------------------------------------
 # Analytic coefficients from Reference-0 RS_f2_En
@@ -315,3 +318,21 @@ class TestF2SpectrumOrdering:
                 f"Term L={L},twoS={twoS}: E_coulomb={entry['E_coulomb']:.8f}, "
                 f"analytic={E_ref:.8f}"
             )
+
+
+def test_ref_analytical_f2_script_defaults_to_f2_only(monkeypatch):
+    module = importlib.import_module("tests.validation.ref_analytical_f2_f12")
+    calls: list[str] = []
+
+    monkeypatch.setattr(module, "run_f2", lambda: calls.append("f2") or 0)
+    if hasattr(module, "run_f12"):
+        monkeypatch.setattr(module, "run_f12", lambda: calls.append("f12") or 0)
+    monkeypatch.setattr(sys, "argv", ["ref_analytical_f2_f12.py"])
+
+    assert module.main() == 0
+    assert calls == ["f2"]
+
+
+def test_ref_analytical_f2_script_has_no_f12_entrypoint():
+    module = importlib.import_module("tests.validation.ref_analytical_f2_f12")
+    assert not hasattr(module, "run_f12")

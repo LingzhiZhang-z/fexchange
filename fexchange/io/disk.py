@@ -87,13 +87,13 @@ def build_stage_path(
     elif stage == "L1":
         return root / "core" / core / "L1"
     elif stage == "L2":
-        return root / "core" / core / "hopping" / hopping_name / "L2"
+        return root / "core" / core / "L2"
     elif stage == "L3":
-        return root / "core" / core / "hopping" / hopping_name / ujhz_dir_token(U, Jh, zeta) / "L3"
+        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "L3"
     elif stage == "L4":
-        return root / "core" / core / "hopping" / hopping_name / ujhz_dir_token(U, Jh, zeta) / "kramer" / kramer_name / "L4"
+        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "L4"
     elif stage == "spin12":
-        return root / "core" / core / "hopping" / hopping_name / ujhz_dir_token(U, Jh, zeta) / "kramer" / kramer_name / "spin12"
+        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "spin12"
     else:
         raise IOError_(
             "FXE-IO-001",
@@ -295,8 +295,6 @@ def append_index_record(
         "U",
         "Jh",
         "zeta",
-        "hopping_name",
-        "kramer_name",
         "content_hash",
     ):
         record.setdefault(field, None)

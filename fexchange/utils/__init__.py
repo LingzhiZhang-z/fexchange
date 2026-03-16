@@ -1,1 +1,1 @@
-"""Utility modules: numerics, errors, checks, parallel, legacy."""
+"""Utility modules: numerics, errors, checks."""

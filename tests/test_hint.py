@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from fexchange.models.hint import build_hint_matrix, build_hint_rank_matrix
+from fexchange.hamiltonian.hint import build_hint_matrix, build_hint_rank_matrix
 from fexchange.utils.checks import check_hermitian
 
 
@@ -26,7 +26,7 @@ class TestF2TermStructure:
     """f^2: expect 7 LS terms with total 91 states (prompt verification checklist)."""
 
     def test_f2_dimension(self):
-        from fexchange.core.fock_basis import dim_sector
+        from fexchange.core.fock import dim_sector
         assert dim_sector(2) == 91
 
     def test_f2_hint_shape(self):

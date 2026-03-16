@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from fexchange.models.hsoc import build_hsoc_matrix, build_hsoc_unit_matrix
+from fexchange.hamiltonian.hsoc import build_hsoc_matrix, build_hsoc_unit_matrix
 from fexchange.utils.checks import check_hermitian
 
 

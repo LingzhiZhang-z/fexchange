@@ -1,8 +1,8 @@
 import numpy as np
 
-from fexchange.core.doublet_basis import build_oh_eg_doublet
-from fexchange.core.symmetry_tables import MULTIPOLE_RULES
-from fexchange.models.ground_doublets import (
+from fexchange.spectrum.doublet import build_oh_eg_doublet
+from fexchange.spectrum.tables import MULTIPOLE_RULES
+from fexchange.spectrum.ground import (
     select_kramers_doublet,
     select_non_kramers_doublet,
 )

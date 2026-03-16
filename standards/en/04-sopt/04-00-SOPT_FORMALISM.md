@@ -1,11 +1,11 @@
 # 04-00-SOPT_FORMALISM
 
 This file defines the SOPT physical core and minimal programmable interface.
-It does not define state-construction details or level-by-level implementation details (see `./standards/en/04-sopt/04-01-PRECOMPUTE_PIPELINE.md`, `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`, and `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`).
+It does not define state-construction details or level-by-level implementation details (see `./standards/en/04-sopt/04-01-PRECOMPUTE.md`, `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`, and `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`).
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
-Writing style follows `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`.
+Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
 Runtime tolerances, deterministic linear algebra, and global input gates follow
-`./standards/en/00-conventions/00-02-RUNTIME_NUMERICS_AND_INPUT_GATES.md`.
+`./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md`.
 
 ## 0) Level Definitions (MUST)
 Level semantics:
@@ -19,7 +19,7 @@ Execution order:
 - Default and required order is $L0 \to L1 \to L2 \to L3 \to L4$ (i.e., $L3 > L4$).
 
 Ownership boundary:
-- Formula details for $L0/L1$ are in `./standards/en/04-sopt/04-01-PRECOMPUTE_PIPELINE.md`.
+- Formula details for $L0/L1$ are in `./standards/en/04-sopt/04-01-PRECOMPUTE.md`.
 - Formula details for $L2/L3/L4$ are in `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`.
 - Post-SOPT pseudospin-$\tfrac{1}{2}$ mapping is in `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`.
 - This file keeps only cross-level contracts and shared symbols.
@@ -37,7 +37,7 @@ Ownership boundary:
 - Site-bound orbital indices: $p,p'$ on site-$i$; $q,q'$ on site-$j$.
 - Scope note: this `p,p',q,q'` convention is SOPT-internal (post-reduction).
   It is distinct from ligand index notation `(o,p)` used in
-  `./standards/en/05-io/05-02-WANNIER90_INPUT_CONTRACT.md`.
+  `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`.
 
 ## 0.2) Core Symbols (Compact, MUST)
 - Projectors/Hamiltonians: $P,Q,H_0,H_{\mathrm{hop}}^{(\mu)},H_{\mathrm{eff}}^{(2)}$.
@@ -56,7 +56,7 @@ The "$f^n$ SOC-lowest LSJM subspace" (also "$f^n$ LSJM ground multiplet") refere
    Coulomb eigenvalue $\varepsilon_{\alpha_0}$ from LSMS (module 03-00).
    If multiple $\alpha$ values exist for the same $(L_0,S_0)$, pick the one with the
    smallest $\varepsilon_{\alpha}$; if numerically tied, apply deterministic
-   tie-break from `./standards/en/01-physics/01-01-STATE_VECTOR_CONVENTION.md`.
+   tie-break from `./standards/en/01-core/01-01-STATE_VECTOR.md`.
 2. Identify the ground $J$: within the ground LS term, apply Hund's third rule:
    - $n \le 2\ell$ (less than half-filled, $\ell=3$): $J_0 = |L_0-S_0|$.
    - $n > 2\ell$ (more than half-filled): $J_0 = L_0+S_0$.
@@ -71,7 +71,7 @@ $$
 
 4. $U^{n,\mathrm{soc0}}\in\mathbb C^{d_{\mathrm{fock}}\times(2J_0+1)}$ is the
    Fock-to-subspace transform whose columns are these states in canonical LSJM
-   order inherited from `./standards/en/03-representations/03-01-REPRESENTATION_LSJM.md`.
+   order inherited from `./standards/en/03-spectrum/03-01-LSJM.md`.
 
 Code form:
 ```text
@@ -312,7 +312,7 @@ MUST:
 - The execution order is fixed as $L0 \to L1 \to L2 \to L3 \to L4$ (i.e., $L3 > L4$).
 - This file defines SOPT-local levels only (`L0..L4`).
 - Global runtime window (`LMSM..L4`) is defined in
-  `./standards/en/00-conventions/00-05-RUN_INPUT_SINGLE_FILE.md` and
+  `./standards/en/05-io/05-04-RUN_INPUT.md` and
   `./standards/en/05-io/05-00-IO.md`.
 - $L0$ must be generated in-code at runtime and requires no external input artifact.
 - $L0$ output must be a single site-agnostic local-transition tensor set; site-specific differences are forbidden at $L0$.

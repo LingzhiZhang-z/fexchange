@@ -13,7 +13,7 @@ from typing import Any, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.core.fock_basis import make_basis_id, check_basis_id, popcount
+from fexchange.core.fock import make_basis_id, check_basis_id, popcount
 from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_ZERO, EPS_NORM
 from fexchange.utils.errors import PhysError, BindError
 

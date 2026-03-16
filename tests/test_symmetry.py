@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from fexchange.core.symmetry import (
+from fexchange.spectrum.classify import (
     MULTIPOLE_RULES,
     parity_from_J,
     build_active_irrep_table,
@@ -15,7 +15,7 @@ from fexchange.core.symmetry import (
     classify_with_multipoles,
     analyze_cef_symmetry,
 )
-from fexchange.core.symmetry_tables import (
+from fexchange.spectrum.tables import (
     C3V_STAR_CHI,
     C3V_STAR_CLASSES,
     C3V_STAR_IRREPS,
@@ -25,7 +25,7 @@ from fexchange.core.symmetry_tables import (
     O_STAR_IRREPS,
     O_STAR_SIZES,
 )
-from fexchange.models.hcef import build_hcef_matrix_J
+from fexchange.hamiltonian.hcef import build_hcef_matrix_J
 
 
 def test_o_star_class_sizes_match_standard():
@@ -252,7 +252,7 @@ def test_analyze_cef_symmetry_requires_exactly_one_input():
         analyze_cef_symmetry(4.0, "Oh", B_params={"B4": 0.01}, evecs=evecs)
 
 
-def test_legacy_dual_parity_keys_are_absent():
+def test_removed_dual_parity_keys_are_absent():
     h = build_hcef_matrix_J(4.0, {"B4": 0.01, "B6": 0.001}, "Oh")
     _, evecs = np.linalg.eigh(h)
     out = analyze_cef_symmetry(4.0, "Oh", evecs=evecs, n_f=2)
@@ -290,7 +290,7 @@ class TestMultipoleRulesD3d:
         """Gamma3+ carries xy-component of magnetic dipole in D3d."""
         assert "magnetic_dipole" in MULTIPOLE_RULES["D3d"]["Gamma3+"]
 
-    def test_d3d_legacy_alias_keys_are_absent(self):
+    def test_d3d_removed_alias_keys_are_absent(self):
         for key in ("A1g", "A2g", "Eg", "A1u", "A2u", "Eu"):
             assert key not in MULTIPOLE_RULES["D3d"]
 

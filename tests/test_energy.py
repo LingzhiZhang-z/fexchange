@@ -1,5 +1,5 @@
 import numpy as np
-from fexchange.models.energy import compute_intermediate_energies
+from fexchange.spectrum.energy import compute_intermediate_energies
 
 
 def _lsjm_payload(coef_f0):

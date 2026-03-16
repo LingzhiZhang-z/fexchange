@@ -1,0 +1,225 @@
+=== f12 Wavefunction Comparison: ref0 f2 particle-hole ===
+
+--- f12 LSMS ---
+  [PASS] (L=6 S=0 ML=+6 MS=+0.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.2222222222 analytic=-1.2222222222 delta=0.00e+00
+    [PASS] coef_F4: fex=-0.9008264463 analytic=-0.9008264463 delta=1.33e-15
+    [PASS] coef_F6: fex=-1.1653653262 analytic=-1.1653653262 delta=6.66e-16
+  [PASS] (L=6 S=0 ML=+5 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=+4 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=+3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=+2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-4 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-5 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 ML=-6 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+5 MS=+1.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.4444444444 analytic=-1.4444444444 delta=4.44e-16
+    [PASS] coef_F4: fex=-0.9559228650 analytic=-0.9559228650 delta=1.22e-15
+    [PASS] coef_F6: fex=-1.1672670764 analytic=-1.1672670764 delta=8.88e-16
+  [PASS] (L=5 S=1 ML=+5 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+5 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+4 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+4 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+4 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+3 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+3 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+2 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+2 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+1 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+0 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=+0 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-1 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-2 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-2 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-3 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-3 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-4 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-4 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-4 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-5 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-5 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 ML=-5 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=+4 MS=+0.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.4666666667 analytic=-1.4666666667 delta=2.22e-16
+    [PASS] coef_F4: fex=-0.8200183655 analytic=-0.8200183655 delta=9.99e-16
+    [PASS] coef_F6: fex=-1.1549057004 analytic=-1.1549057004 delta=1.55e-15
+  [PASS] (L=4 S=0 ML=+3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=+2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=-2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=-3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 ML=-4 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+3 MS=+1.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.3777777778 analytic=-1.3777777778 delta=6.66e-16
+    [PASS] coef_F4: fex=-0.9393939394 analytic=-0.9393939394 delta=1.78e-15
+    [PASS] coef_F6: fex=-1.2043512044 analytic=-1.2043512044 delta=1.55e-15
+  [PASS] (L=3 S=1 ML=+3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+3 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+2 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+2 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+1 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+0 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=+0 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-1 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-2 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-2 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-3 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-3 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 ML=-3 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 ML=+2 MS=+0.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.2488888889 analytic=-1.2488888889 delta=8.88e-16
+    [PASS] coef_F4: fex=-1.0000000000 analytic=-1.0000000000 delta=1.78e-15
+    [PASS] coef_F6: fex=-1.0683760684 analytic=-1.0683760684 delta=6.66e-16
+  [PASS] (L=2 S=0 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 ML=-2 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=+1 MS=+1.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.1333333333 analytic=-1.1333333333 delta=4.44e-16
+    [PASS] coef_F4: fex=-0.8787878788 analytic=-0.8787878788 delta=1.44e-15
+    [PASS] coef_F6: fex=-1.3403263403 analytic=-1.3403263403 delta=1.11e-15
+  [PASS] (L=1 S=1 ML=+1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=+1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=+0 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=+0 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=+0 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=-1 MS=+1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=-1 MS=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 ML=-1 MS=-1.0)  overlap=1.0000000000
+  [PASS] (L=0 S=0 ML=+0 MS=+0.0)  overlap=1.0000000000
+    [PASS] coef_F2: fex=-1.0666666667 analytic=-1.0666666667 delta=0.00e+00
+    [PASS] coef_F4: fex=-0.7272727273 analytic=-0.7272727273 delta=5.55e-16
+    [PASS] coef_F6: fex=-0.9324009324 analytic=-0.9324009324 delta=1.89e-15
+  f12 LSMS: 91/91 overlap > 0.9999
+
+--- f12 LSJM ---
+  [PASS] (L=6 S=0 J=6 M=+6.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+0.0000000000 ref=-0.0000000000 delta=0.00e+00
+  [PASS] (L=6 S=0 J=6 M=+5.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=+4.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-5.0)  overlap=1.0000000000
+  [PASS] (L=6 S=0 J=6 M=-6.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+6.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-2.5000000000 ref=-2.5000000000 delta=0.00e+00
+  [PASS] (L=5 S=1 J=6 M=+5.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+4.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-5.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=6 M=-6.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=+5.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+0.5000000000 ref=+0.5000000000 delta=2.22e-16
+  [PASS] (L=5 S=1 J=5 M=+4.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=5 M=-5.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=+4.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+3.0000000000 ref=+3.0000000000 delta=1.33e-15
+  [PASS] (L=5 S=1 J=4 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=5 S=1 J=4 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=+4.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-0.0000000000 ref=-0.0000000000 delta=2.21e-16
+  [PASS] (L=4 S=0 J=4 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=4 S=0 J=4 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=+4.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-1.5000000000 ref=-1.5000000000 delta=6.66e-16
+  [PASS] (L=3 S=1 J=4 M=+3.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=4 M=-4.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=+3.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+0.5000000000 ref=+0.5000000000 delta=1.11e-16
+  [PASS] (L=3 S=1 J=3 M=+2.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=3 M=-3.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=2 M=+2.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+2.0000000000 ref=+2.0000000000 delta=0.00e+00
+  [PASS] (L=3 S=1 J=2 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=2 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=2 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=3 S=1 J=2 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 J=2 M=+2.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-0.0000000000 ref=-0.0000000000 delta=5.68e-17
+  [PASS] (L=2 S=0 J=2 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 J=2 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 J=2 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=2 S=0 J=2 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=2 M=+2.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-0.5000000000 ref=-0.5000000000 delta=1.11e-16
+  [PASS] (L=1 S=1 J=2 M=+1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=2 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=2 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=2 M=-2.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=1 M=+1.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+0.5000000000 ref=+0.5000000000 delta=0.00e+00
+  [PASS] (L=1 S=1 J=1 M=+0.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=1 M=-1.0)  overlap=1.0000000000
+  [PASS] (L=1 S=1 J=0 M=+0.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=+1.0000000000 ref=+1.0000000000 delta=6.66e-16
+  [PASS] (L=0 S=0 J=0 M=+0.0)  overlap=1.0000000000
+    [PASS] coef_zeta: fex=-0.0000000000 ref=-0.0000000000 delta=1.33e-15
+  f12 LSJM: 91/91 overlap > 0.9999
+
+=== Summary: LSMS 0 FAIL, LSJM 0 FAIL ===

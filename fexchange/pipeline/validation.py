@@ -101,7 +101,6 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
-            hopping_name=cfg["sources"]["hopping_name"],
         )
         _check(d / "data.npz", ["M_A", "M_B"])
         try:
@@ -117,7 +116,6 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
-            hopping_name=cfg["sources"]["hopping_name"],
             U=float(s["U"]),
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
@@ -136,11 +134,9 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
-            hopping_name=cfg["sources"]["hopping_name"],
             U=float(s["U"]),
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
-            kramer_name=cfg["sources"]["kramer_name"],
         )
         _check(d / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
         try:
@@ -164,4 +160,3 @@ def validate_upstream_artifacts(
             actual={"invalid_paths": invalid},
             paths={"output_root": output_root},
         )
-

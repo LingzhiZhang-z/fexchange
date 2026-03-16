@@ -1,8 +1,8 @@
 """Tests for select_non_kramers_doublet gauge integration."""
 import numpy as np
 
-from fexchange.core.doublet_basis import build_d3d_eg_doublet, build_oh_eg_doublet
-from fexchange.models.ground_doublets import select_non_kramers_doublet
+from fexchange.spectrum.doublet import build_d3d_eg_doublet, build_oh_eg_doublet
+from fexchange.spectrum.ground import select_non_kramers_doublet
 
 
 def _make_oh_j4_input():

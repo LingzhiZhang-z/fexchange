@@ -1,11 +1,11 @@
 # 04-00-SOPT_FORMALISM
 
 本文件定义 SOPT 的物理主干与最小可编程接口。
-本文件不定义态构造细节，不定义分层实现细节（见 `./standards/en/04-sopt/04-01-PRECOMPUTE_PIPELINE.md`、`./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md` 与 `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`）。
+本文件不定义态构造细节，不定义分层实现细节（见 `./standards/en/04-sopt/04-01-PRECOMPUTE.md`、`./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md` 与 `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`）。
 磁盘 I/O 布局与格式由 `./standards/en/05-io/05-00-IO.md` 统一定义。
-写作形式遵循 `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`。
+写作形式遵循 `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`。
 运行时阈值、确定性线性代数与全局输入闸门遵循
-`./standards/en/00-conventions/00-02-RUNTIME_NUMERICS_AND_INPUT_GATES.md`。
+`./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md`。
 
 ## 0) 分层定义（MUST）
 分层语义：
@@ -19,7 +19,7 @@
 - 默认且强制顺序为 $L0 \to L1 \to L2 \to L3 \to L4$（即 $L3 > L4$）。
 
 职责边界：
-- $L0/L1$ 的公式细节放在 `./standards/en/04-sopt/04-01-PRECOMPUTE_PIPELINE.md`。
+- $L0/L1$ 的公式细节放在 `./standards/en/04-sopt/04-01-PRECOMPUTE.md`。
 - $L2/L3/L4$ 的公式细节放在 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`。
 - SOPT 后处理的赝自旋-$\tfrac{1}{2}$ 映射放在 `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`。
 - 本文件只保留跨层契约与共用符号。
@@ -36,7 +36,7 @@
 - 通用单站点轨道指标：$\kappa$（仅在未绑定 site 时使用）。
 - site 绑定轨道指标：$p,p'$ 属于 site-$i$；$q,q'$ 属于 site-$j$。
 - 作用域说明：本处 `p,p',q,q'` 是 SOPT 内部（约化后）记号，
-  与 `./standards/en/05-io/05-02-WANNIER90_INPUT_CONTRACT.md` 中配体记号 `(o,p)`
+  与 `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md` 中配体记号 `(o,p)`
   不同。
 
 ## 0.2) 核心符号（精简，MUST）
@@ -54,7 +54,7 @@ SOPT 中引用的"$f^n$ SOC 最低能 LSJM 子空间"（也称"$f^n$ LSJM 基态
 
 1. 确定基态 LS 项：LSMS（模块 03-00）中库仑本征值 $\varepsilon_{\alpha}$ 最小的 $(\alpha_0, L_0, S_0)$ 项。
    若同一 $(L_0,S_0)$ 有多个 $\alpha$，取 $\varepsilon_\alpha$ 最小者；
-   若数值上相等，按 `./standards/en/01-physics/01-01-STATE_VECTOR_CONVENTION.md` 的确定性规则处理。
+   若数值上相等，按 `./standards/en/01-core/01-01-STATE_VECTOR.md` 的确定性规则处理。
 2. 确定基态 $J$：在基态 LS 项内应用 Hund 第三规则：
    - $n \le 2\ell$（少于半满，$\ell=3$）：$J_0 = |L_0-S_0|$。
    - $n > 2\ell$（超过半满）：$J_0 = L_0+S_0$。
@@ -68,7 +68,7 @@ $$
 $$
 
 4. $U^{n,\mathrm{soc0}}\in\mathbb C^{d_{\mathrm{fock}}\times(2J_0+1)}$ 的列即为上述态，
-   其列序继承自 `./standards/en/03-representations/03-01-REPRESENTATION_LSJM.md` 的正则 LSJM 序。
+   其列序继承自 `./standards/en/03-spectrum/03-01-LSJM.md` 的正则 LSJM 序。
 
 Code form:
 ```text
@@ -308,7 +308,7 @@ MUST:
 - 调用顺序在本文件中固定为 $L0 \to L1 \to L2 \to L3 \to L4$（即 $L3 > L4$）。
 - 本文件只定义 SOPT 局部分层（`L0..L4`）。
 - 全局运行窗口（`LMSM..L4`）由
-  `./standards/en/00-conventions/00-05-RUN_INPUT_SINGLE_FILE.md` 与
+  `./standards/en/05-io/05-04-RUN_INPUT.md` 与
   `./standards/en/05-io/05-00-IO.md` 统一定义。
 - $L0$ 必须可由代码在运行时直接生成，不要求外部文件输入。
 - $L0$ 输出必须是与 site 无关的统一局域跃迁元；site 差异不得在 $L0$ 引入。

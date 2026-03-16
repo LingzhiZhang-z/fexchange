@@ -4,7 +4,7 @@ This file defines post-SOPT mapping from `04-02-RUNTIME_CONTRACTION` outputs to 
 pseudospin-$\tfrac{1}{2}$ model.
 It reads $\mathrm{Heff}_{cd,ab}^{(\mu)}$ and projects it to spin couplings.
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
-Writing style follows `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`.
+Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
 
 ## 0) Scope (MUST)
 - Input comes from level-$L4$ outputs in `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`.

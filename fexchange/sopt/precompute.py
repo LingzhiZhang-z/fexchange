@@ -12,10 +12,9 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.core.fock_basis import (
-    N_ORB, enumerate_dets, dim_sector, make_basis_id,
-)
-from fexchange.core.fermion_ops import cdag_matrix
+from fexchange.utils.constants import N_ORB
+from fexchange.core.fock import enumerate_dets, dim_sector, make_basis_id
+from fexchange.core.fermion import cdag_matrix
 from fexchange.utils.numerics import DTYPE_COMPLEX
 from fexchange.utils.errors import PhysError, BindError
 

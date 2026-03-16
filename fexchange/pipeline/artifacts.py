@@ -22,7 +22,6 @@ from fexchange.io.disk import (
 )
 from fexchange.pipeline.keys import level_key, three_sectors
 from fexchange.utils.numerics import numerics_meta
-from fexchange.utils.parallel import ParallelContext
 
 logger = logging.getLogger("fexchange")
 
@@ -162,10 +161,7 @@ def persist_stateset(
     physics: dict[str, Any],
     r42: float,
     r62: float,
-    ctx: ParallelContext,
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     hash_v = atomic_write_npz(stage_dir / "V.npz", V_fock=result["V_fock"])
     e_payload: dict[str, Any] = {
@@ -206,7 +202,6 @@ def persist_stateset(
             "n_orb": result.get("n_orb"),
             "n_ele": result.get("n_ele"),
             "numerics_meta": numerics_meta(),
-            "parallel_meta": ctx.meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -227,13 +222,10 @@ def persist_stateset(
 
 def persist_l0(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     result: dict[str, Any],
     *,
     n_ele: int,
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     stage_dir = build_stage_path(output_root, "fock")
     hash_x = atomic_write_npz(stage_dir / f"n{n_ele}{n_ele + 1}.npz", X=result["X"])
@@ -250,10 +242,7 @@ def persist_l0(
             index_definition="X(kappa,alpha,beta), Y(kappa,beta,gamma)",
             logical_shape=[*result["X"].shape],
             payload_files=[f"n{n_ele}{n_ele + 1}.npz", f"n{n_ele - 1}{n_ele}.npz"],
-            extra={
-                "numerics_meta": numerics_meta(),
-                "parallel_meta": ctx.meta(),
-            },
+            extra={"numerics_meta": numerics_meta()},
         )
         atomic_write_json(stage_dir / f"meta_n{sec}.json", meta)
     append_index_record(
@@ -271,7 +260,6 @@ def persist_l0(
 
 def persist_l1(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     result: dict[str, Any],
     *,
     n_ele: int,
@@ -280,8 +268,6 @@ def persist_l1(
     scheme: str,
     soc0: dict[str, Any],
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     stage_dir = build_stage_path(output_root, "L1", n=n_ele, r42=r42, r62=r62, scheme=scheme)
     content_hash = atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
@@ -312,7 +298,6 @@ def persist_l1(
                 "n_j": soc0["n_j"],
             },
             "numerics_meta": numerics_meta(),
-            "parallel_meta": ctx.meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -333,18 +318,13 @@ def persist_l1(
 
 def persist_l2(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
     scheme: str,
-    hopping_name: str,
-    hopping_meta: dict[str, Any],
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     stage_dir = build_stage_path(
         output_root,
@@ -353,14 +333,13 @@ def persist_l2(
         r42=r42,
         r62=r62,
         scheme=scheme,
-        hopping_name=hopping_name,
     )
     content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
         level="L2",
         key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={"n": n_ele, "hopping_name": hopping_name},
+        inputs_summary={"n": n_ele},
         tensor_name="M_A/M_B",
         physical_meaning="Route factors for denominator contraction",
         basis_id=f"fock14_n{n_ele}_lex_v1",
@@ -369,9 +348,7 @@ def persist_l2(
         payload_files=["data.npz"],
         extra={
             "axis_order_id": {"M_A": "uvj1j2_v1", "M_B": "rsj1j2_v1"},
-            "hopping_meta": hopping_meta,
             "numerics_meta": numerics_meta(),
-            "parallel_meta": ctx.meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -385,7 +362,6 @@ def persist_l2(
             "n": n_ele,
             "r42": r42,
             "r62": r62,
-            "hopping_name": hopping_name,
             "content_hash": content_hash,
         },
     )
@@ -393,17 +369,13 @@ def persist_l2(
 
 def persist_l3(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
     scheme: str,
-    hopping_name: str,
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
     stage_dir = build_stage_path(
@@ -413,7 +385,6 @@ def persist_l3(
         r42=r42,
         r62=r62,
         scheme=scheme,
-        hopping_name=hopping_name,
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
@@ -425,7 +396,6 @@ def persist_l3(
         key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
         inputs_summary={
             "n": n_ele,
-            "hopping_name": hopping_name,
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
@@ -436,7 +406,7 @@ def persist_l3(
         index_definition="(j3,j4,j1,j2)",
         logical_shape=[*result["h_pre_j_mu"].shape],
         payload_files=["data.npz"],
-        extra={"numerics_meta": numerics_meta(), "parallel_meta": ctx.meta()},
+        extra={"numerics_meta": numerics_meta()},
     )
     atomic_write_json(stage_dir / "meta.json", meta)
     append_index_record(
@@ -452,7 +422,6 @@ def persist_l3(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
-            "hopping_name": hopping_name,
             "content_hash": content_hash,
         },
     )
@@ -460,21 +429,15 @@ def persist_l3(
 
 def persist_l4(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
     scheme: str,
-    hopping_name: str,
-    kramer_name: str,
     labels: np.ndarray,
     W: np.ndarray,
-    W_info: dict[str, Any],
 ) -> None:
-    if not ctx.can_persist:
-        return
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
     stage_dir = build_stage_path(
@@ -484,11 +447,9 @@ def persist_l4(
         r42=r42,
         r62=r62,
         scheme=scheme,
-        hopping_name=hopping_name,
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
-        kramer_name=kramer_name,
     )
     content_hash = atomic_write_npz(
         stage_dir / "data.npz",
@@ -503,8 +464,6 @@ def persist_l4(
         key=level_key("L4", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
         inputs_summary={
             "n": n_ele,
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
@@ -517,11 +476,7 @@ def persist_l4(
         payload_files=["data.npz"],
         extra={
             "labels_order_id": "abcd_lex_v1",
-            "kramer_basis_id": W_info["kramer_basis_id"],
-            "j_order_id": W_info.get("j_order_id"),
-            "kramer_gauge_meta": W_info.get("gauge_meta"),
             "numerics_meta": numerics_meta(),
-            "parallel_meta": ctx.meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -538,8 +493,6 @@ def persist_l4(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
             "content_hash": content_hash,
         },
     )

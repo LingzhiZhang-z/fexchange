@@ -1,14 +1,14 @@
 import numpy as np
 
-from fexchange.core.doublet_basis import (
+from fexchange.spectrum.doublet import (
     build_d3d_eg_doublet,
     build_oh_eg_doublet,
     gauge_fix_kramers_pair,
     project_to_eg_doublet,
 )
 from fexchange.core.space_j import build_time_reversal_operator
-from fexchange.models.ground_doublets import (
-    load_or_build_W,
+from fexchange.spectrum.ground import (
+    build_W,
     select_kramers_doublet,
     select_non_kramers_doublet,
 )
@@ -21,7 +21,7 @@ def test_target_module_imports_resolve():
     assert callable(project_to_eg_doublet)
     assert callable(select_kramers_doublet)
     assert callable(select_non_kramers_doublet)
-    assert callable(load_or_build_W)
+    assert callable(build_W)
 
 
 def test_build_oh_eg_doublet_still_returns_real_j4_basis():

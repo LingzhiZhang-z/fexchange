@@ -3,7 +3,7 @@
 本文件定义从 `04-02-RUNTIME_CONTRACTION` 输出到赝自旋-$\tfrac{1}{2}$模型的后处理映射。
 模块读取 $\mathrm{Heff}_{cd,ab}^{(\mu)}$ 并投影为自旋耦合参数。
 磁盘 I/O 布局与格式由 `./standards/en/05-io/05-00-IO.md` 统一定义。
-写作形式遵循 `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`。
+写作形式遵循 `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`。
 
 ## 0) 适用范围（MUST）
 - 输入来自 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md` 的 $L4$ 输出。

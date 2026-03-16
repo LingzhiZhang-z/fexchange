@@ -2,9 +2,8 @@
 
 本文件定义 SOPT 运行时中的 $L2$、$L3$ 与 $L4$。
 磁盘 I/O 布局与格式由 `./standards/en/05-io/05-00-IO.md` 统一定义。
-写作形式遵循 `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`。
-MPI/并行运行时契约由
-`./standards/en/00-conventions/00-06-MPI_PARALLEL_RUNTIME.md` 定义。
+写作形式遵循 `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`。
+本文件以串行实现为基准且与后端无关；若未来加入并行运行时，也必须保持本文件定义的张量契约不变。
 全局执行顺序由 `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` 固定为 $L0 \to L1 \to L2 \to L3 \to L4$。
 
 ## -1) 公式理解区（先读，非实现规范）
@@ -228,9 +227,9 @@ $$
 4. 选取目标低能子空间：
    - Kramers 体系（奇数 $n$）：选最低双重态（$n_k=2$）。
      验证 Kramers 简并 $|\epsilon_1-\epsilon_2|\le\varepsilon_{\mathrm{eig\_cluster}}$。
-     按 `./standards/en/02-models/02-05-KRAMERS_DOUBLET_G_TENSOR.md` 做规范固定。
+     按 `./standards/en/03-spectrum/03-02-KRAMERS_DOUBLET.md` 做规范固定。
    - 非 Kramers 体系（偶数 $n$）：选最低准双重态（$n_k=2$）。
-     按 `./standards/en/02-models/02-06-NON_KRAMERS_DOUBLET.md` 做规范固定。
+     按 `./standards/en/03-spectrum/03-03-NON_KRAMERS_DOUBLET.md` 做规范固定。
    - 更大目标空间（$n_k>2$）：选最低 $n_k$ 个态，须有显式能隙判据。
 5. 组装 $W\in\mathbb C^{n_j\times n_k}$，各列为选出的本征态 $w_k$。
 
@@ -252,7 +251,7 @@ Validation:
 ## 0.1) $L2/L3/L4$ 外部运行时输入 Schema（MUST）
 MUST:
 - hopping（`t_mu`）与 Kramer 投影（`W`, `kramer_labels`）必须由外部运行时输入提供。
-- 必须满足 `./standards/en/00-conventions/00-02-RUNTIME_NUMERICS_AND_INPUT_GATES.md` 的全局头字段闸门：
+- 必须满足 `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` 的全局头字段闸门：
   `schema_version`, `standard_version`, `basis_id`, `orbital_order_id`, `unit`。
 - 单次运行只计算一个 bond；输入 hopping 载荷中不允许 `mu` 轴。
 

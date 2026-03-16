@@ -17,6 +17,36 @@ def _write(tmp_path, content: str):
 
 
 class TestRunInputValidation:
+    def test_unknown_top_level_section_is_rejected(self, tmp_path):
+        path = _write(
+            tmp_path,
+            """
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "extra"
+            title = "unsupported section"
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L1"
+            end_level = "L1"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+
+            [extra]
+            value = true
+            """,
+        )
+
+        with pytest.raises(InputError, match="Unsupported top-level section"):
+            load_run_input(path)
+
     def test_l1_window_allows_missing_physics_section(self, tmp_path):
         path = _write(
             tmp_path,
@@ -77,3 +107,93 @@ class TestRunInputValidation:
         cfg = load_run_input(path)
         assert cfg["physics"]["n_ele"] == 2
         assert "_derived" in cfg
+
+    def test_l2_window_requires_inputs_section(self, tmp_path):
+        path = _write(
+            tmp_path,
+            """
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "l2_missing_inputs"
+            title = "missing inputs"
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L2"
+            end_level = "L2"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+            """,
+        )
+
+        with pytest.raises(InputError, match=r"Missing required section for selected window: \[inputs\]"):
+            load_run_input(path)
+
+    def test_valid_l2_with_inputs(self, tmp_path):
+        hopping = tmp_path / "hop.npy"
+        hopping.write_bytes(b"placeholder")
+        path = _write(
+            tmp_path,
+            f"""
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "l2_valid_inputs"
+            title = "valid l2 with inputs"
+
+            [inputs]
+            hopping_file = "{hopping}"
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L2"
+            end_level = "L2"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+            """,
+        )
+
+        cfg = load_run_input(path)
+        assert cfg["inputs"]["hopping_file"] == str(hopping)
+
+    def test_sources_section_is_now_rejected(self, tmp_path):
+        path = _write(
+            tmp_path,
+            """
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "sources_rejected"
+            title = "sources section rejected"
+
+            [sources]
+            hopping_source = "file"
+            kramer_source = "file"
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L1"
+            end_level = "L1"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+            """,
+        )
+
+        with pytest.raises(InputError, match="Unsupported top-level section"):
+            load_run_input(path)

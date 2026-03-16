@@ -2,9 +2,9 @@
 
 This file defines runtime Levels $L2$, $L3$, and $L4$ for SOPT.
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
-Writing style follows `./standards/en/00-conventions/00-00-SPEC_WRITING_CONVENTION.md`.
-MPI/parallel runtime contract is defined by
-`./standards/en/00-conventions/00-06-MPI_PARALLEL_RUNTIME.md`.
+Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
+This file is serial-first and backend-agnostic: if a future parallel runtime is
+added, it must preserve the tensor contracts defined here.
 Global execution order is fixed in `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` as $L0 \to L1 \to L2 \to L3 \to L4$.
 
 ## -1) Formula-Only Equivalence (READ FIRST, Non-Implementation)
@@ -13,7 +13,7 @@ It is not an implementation contract.
 For AI readers: read this section first to understand the algebra;
 implementation/interface requirements start from Section `0` below.
 
-Start from the legacy expression:
+Start from the reference expanded expression:
 
 Math:
 $$
@@ -39,7 +39,7 @@ $$
 In f-shell convention, $E_0=0$, hence
 $\Delta_{uv}=-E_{uv}$ and $\Delta_{rs}=-E_{rs}$.
 
-Route A legacy kernel:
+Route A kernel:
 
 Math:
 $$
@@ -90,7 +90,7 @@ M_{A,uv;j_1j_2}^{R,(\mu)}
 }{\Delta_{uv}}.
 $$
 
-Route B legacy kernel:
+Route B kernel:
 
 Math:
 $$
@@ -230,9 +230,9 @@ $$
 4. Select the target low-energy subspace:
    - Kramers systems (odd $n$): select lowest doublet ($n_k=2$).
      Verify Kramers degeneracy $|\epsilon_1-\epsilon_2|\le\varepsilon_{\mathrm{eig\_cluster}}$.
-     Apply gauge-fixing from `./standards/en/02-models/02-05-KRAMERS_DOUBLET_G_TENSOR.md`.
+     Apply gauge-fixing from `./standards/en/03-spectrum/03-02-KRAMERS_DOUBLET.md`.
    - Non-Kramers systems (even $n$): select lowest quasi-doublet ($n_k=2$).
-     Apply gauge-fixing from `./standards/en/02-models/02-06-NON_KRAMERS_DOUBLET.md`.
+     Apply gauge-fixing from `./standards/en/03-spectrum/03-03-NON_KRAMERS_DOUBLET.md`.
    - Larger target spaces ($n_k>2$): select the lowest $n_k$ states with explicit energy-gap criterion.
 5. Assemble $W\in\mathbb C^{n_j\times n_k}$ whose columns are the selected eigenstates $w_k$.
 
@@ -254,7 +254,7 @@ Validation:
 ## 0.1) External Runtime Input Schema for $L2/L3/L4$ (MUST)
 MUST:
 - Hopping (`t_mu`) and Kramer projector (`W`, `kramer_labels`) are external runtime inputs.
-- Global header gate from `./standards/en/00-conventions/00-02-RUNTIME_NUMERICS_AND_INPUT_GATES.md` is mandatory:
+- Global header gate from `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` is mandatory:
   `schema_version`, `standard_version`, `basis_id`, `orbital_order_id`, `unit`.
 - One run computes one bond only; no `mu` axis is allowed in input hopping payload.
 

@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 
 from fexchange.sopt.precompute import build_L0
-from fexchange.core.fock_basis import dim_sector
+from fexchange.core.fock import dim_sector
 
 
 class TestL0:

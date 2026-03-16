@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 
 from fexchange.core.stevens import build_cef_stevens_operators
-from fexchange.models.hcef import build_hcef_matrix_J
+from fexchange.hamiltonian.hcef import build_hcef_matrix_J
 from fexchange.utils.checks import check_hermitian
 from fexchange.utils.errors import PhysError
 

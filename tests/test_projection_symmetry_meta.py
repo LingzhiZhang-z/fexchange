@@ -1,6 +1,6 @@
 import numpy as np
 
-from fexchange.models.ground_doublets import load_or_build_W
+from fexchange.spectrum.ground import build_W
 
 
 def test_cef_mode_returns_symmetry_meta(monkeypatch):
@@ -15,11 +15,11 @@ def test_cef_mode_returns_symmetry_meta(monkeypatch):
     }
 
     monkeypatch.setattr(
-        "fexchange.models.ground_doublets.build_hcef_matrix_J",
+        "fexchange.spectrum.ground.build_hcef_matrix_J",
         lambda J, B, symmetry, mode_q3: np.zeros((8, 8), dtype=complex),
     )
     monkeypatch.setattr(
-        "fexchange.models.ground_doublets.select_kramers_doublet",
+        "fexchange.spectrum.ground.select_kramers_doublet",
         lambda J, evals, evecs, c_g=1.0, point_group="Oh", symmetry_meta=None: {
             "kramer_vectors": np.eye(8, 2, dtype=complex),
             "gauge_meta": {"ok": True},
@@ -27,7 +27,7 @@ def test_cef_mode_returns_symmetry_meta(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "fexchange.models.ground_doublets.analyze_cef_symmetry",
+        "fexchange.spectrum.ground.analyze_cef_symmetry",
         lambda J, point_group, **kwargs: {
             "irrep_primary": "Gamma6",
             "irrep_display": "Γ6",
@@ -37,6 +37,6 @@ def test_cef_mode_returns_symmetry_meta(monkeypatch):
             "excited_irreps": [],
         },
     )
-    out = load_or_build_W(cfg, state, n_ele=1)
+    out = build_W(cfg, state, n_ele=1)
     assert "symmetry_meta" in out
     assert out["symmetry_meta"]["irrep_primary"] == "Gamma6"

@@ -1,5 +1,5 @@
 import numpy as np
-from fexchange.core.doublet_basis import (
+from fexchange.spectrum.doublet import (
     build_d3d_eg_doublet,
     gauge_fix_kramers_pair,
     project_to_eg_doublet,
@@ -13,7 +13,7 @@ from fexchange.core.space_j import (
     project_J_to_subspace,
     project_operators_to_subspace,
 )
-from fexchange.core.multipole import analyze_multipole_carrying
+from fexchange.spectrum.multipole import analyze_multipole_carrying
 from fexchange.core.stevens import build_multipole_operators
 
 def test_space_ls_module_builds_expected_keys():

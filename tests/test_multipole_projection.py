@@ -9,7 +9,11 @@ import numpy as np
 
 from fexchange.core.space_j import _fix_column_phases
 from fexchange.hamiltonian.hcef import build_hcef_matrix_J
-from fexchange.spectrum.multipole import analyze_multipole_carrying, format_multipole_summary
+from fexchange.spectrum.multipole import (
+    analyze_multipole_carrying,
+    format_multipole_summary,
+    gauge_fix_subspace,
+)
 
 
 def _diag_and_project(J, B_params, symmetry="Oh", mode_q3="cos"):
@@ -35,10 +39,10 @@ class TestKramersDoublet:
 
     def test_oh_j72_ground_doublet_has_pauli(self):
         _, evecs = _diag_and_project(3.5, {"B4": 0.01, "B6": 0.0001})
-        Psi = evecs[:, :2]
-        result = analyze_multipole_carrying(Psi, 3.5, point_group="Oh")
+        Psi, gauge = gauge_fix_subspace(evecs[:, :2], 3.5, point_group="Oh")
+        assert gauge == "kramers"
+        result = analyze_multipole_carrying(Psi, 3.5)
         assert result["subspace_dim"] == 2
-        assert result["used_gauge"] == "kramers"
         dipole = result["multipoles"]["magnetic_dipole"]
         assert any(dipole[op]["carried"] for op in dipole)
         for _, payload in dipole.items():
@@ -51,10 +55,10 @@ class TestKramersDoublet:
             {"B40": 0.01, "B60": 0.0001, "B43": 0.005},
             symmetry="C3v",
         )
-        Psi = evecs[:, :2]
-        result = analyze_multipole_carrying(Psi, 3.5, point_group="C3v")
+        Psi, gauge = gauge_fix_subspace(evecs[:, :2], 3.5, point_group="C3v")
+        assert gauge == "kramers"
+        result = analyze_multipole_carrying(Psi, 3.5)
         assert result["subspace_dim"] == 2
-        assert result["used_gauge"] == "kramers"
 
 
 class TestIntegerTriplet:
@@ -64,8 +68,9 @@ class TestIntegerTriplet:
         evals, evecs = _diag_and_project(4.0, {"B4": 0.01, "B6": 0.0001})
         assert abs(evals[0] - evals[1]) < 1e-6
         assert abs(evals[1] - evals[2]) < 1e-6
-        Psi = evecs[:, :3]
-        result = analyze_multipole_carrying(Psi, 4.0, point_group="Oh")
+        Psi, gauge = gauge_fix_subspace(evecs[:, :3], 4.0, point_group="Oh")
+        assert gauge == "triplet_jz"
+        result = analyze_multipole_carrying(Psi, 4.0)
         assert result["subspace_dim"] == 3
         for family in result["multipoles"].values():
             for payload in family.values():
@@ -74,7 +79,8 @@ class TestIntegerTriplet:
 
     def test_triplet_summary_includes_spin1_components(self):
         _, evecs = _diag_and_project(4.0, {"B4": 0.01, "B6": 0.0001})
-        analysis = analyze_multipole_carrying(evecs[:, :3], 4.0, point_group="Oh")
+        Psi, _ = gauge_fix_subspace(evecs[:, :3], 4.0, point_group="Oh")
+        analysis = analyze_multipole_carrying(Psi, 4.0)
         text = format_multipole_summary(analysis)
         assert "sx=" in text
         assert "q3z2r2=" in text
@@ -85,14 +91,14 @@ class TestIntegerSinglet:
 
     def test_j4_basis_singlet_has_expectation(self):
         Psi = np.eye(9, dtype=complex)[:, -1:]
-        result = analyze_multipole_carrying(Psi, 4.0, point_group="Oh")
+        result = analyze_multipole_carrying(Psi, 4.0)
         assert result["subspace_dim"] == 1
         jz = result["multipoles"]["magnetic_dipole"]["Jz"]
         assert jz["carried"] is True
         assert jz["expectation"] == 4.0
 
     def test_singlet_summary_includes_expectation(self):
-        analysis = analyze_multipole_carrying(np.eye(9, dtype=complex)[:, -1:], 4.0, point_group="Oh")
+        analysis = analyze_multipole_carrying(np.eye(9, dtype=complex)[:, -1:], 4.0)
         text = format_multipole_summary(analysis)
         assert "<O>=" in text
 
@@ -103,7 +109,6 @@ def test_cef_states_computes_level_multipoles_for_supported_dimensions():
         point_group="Oh",
         J=4.0,
         B_params={"B4": 0.01, "B6": 0.0001},
-        verbose=False,
     )
     assert len(result["level_multipoles"]) == len(result["level_info"])
     assert result["level_multipoles"][0]["subspace_dim"] == 3
@@ -115,7 +120,6 @@ def test_cef_states_skips_fourfold_levels():
         point_group="Oh",
         J=1.5,
         B_params={},
-        verbose=False,
     )
     assert [level["degeneracy"] for level in result["level_info"]] == [4]
     assert result["level_multipoles"] == [None]

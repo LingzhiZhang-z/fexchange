@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 from math import comb
 
-from fexchange.core.fock_basis import (
+from fexchange.core.fock import (
     N_ORB, occ, popcount, count_below,
     set_bit, clear_bit,
     dim_sector, enumerate_dets, det_index,

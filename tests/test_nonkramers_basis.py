@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from fexchange.core.doublet_basis import (
+from fexchange.spectrum.doublet import (
     allowed_m_values,
     build_d3d_eg_doublet,
     build_oh_eg_doublet,

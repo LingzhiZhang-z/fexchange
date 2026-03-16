@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_ZERO
+from fexchange.utils.numerics import EPS_ZERO
 from fexchange.utils.checks import check_hermitian
 from fexchange.utils.errors import PhysError, NumError, BindError
 
@@ -58,35 +58,13 @@ def build_L2(
 
     logger.info("L2: Building route factors")
 
-    # Route A: M_A^R[u,v,j1,j2] = sum_p sum_q t[p,q] * A[p,u,j1] * conj(B[q,j2,v])
-    # A[kappa] shape (n_u, n_j), site-i binding: kappa=p
-    # B[kappa] shape (n_j, n_v), site-j binding: kappa=q
+    # Route A: M_A[u,v,j1,j2] = sum_{p,q} t[p,q] * A[p,u,j1] * conj(B[q,j2,v])
+    # Optimal contraction path (optimize=True): first contract t with A -> (n_orb,n_u,n_j),
+    # then contract with conj(B) -> (n_u,n_v,n_j,n_j). Single BLAS ZGEMM for the heavy step.
+    M_A = np.einsum("pq,puj,qkv->uvjk", t_mu, A, B.conj(), optimize=True)
 
-    # Efficient einsum:
-    # M_A_R[u,v,j1,j2] = sum_{p,q} t[p,q] * A[p,u,j1] * conj(B[q,j2,v])
-    M_A = np.zeros((n_u, n_v, n_j, n_j), dtype=DTYPE_COMPLEX)
-    for p in range(n_orb):
-        for q in range(n_orb):
-            if abs(t_mu[p, q]) < EPS_ZERO:
-                continue
-            # A[p] shape (n_u, n_j), B[q] shape (n_j, n_v)
-            # outer: A[p][:,j1] * conj(B[q][j2,:])
-            # M_A[:,:,j1,j2] += t[p,q] * A[p][:,j1] * conj(B[q][j2,:]).T
-            contrib = t_mu[p, q] * np.einsum("uj,kv->uvjk", A[p], B[q].conj())
-            M_A += contrib
-
-    # Route B: M_B^R[r,s,j1,j2] = sum_{p',q'} conj(t[p',q']) * conj(B[p',j1,r]) * A[q',s,j2]
-    # site-i binding for B: kappa=p', site-j binding for A: kappa=q'
-    M_B = np.zeros((n_v, n_u, n_j, n_j), dtype=DTYPE_COMPLEX)
-    for pp in range(n_orb):
-        for qp in range(n_orb):
-            t_conj = t_mu[pp, qp].conj()
-            if abs(t_conj) < EPS_ZERO:
-                continue
-            # B[pp] shape (n_j, n_v) -> conj(B[pp][j1, r]) for site-i
-            # A[qp] shape (n_u, n_j) -> A[qp][s, j2] for site-j
-            # conj(B[pp])[j1,r] * A[qp][s,j2] -> M_B[r,s,j1,j2]
-            M_B += t_conj * np.einsum("ar,sb->rsab", B[pp].conj(), A[qp])
+    # Route B: M_B[r,s,j1,j2] = sum_{p,q} conj(t[p,q]) * conj(B[p,j1,r]) * A[q,s,j2]
+    M_B = np.einsum("pq,par,qsb->rsab", t_mu.conj(), B.conj(), A, optimize=True)
 
     logger.info("L2 complete: M_A shape=%s, M_B shape=%s", M_A.shape, M_B.shape)
 
@@ -132,44 +110,39 @@ def build_L3(
     n_v = M_A.shape[1]
 
     # Flatten M_A for matrix contraction (04-02 §2 recommended form)
-    J2 = n_j * n_j
-    YA = M_A.reshape(n_u * n_v, J2)
+    YA = M_A.reshape(n_u * n_v, n_j * n_j)
 
-    # Build denominator vector for route A
-    denom_A = np.zeros(n_u * n_v)
-    for u in range(n_u):
-        for v in range(n_v):
-            E_uv = E_u_np1[u] + E_u_nm1[v]
-            Delta_uv = -E_uv  # E0 - E_uv with E0=0
-            if (not np.isfinite(Delta_uv)) or (abs(Delta_uv) < EPS_ZERO):
-                raise NumError(
-                    "FXE-NUM-002",
-                    f"Invalid denominator Delta_uv at u={u}, v={v}",
-                    actual={"Delta_uv": float(Delta_uv)},
-                )
-            denom_A[u * n_v + v] = Delta_uv
+    # Build denominator vector for route A via broadcasting: Delta_uv = -(E_np1[u] + E_nm1[v])
+    denom_A = -(E_u_np1[:, None] + E_u_nm1[None, :]).ravel()
+    bad_A = ~np.isfinite(denom_A) | (np.abs(denom_A) < EPS_ZERO)
+    if np.any(bad_A):
+        idx = int(np.argmax(bad_A))
+        u, v = divmod(idx, n_v)
+        raise NumError(
+            "FXE-NUM-002",
+            f"Invalid denominator Delta_uv at u={u}, v={v}",
+            actual={"Delta_uv": float(denom_A[idx])},
+        )
 
     w_A = 1.0 / denom_A
     hA = YA.conj().T @ (w_A[:, None] * YA)
 
-    # Route B denominators: Delta_rs = E0 - E_rs = -(E_r^{n-1}[r] + E_s^{n+1}[s])
+    # Route B denominators: Delta_rs = -(E_nm1[r] + E_np1[s])
     n_r = M_B.shape[0]  # n_v from nm1 sector
     n_s = M_B.shape[1]  # n_u from np1 sector
 
-    YB = M_B.reshape(n_r * n_s, J2)
+    YB = M_B.reshape(n_r * n_s, n_j * n_j)
 
-    denom_B = np.zeros(n_r * n_s)
-    for r in range(n_r):
-        for s in range(n_s):
-            E_rs = E_u_nm1[r] + E_u_np1[s]
-            Delta_rs = -E_rs
-            if (not np.isfinite(Delta_rs)) or (abs(Delta_rs) < EPS_ZERO):
-                raise NumError(
-                    "FXE-NUM-002",
-                    f"Invalid denominator Delta_rs at r={r}, s={s}",
-                    actual={"Delta_rs": float(Delta_rs)},
-                )
-            denom_B[r * n_s + s] = Delta_rs
+    denom_B = -(E_u_nm1[:, None] + E_u_np1[None, :]).ravel()
+    bad_B = ~np.isfinite(denom_B) | (np.abs(denom_B) < EPS_ZERO)
+    if np.any(bad_B):
+        idx = int(np.argmax(bad_B))
+        r, s = divmod(idx, n_s)
+        raise NumError(
+            "FXE-NUM-002",
+            f"Invalid denominator Delta_rs at r={r}, s={s}",
+            actual={"Delta_rs": float(denom_B[idx])},
+        )
 
     w_B = 1.0 / denom_B
     hB = YB.conj().T @ (w_B[:, None] * YB)

@@ -10,12 +10,13 @@ import json
 import datetime
 from typing import Any
 
+from fexchange.utils.constants import RUN_SCHEMA_VERSION, STANDARD_VERSION
 
 # ---------------------------------------------------------------------------
 # Domain set (00-03 §3)
 # ---------------------------------------------------------------------------
 _VALID_DOMAINS = frozenset(
-    {"INPUT", "SCHEMA", "BIND", "IO", "NUM", "PHYS", "W90", "LEGACY", "RUNTIME"}
+    {"INPUT", "SCHEMA", "BIND", "IO", "NUM", "PHYS", "W90", "RUNTIME"}
 )
 
 
@@ -33,8 +34,8 @@ class FexchangeError(Exception):
         op: str = "",
         run_id: str = "",
         key: str = "",
-        schema_version: str = "fxe.run_input.v1",
-        standard_version: str = "2026-02",
+        schema_version: str = RUN_SCHEMA_VERSION,
+        standard_version: str = STANDARD_VERSION,
         expected: dict[str, Any] | None = None,
         actual: dict[str, Any] | None = None,
         paths: dict[str, Any] | None = None,
@@ -117,10 +118,6 @@ class PhysError(FexchangeError):
 
 class W90Error(FexchangeError):
     """FXE-W90-*: Wannier90 parsing/mapping failures."""
-
-
-class LegacyError(FexchangeError):
-    """FXE-LEGACY-*: legacy access blocked."""
 
 
 class RuntimeError_(FexchangeError):

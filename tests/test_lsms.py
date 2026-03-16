@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from fexchange.representations.lsms import build_lsms
+from fexchange.spectrum.lsms import build_lsms
 from fexchange.utils.checks import check_orthonormal
 
 

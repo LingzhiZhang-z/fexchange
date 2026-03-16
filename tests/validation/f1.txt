@@ -1,0 +1,131 @@
+======================================================================
+  fexchange LSMS/LSJM Validation Report
+  Configuration: f1  (n_ele=1, dim=14)
+  F2 : F4 : F6 = 12.98 : 8.163 : 5.878
+  r42 = 0.628891,  r62 = 0.452851
+  Timestamp: 2026-03-13 18:51:44
+======================================================================
+
+--- Build ---
+
+  Build completed in 0.2s
+  Internal F2=12.331217, F4=7.754986, F6=5.584198
+
+--- Numerical Self-Consistency ---
+
+  [PASS] LSMS dimension: got 14, expected 14
+  [PASS] LSJM dimension: got 14, expected 14
+  [PASS] LSMS orthonormality: residual = 0.00e+00
+  [PASS] LSJM orthonormality: residual = 2.09e-15
+  [PASS] Term multiplicities: max |count-expected| = 0
+
+--- LSMS Checks ---
+
+  LSMS Term Summary
+
+  alpha  L    S   n        <L2>       <S2>       <H0>       <H2>       <H4>       <H6>
+  -----  -  ---  --  ----------  ---------  ---------  ---------  ---------  ---------
+      0  3  1/2  14  +12.000000  +0.750000  +0.000000  +0.000000  +0.000000  +0.000000
+
+  LSMS State Lz/Sz
+
+  alpha  L    S  ML    MS       <Lz>       <Sz>
+  -----  -  ---  --  ----  ---------  ---------
+      0  3  1/2  -3  -1/2  -3.000000  -0.500000
+      0  3  1/2  -3   1/2  -3.000000  +0.500000
+      0  3  1/2  -2  -1/2  -2.000000  -0.500000
+      0  3  1/2  -2   1/2  -2.000000  +0.500000
+      0  3  1/2  -1  -1/2  -1.000000  -0.500000
+      0  3  1/2  -1   1/2  -1.000000  +0.500000
+      0  3  1/2   0  -1/2  +0.000000  -0.500000
+      0  3  1/2   0   1/2  +0.000000  +0.500000
+      0  3  1/2   1  -1/2  +1.000000  -0.500000
+      0  3  1/2   1   1/2  +1.000000  +0.500000
+      0  3  1/2   2  -1/2  +2.000000  -0.500000
+      0  3  1/2   2   1/2  +2.000000  +0.500000
+      0  3  1/2   3  -1/2  +3.000000  -0.500000
+      0  3  1/2   3   1/2  +3.000000  +0.500000
+
+  [PASS] LSMS L2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS L2 residual: max residual = 0.00e+00
+  [PASS] LSMS L2 label/stored consistency: max |diag-expected| = 1.78e-15
+  [PASS] LSMS S2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS S2 residual: max residual = 0.00e+00
+  [PASS] LSMS S2 label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS Lz diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS Lz residual: max residual = 0.00e+00
+  [PASS] LSMS Lz label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS Sz diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS Sz residual: max residual = 0.00e+00
+  [PASS] LSMS Sz label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS H0 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS H0 residual: max residual = 0.00e+00
+  [PASS] LSMS H0 label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS H2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS H2 residual: max residual = 0.00e+00
+  [PASS] LSMS H2 label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS H4 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS H4 residual: max residual = 0.00e+00
+  [PASS] LSMS H4 label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS H6 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSMS H6 residual: max residual = 0.00e+00
+  [PASS] LSMS H6 label/stored consistency: max |diag-expected| = 0.00e+00
+  [PASS] LSMS term eigenvalue spread: max spread across terms = 1.78e-15
+
+--- LSJM Checks ---
+
+  LSJM Multiplet Summary
+
+  alpha  L    S    J  n        <L2>       <S2>        <J2>    <O_soc>  term max|Im diag|  term max residual
+  -----  -  ---  ---  -  ----------  ---------  ----------  ---------  -----------------  -----------------
+      0  3  1/2  5/2  6  +12.000000  +0.750000   +8.750000  -2.000000           0.00e+00           1.94e-15
+      0  3  1/2  7/2  8  +12.000000  +0.750000  +15.750000  +1.500000           0.00e+00           1.94e-15
+
+  LSJM State Jz
+
+  alpha  L    S    J     M       <Jz>
+  -----  -  ---  ---  ----  ---------
+      0  3  1/2  5/2  -5/2  -2.500000
+      0  3  1/2  5/2  -3/2  -1.500000
+      0  3  1/2  5/2  -1/2  -0.500000
+      0  3  1/2  5/2   1/2  +0.500000
+      0  3  1/2  5/2   3/2  +1.500000
+      0  3  1/2  5/2   5/2  +2.500000
+      0  3  1/2  7/2  -7/2  -3.500000
+      0  3  1/2  7/2  -5/2  -2.500000
+      0  3  1/2  7/2  -3/2  -1.500000
+      0  3  1/2  7/2  -1/2  -0.500000
+      0  3  1/2  7/2   1/2  +0.500000
+      0  3  1/2  7/2   3/2  +1.500000
+      0  3  1/2  7/2   5/2  +2.500000
+      0  3  1/2  7/2   7/2  +3.500000
+
+  [PASS] LSJM L2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSJM L2 residual: max residual = 1.04e-14
+  [PASS] LSJM L2 label consistency: max |diag-expected| = 1.07e-14
+  [PASS] LSJM S2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSJM S2 residual: max residual = 6.47e-16
+  [PASS] LSJM S2 label consistency: max |diag-expected| = 6.66e-16
+  [PASS] LSJM J2 diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSJM J2 residual: max residual = 1.28e-14
+  [PASS] LSJM J2 label consistency: max |diag-expected| = 1.07e-14
+  [PASS] LSJM Jz diagonal imaginary part: max |Im diag| = 0.00e+00
+  [PASS] LSJM Jz residual: max residual = 2.66e-15
+  [PASS] LSJM Jz label consistency: max |diag-expected| = 2.66e-15
+  [INFO] LSJM global O_soc diagonal imaginary part: max |Im diag| = 0.00e+00
+  [INFO] LSJM global O_soc residual: max residual = 2.21e-15
+  [PASS] LSJM term O_soc diagonal imaginary part (alpha=0, L=3, S=0.5): max |Im diag| = 0.00e+00
+  [PASS] LSJM term O_soc residual (alpha=0, L=3, S=0.5): max residual = 1.94e-15
+  [PASS] LSJM term O_soc stored consistency (alpha=0, L=3, S=0.5): max |diag-expected| = 2.00e-15
+  [PASS] LSJM multiplet eigenvalue spread: max spread across multiplets = 7.11e-15
+
+  LSJM O_soc Global Reference
+
+  max |Im diag| = 0.00e+00
+  max residual = 2.21e-15
+  diag preview = [-2.000000, -2.000000, -2.000000, -2.000000, -2.000000, -2.000000, +1.500000, +1.500000]
+
+--- Summary ---
+
+  46 PASSED, 0 FAILED, 2 INFO
+  Elapsed (n_ele=1): 0.2s

@@ -30,17 +30,15 @@ from fexchange.pipeline import stages as _stages
 from fexchange.pipeline.validation import (
     validate_upstream_artifacts as _validate_upstream_artifacts,
 )
+from fexchange.utils.constants import LEVELS, N_ORB
 from fexchange.utils.errors import (
     FexchangeError,
     InputError,
     RuntimeError_,
 )
 from fexchange.utils.numerics import numerics_meta
-from fexchange.utils.parallel import ParallelContext
 
 logger = logging.getLogger("fexchange")
-
-LEVELS = ("LMSM", "LSJM", "L0", "L1", "L2", "L3", "L4")
 _FULL_KW = ("n_ele", "n_orb", "r42", "r62", "scheme")
 _STAGE_DISPATCH: dict[str, tuple[Callable[..., Any], tuple[str, ...]]] = {
     "LMSM": (_stages.ensure_lsms_all_three, _FULL_KW),
@@ -110,13 +108,12 @@ def main(argv: list[str] | None = None) -> int:
 def _run_pipeline(toml_path: str) -> int:
     t0 = time.time()
     cfg = load_run_input(toml_path)
-    ctx = ParallelContext()
 
     output_root = cfg["paths"]["output_root"]
     n_ele, r42, r62, scheme = _resolve_core_params(cfg)
-    n_orb = 14
+    n_orb = N_ORB
 
-    _preflight(cfg, ctx, n_ele=n_ele, r42=r42, r62=r62, scheme=scheme)
+    _preflight(cfg, n_ele=n_ele, r42=r42, r62=r62, scheme=scheme)
 
     state: dict[str, Any] = {}
     for level in LEVELS:
@@ -130,127 +127,58 @@ def _run_pipeline(toml_path: str) -> int:
             r62=r62,
             cfg=cfg,
         )
-        _set_level_sharding(ctx, level)
         logger.info("=== executing %s ===", level)
 
-        _execute_level(
-            level,
-            cfg,
-            ctx,
-            state,
-            n_ele=n_ele,
-            n_orb=n_orb,
-            r42=r42,
-            r62=r62,
-            scheme=scheme,
-        )
+        _execute_level(level, cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
 
-        _emit_stage_summary(
-            level=level,
-            key=level_key,
-            elapsed_s=time.time() - t_level,
-            ctx=ctx,
-        )
+        _emit_stage_summary(level=level, key=level_key, elapsed_s=time.time() - t_level)
 
     total = time.time() - t0
     logger.info("pipeline complete in %.3fs", total)
-    if ctx.is_root:
-        print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}")
+    print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}")
     return 0
 
 
 def _preflight(
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     *,
     n_ele: int,
     r42: float,
     r62: float,
     scheme: str,
 ) -> None:
-    """
-    Root performs preflight, broadcasts verdict, all ranks obey (00-06 §5).
-    """
-    plan: dict[str, Any] = {"ok": True, "errors": []}
-    if ctx.is_root:
-        try:
-            start_level = cfg["runtime"]["start_level"]
-            required_upstream = upstream_for_start_level(start_level)
-            _validate_upstream_artifacts(
-                cfg,
-                required_upstream,
-                n_ele=n_ele,
-                r42=r42,
-                r62=r62,
-                scheme=scheme,
-            )
-            plan["required_upstream"] = list(required_upstream)
-            plan["window"] = (
-                cfg["runtime"]["start_level"],
-                cfg["runtime"]["end_level"],
-            )
-        except FexchangeError as exc:
-            plan = {"ok": False, "error_payload": exc.payload()}
-
-    plan = ctx.bcast(plan, root=ctx.root_rank)
-    if not plan.get("ok", False):
-        payload = plan.get("error_payload", {})
-        if payload:
-            raise RuntimeError_(
-                payload.get("code", "FXE-RUNTIME-001"),
-                payload.get("message", "Preflight failed"),
-                **{k: payload[k] for k in _PAYLOAD_KEYS if k in payload},
-            )
-        raise RuntimeError_("FXE-RUNTIME-001", "Preflight failed without payload", stage="preflight")
-    ctx.barrier()
+    start_level = cfg["runtime"]["start_level"]
+    required_upstream = upstream_for_start_level(start_level)
+    _validate_upstream_artifacts(
+        cfg,
+        required_upstream,
+        n_ele=n_ele,
+        r42=r42,
+        r62=r62,
+        scheme=scheme,
+    )
 
 
 def _execute_level(
     level: str,
     cfg: dict[str, Any],
-    ctx: ParallelContext,
     state: dict[str, Any],
     **kw: Any,
 ) -> None:
     if level not in _STAGE_DISPATCH:
         raise InputError("FXE-INPUT-003", f"Unknown level: {level}", actual={"level": level})
     fn, keys = _STAGE_DISPATCH[level]
-
-    # Current MPI contract implementation is root-only execution per stage.
-    if ctx.parallel_enabled and not ctx.is_root:
-        ctx.barrier()
-        return
-
-    fn(cfg, ctx, state, **{k: kw[k] for k in keys})
-    if ctx.parallel_enabled:
-        ctx.barrier()
+    fn(cfg, state, **{k: kw[k] for k in keys})
 
 
-def _emit_stage_summary(*, level: str, key: str, elapsed_s: float, ctx: ParallelContext) -> None:
+def _emit_stage_summary(*, level: str, key: str, elapsed_s: float) -> None:
     summary = {
         "level": level,
         "key": key,
         "elapsed_s": elapsed_s,
         "numerics_meta": numerics_meta(),
-        "parallel_meta": ctx.meta(),
     }
     logger.info("stage_summary=%s", json.dumps(summary, default=str))
-
-
-def _set_level_sharding(ctx: ParallelContext, level: str) -> None:
-    axis = {
-        "LMSM": "(alpha,L,S)",
-        "LSJM": "(alpha,L,S)",
-        "L0": "kappa",
-        "L1": "(u,v)",
-        "L2": "(u,v)|(r,s)",
-        "L3": "denominator_pairs",
-        "L4": "root_serial_default",
-    }.get(level, "root_serial")
-    ctx.set_sharding(
-        axis,
-        [{"rank": ctx.rank, "scope": "full"}],
-    )
 
 
 def _safe_append_error(output_root: str, payload: dict[str, Any]) -> None:

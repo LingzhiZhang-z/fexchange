@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from fexchange.core.multipole import analyze_multipole_carrying, format_multipole_summary
+from fexchange.spectrum.multipole import analyze_multipole_carrying, format_multipole_summary
 
 
 def _analyze_doublet_j_half() -> dict:

@@ -1,0 +1,82 @@
+=== f1 Analytical Validation ===
+--- f1 LSMS ---
+  [PASS] ML=-3 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-3 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=-2 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-2 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=-1 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-1 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+0 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+0 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+1 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+1 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+2 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+2 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+3 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+3 MS=+1/2  overlap=1.0000000000
+  [PASS] coef_F0: max|delta|=0.00e+00
+  [PASS] coef_F2: max|delta|=0.00e+00
+  [PASS] coef_F4: max|delta|=0.00e+00
+  [PASS] coef_F6: max|delta|=0.00e+00
+  f1 LSMS overlap: 14/14
+--- f1 LSJM ---
+  [PASS] J=2.5 M=-2.5  overlap=1.0000000000
+  [PASS] J=2.5 M=-1.5  overlap=1.0000000000
+  [PASS] J=2.5 M=-0.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+0.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+1.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-3.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-1.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-0.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+0.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+1.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+3.5  overlap=1.0000000000
+  [PASS] J=2.5 coef_zeta: fex=-2.0000000000 ana=-2.0000000000 delta=8.88e-16
+  [PASS] J=3.5 coef_zeta: fex=+1.5000000000 ana=+1.5000000000 delta=0.00e+00
+  f1 LSJM overlap: 14/14
+=== f1 total FAIL: 0 ===
+
+=== f13 Analytical Validation ===
+--- f13 LSMS ---
+  [PASS] ML=-3 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-3 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=-2 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-2 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=-1 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=-1 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+0 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+0 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+1 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+1 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+2 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+2 MS=+1/2  overlap=1.0000000000
+  [PASS] ML=+3 MS=-1/2  overlap=1.0000000000
+  [PASS] ML=+3 MS=+1/2  overlap=1.0000000000
+  [PASS] coef_F0: max|delta|=1.42e-14
+  [PASS] coef_F2: max|delta|=1.78e-15
+  [PASS] coef_F4: max|delta|=1.11e-15
+  [PASS] coef_F6: max|delta|=1.55e-15
+  f13 LSMS overlap: 14/14
+--- f13 LSJM ---
+  [PASS] J=2.5 M=-2.5  overlap=1.0000000000
+  [PASS] J=2.5 M=-1.5  overlap=1.0000000000
+  [PASS] J=2.5 M=-0.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+0.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+1.5  overlap=1.0000000000
+  [PASS] J=2.5 M=+2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-3.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-1.5  overlap=1.0000000000
+  [PASS] J=3.5 M=-0.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+0.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+1.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+2.5  overlap=1.0000000000
+  [PASS] J=3.5 M=+3.5  overlap=1.0000000000
+  [PASS] J=2.5 coef_zeta: fex=+2.0000000000 ana=+2.0000000000 delta=8.88e-16
+  [PASS] J=3.5 coef_zeta: fex=-1.5000000000 ana=-1.5000000000 delta=0.00e+00
+  f13 LSJM overlap: 14/14
+=== f13 total FAIL: 0 ===
+

@@ -8,21 +8,71 @@ Spec reference:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
-import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.core.fock_basis import N_ORB
 from fexchange.utils.checks import check_unitary, check_hermitian
+from fexchange.utils.constants import N_ORB
 from fexchange.utils.errors import BindError, W90Error
 from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_UNITARY, EPS_ZERO, EPS_HERM
 
 logger = logging.getLogger("fexchange")
+
+
+@dataclass(frozen=True)
+class _ValidatedConfig:
+    soc_mode: str
+    energy_unit: str
+    energy_scale: float
+    orbital_basis: str
+    orbital_order_id: str
+    delta_mode: str
+    delta_reduction: str
+    spin_completion_rule: str | None
+
+
+@dataclass(frozen=True)
+class _SiteMap:
+    atom_ids: tuple[int, ...]
+    per_atom: int
+    f_dim_raw: int
+    spin_order_id: str
+    atom_to_start: dict[int, int]
+    f_i: int
+    f_j: int
+    f_i_idx: tuple[int, ...]
+    f_j_idx: tuple[int, ...]
+    c_i: tuple[int, int, int]
+    c_j: tuple[int, int, int]
+    R_ij: tuple[int, int, int]
+    ligand_indices: tuple[int, ...]
+    ligand_cells: tuple[tuple[int, int, int], ...]
+
+
+@dataclass(frozen=True)
+class _LigandChannel:
+    t_i: NDArray[np.complexfloating]
+    t_j: NDArray[np.complexfloating]
+    delta_from_onsite: NDArray[np.floating]
+    ligand_atom: int
+    ligand_cell: tuple[int, int, int]
+    wannier_index: int
+    channel_index: int
+
+
+@dataclass(frozen=True)
+class _LigandCorrection:
+    matrix: NDArray[np.complexfloating]
+    map_lig: list[dict[str, Any]]
+    R_io: list[tuple[int, int, int]]
+    R_jo: list[tuple[int, int, int]]
 
 
 def parse_hr_dat(path: str | Path) -> dict[str, Any]:
@@ -271,7 +321,7 @@ def build_U_r2c(
         ],
         dtype=DTYPE_COMPLEX,
     )
-    U = np.kron(tmp, np.eye(2, dtype=DTYPE_COMPLEX)) if spinor else tmp
+    U = np.kron(tmp.T, np.eye(2, dtype=DTYPE_COMPLEX)) if spinor else tmp.T
     check_unitary(U, label="U_r2c", eps=EPS_UNITARY, module="wannier90")
     return U
 
@@ -300,25 +350,46 @@ def apply_basis_transform(
     return U_r2c.T @ h_real @ U_r2c.conj()
 
 
+def w90_extract(cfg: dict[str, Any], *, n_orb: int = N_ORB) -> dict[str, Any]:
+    """
+    Extract hopping matrix and local Hamiltonian from Wannier90 outputs.
+
+    Returns a dict with keys ``t_mu``, ``h_local`` and ``meta``.
+    """
+    logger.info("w90_extract start: soc_mode=%s hr=%s", cfg.get("soc_mode"), cfg.get("hr_path"))
+    validated = _validate_config(cfg, n_orb=n_orb)
+    H_R, num_wann = _load_wannier_data(cfg, energy_scale=validated.energy_scale)
+    site_map = _build_site_map(cfg["all_wannier_atom_indices"], num_wann, validated.soc_mode, n_orb, cfg)
+    H0 = _get_onsite_matrix(H_R)
+    h_local_raw, eps_f_i, eps_f_j = _extract_onsite(H0, site_map)
+    t_direct = extract_hopping_block(H_R, list(site_map.f_i_idx), list(site_map.f_j_idx), site_map.R_ij)
+    ligand = _compute_ligand_correction(H_R, H0, site_map, cfg, validated.soc_mode, validated.energy_scale, eps_f_i, eps_f_j)
+    t_mu = _finalize_reduced_matrix(t_direct + ligand.matrix, validated, n_orb=n_orb, label="t_mu")
+    h_local = _finalize_reduced_matrix(h_local_raw, validated, n_orb=n_orb, label="h_local")
+    meta = _build_metadata(cfg, validated, site_map, ligand, num_wann=num_wann)
+    logger.info("w90_extract done: t_mu_shape=%s h_local_shape=%s", t_mu.shape, h_local.shape)
+    return {"t_mu": t_mu, "h_local": h_local, "meta": meta}
+
+
 def load_t_mu_from_wannier90(
     w90_cfg: dict[str, Any],
     *,
     n_orb: int = N_ORB,
     return_payload: bool = False,
 ) -> NDArray[np.complexfloating] | dict[str, Any]:
-    """
-    Build one-bond effective f-f hopping matrix ``t_mu`` from Wannier90 inputs.
+    """Backward-compatible wrapper around :func:`w90_extract`."""
+    result = w90_extract(w90_cfg, n_orb=n_orb)
+    if return_payload:
+        return {"t_mu": result["t_mu"], "meta": result["meta"]}
+    return result["t_mu"]
 
-    This follows the one-run/one-bond contract and applies:
-    - relative-cell fetch rule,
-    - direct f-f term,
-    - optional ligand-mediated second-order correction with configurable
-      denominator policy.
-    """
-    required = [
+
+def _validate_config(cfg: dict[str, Any], *, n_orb: int) -> _ValidatedConfig:
+    required = (
         "soc_mode",
         "hr_path",
         "win_path",
+        "orbital_basis",
         "orbital_order_id",
         "energy_unit",
         "f_site_i",
@@ -330,304 +401,430 @@ def load_t_mu_from_wannier90(
         "all_wannier_atom_indices",
         "delta_mode",
         "delta_reduction",
-    ]
+    )
     for key in required:
-        if key not in w90_cfg:
+        if key not in cfg:
             raise W90Error("FXE-W90-001", f"Missing Wannier90 config field: {key}")
-
-    soc_mode = str(w90_cfg["soc_mode"])
+    if n_orb != N_ORB:
+        raise W90Error("FXE-W90-003", "Wannier90 extraction requires n_orb=14", expected={"n_orb": N_ORB}, actual={"n_orb": n_orb})
+    soc_mode = str(cfg["soc_mode"])
     if soc_mode not in {"with_soc", "without_soc"}:
-        raise W90Error(
-            "FXE-W90-002",
-            "soc_mode must be 'with_soc' or 'without_soc'",
-            actual={"soc_mode": soc_mode},
-        )
-    if soc_mode == "without_soc":
-        rule = str(w90_cfg.get("spin_completion_rule", ""))
-        if rule != "up_raw_down_conj_zero_flip_v1":
-            raise W90Error(
-                "FXE-W90-002",
-                "spin_completion_rule must be 'up_raw_down_conj_zero_flip_v1' when soc_mode='without_soc'",
-                expected={"spin_completion_rule": "up_raw_down_conj_zero_flip_v1"},
-                actual={"spin_completion_rule": rule},
-            )
+        raise W90Error("FXE-W90-002", "soc_mode must be 'with_soc' or 'without_soc'", actual={"soc_mode": soc_mode})
+    orbital_basis = str(cfg["orbital_basis"])
+    if orbital_basis != "real_harmonic_default_w90":
+        raise W90Error("FXE-W90-003", "Unsupported orbital_basis", expected={"orbital_basis": "real_harmonic_default_w90"}, actual={"orbital_basis": orbital_basis})
+    delta_mode = str(cfg["delta_mode"])
+    delta_reduction = str(cfg["delta_reduction"])
+    if delta_mode not in {"manual", "from_onsite"}:
+        raise W90Error("FXE-W90-002", "delta_mode must be 'manual' or 'from_onsite'", actual={"delta_mode": delta_mode})
+    if delta_reduction not in {"channelwise", "global_mean"}:
+        raise W90Error("FXE-W90-002", "delta_reduction must be 'channelwise' or 'global_mean'", actual={"delta_reduction": delta_reduction})
+    spin_rule = cfg.get("spin_completion_rule")
+    if soc_mode == "without_soc" and spin_rule != "up_raw_down_conj_zero_flip_v1":
+        raise W90Error("FXE-W90-002", "spin_completion_rule must be 'up_raw_down_conj_zero_flip_v1' when soc_mode='without_soc'", expected={"spin_completion_rule": "up_raw_down_conj_zero_flip_v1"}, actual={"spin_completion_rule": spin_rule})
+    return _ValidatedConfig(
+        soc_mode=soc_mode,
+        energy_unit=str(cfg["energy_unit"]),
+        energy_scale=_energy_scale_to_ev(str(cfg["energy_unit"])),
+        orbital_basis=orbital_basis,
+        orbital_order_id=str(cfg["orbital_order_id"]),
+        delta_mode=delta_mode,
+        delta_reduction=delta_reduction,
+        spin_completion_rule=None if spin_rule is None else str(spin_rule),
+    )
 
-    energy_unit = str(w90_cfg["energy_unit"])
-    energy_scale = _energy_scale_to_ev(energy_unit)
 
-    hr = parse_hr_dat(w90_cfg["hr_path"])
-    win = parse_win(w90_cfg["win_path"])
+def _load_wannier_data(
+    cfg: dict[str, Any],
+    *,
+    energy_scale: float,
+) -> tuple[dict[tuple[int, int, int], NDArray[np.complexfloating]], int]:
+    hr = parse_hr_dat(cfg["hr_path"])
+    win = parse_win(cfg["win_path"])
     if int(hr["num_wann"]) != int(win["num_wann"]):
-        raise W90Error(
-            "FXE-W90-003",
-            "num_wann mismatch between hr and win",
-            actual={"hr_num_wann": hr["num_wann"], "win_num_wann": win["num_wann"]},
-        )
+        raise W90Error("FXE-W90-003", "num_wann mismatch between hr and win", actual={"hr_num_wann": hr["num_wann"], "win_num_wann": win["num_wann"]})
+    H_R = {R: energy_scale * np.asarray(mat, dtype=np.complex128) for R, mat in hr["H_R"].items()}
+    return H_R, int(hr["num_wann"])
 
-    H_R_raw: dict[tuple[int, int, int], NDArray[np.complexfloating]] = hr["H_R"]
-    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]] = {
-        R: energy_scale * np.asarray(mat, dtype=np.complex128)
-        for R, mat in H_R_raw.items()
-    }
-    num_wann = int(hr["num_wann"])
-    atom_ids = list(w90_cfg["all_wannier_atom_indices"])
-    if len(atom_ids) < 2:
-        raise W90Error(
-            "FXE-W90-002",
-            "all_wannier_atom_indices must include at least two atoms",
-            actual={"all_wannier_atom_indices": atom_ids},
-        )
-    if num_wann % len(atom_ids) != 0:
-        raise W90Error(
-            "FXE-W90-002",
-            "Cannot infer equal per-atom Wannier block from num_wann/all_wannier_atom_indices",
-            actual={"num_wann": num_wann, "n_atoms": len(atom_ids)},
-        )
-    per_atom = num_wann // len(atom_ids)
-    if soc_mode == "with_soc":
-        f_dim_raw = n_orb
-        spin_order_id = "sigma(-1/2,+1/2)_interleaved_v1"
-    else:
-        if n_orb % 2 != 0:
-            raise W90Error(
-                "FXE-W90-002",
-                "n_orb must be even in soc_mode='without_soc' expansion",
-                actual={"n_orb": n_orb},
-            )
-        f_dim_raw = n_orb // 2
-        spin_order_id = "up_raw_down_conj_zero_flip_v1"
+
+def _build_site_map(
+    atom_ids: list[int],
+    num_wann: int,
+    soc_mode: str,
+    n_orb: int,
+    cfg: dict[str, Any],
+) -> _SiteMap:
+    atoms = tuple(int(atom) for atom in atom_ids)
+    _validate_atom_selection(atoms)
+    if num_wann % len(atoms) != 0:
+        raise W90Error("FXE-W90-002", "Cannot infer equal per-atom Wannier block", actual={"num_wann": num_wann, "n_atoms": len(atoms)})
+    per_atom = num_wann // len(atoms)
+    f_dim_raw, spin_order_id = _raw_f_dim(soc_mode, n_orb)
     if per_atom < f_dim_raw:
-        raise W90Error(
-            "FXE-W90-002",
-            "Per-atom Wannier block is smaller than required f-manifold size",
-            actual={"per_atom": per_atom, "required_n_orb": f_dim_raw},
-        )
-
-    atom_to_start = {atom: idx * per_atom for idx, atom in enumerate(atom_ids)}
-    f_i = int(w90_cfg["f_site_i"])
-    f_j = int(w90_cfg["f_site_j"])
+        raise W90Error("FXE-W90-002", "Per-atom Wannier block is smaller than required f-manifold size", actual={"per_atom": per_atom, "required_n_orb": f_dim_raw})
+    atom_to_start = {atom: idx * per_atom for idx, atom in enumerate(atoms)}
+    f_i = int(cfg["f_site_i"])
+    f_j = int(cfg["f_site_j"])
     if f_i == f_j:
         raise W90Error("FXE-W90-002", "f_site_i and f_site_j must be different")
-    if f_i not in atom_to_start or f_j not in atom_to_start:
-        raise W90Error(
-            "FXE-W90-002",
-            "Selected f sites are not included in all_wannier_atom_indices",
-            actual={"f_site_i": f_i, "f_site_j": f_j, "all_wannier_atom_indices": atom_ids},
-        )
+    _require_atom_in_map(atom_to_start, f_i, "f_site_i")
+    _require_atom_in_map(atom_to_start, f_j, "f_site_j")
+    ligand_indices, ligand_cells = _parse_ligand_sites(cfg, atom_to_start, f_i=f_i, f_j=f_j)
+    c_i = _cell_triplet(cfg["f_site_i_cell"], "f_site_i_cell")
+    c_j = _cell_triplet(cfg["f_site_j_cell"], "f_site_j_cell")
+    return _SiteMap(
+        atom_ids=atoms,
+        per_atom=per_atom,
+        f_dim_raw=f_dim_raw,
+        spin_order_id=spin_order_id,
+        atom_to_start=atom_to_start,
+        f_i=f_i,
+        f_j=f_j,
+        f_i_idx=_site_indices(atom_to_start, f_i, f_dim_raw),
+        f_j_idx=_site_indices(atom_to_start, f_j, f_dim_raw),
+        c_i=c_i,
+        c_j=c_j,
+        R_ij=(c_j[0] - c_i[0], c_j[1] - c_i[1], c_j[2] - c_i[2]),
+        ligand_indices=ligand_indices,
+        ligand_cells=ligand_cells,
+    )
 
-    f_i_idx = list(range(atom_to_start[f_i], atom_to_start[f_i] + f_dim_raw))
-    f_j_idx = list(range(atom_to_start[f_j], atom_to_start[f_j] + f_dim_raw))
-    c_i = _cell_triplet(w90_cfg["f_site_i_cell"], "f_site_i_cell")
-    c_j = _cell_triplet(w90_cfg["f_site_j_cell"], "f_site_j_cell")
-    R_ij = (c_j[0] - c_i[0], c_j[1] - c_i[1], c_j[2] - c_i[2])
 
-    t_direct = extract_hopping_block(H_R, f_i_idx, f_j_idx, R_ij)
-    ligand_indices = list(w90_cfg["ligand_indices"])
-    ligand_cells = list(w90_cfg["ligand_cells"])
-    if len(ligand_indices) != len(ligand_cells):
-        raise W90Error(
-            "FXE-W90-002",
-            "ligand_indices and ligand_cells length mismatch",
-            actual={"len_ligand_indices": len(ligand_indices), "len_ligand_cells": len(ligand_cells)},
-        )
+def _validate_atom_selection(atom_ids: tuple[int, ...]) -> None:
+    if len(atom_ids) < 2:
+        raise W90Error("FXE-W90-002", "all_wannier_atom_indices must include at least two atoms", actual={"all_wannier_atom_indices": list(atom_ids)})
+    if len(set(atom_ids)) != len(atom_ids):
+        raise W90Error("FXE-W90-002", "Duplicated atom index in all_wannier_atom_indices", actual={"all_wannier_atom_indices": list(atom_ids)})
+
+
+def _raw_f_dim(soc_mode: str, n_orb: int) -> tuple[int, str]:
+    if soc_mode == "with_soc":
+        return n_orb, "sigma(-1/2,+1/2)_interleaved_v1"
+    if n_orb % 2 != 0:
+        raise W90Error("FXE-W90-002", "n_orb must be even in soc_mode='without_soc'", actual={"n_orb": n_orb})
+    return n_orb // 2, "up_raw_down_conj_zero_flip_v1"
+
+
+def _require_atom_in_map(atom_to_start: dict[int, int], atom: int, field: str) -> None:
+    if atom not in atom_to_start:
+        raise W90Error("FXE-W90-002", f"{field} is not included in all_wannier_atom_indices", actual={field: atom, "all_wannier_atom_indices": sorted(atom_to_start)})
+
+
+def _parse_ligand_sites(
+    cfg: dict[str, Any],
+    atom_to_start: dict[int, int],
+    *,
+    f_i: int,
+    f_j: int,
+) -> tuple[tuple[int, ...], tuple[tuple[int, int, int], ...]]:
+    ligand_indices = tuple(int(atom) for atom in cfg["ligand_indices"])
+    if len(set(ligand_indices)) != len(ligand_indices):
+        raise W90Error("FXE-W90-002", "Duplicated atom index in ligand_indices", actual={"ligand_indices": list(ligand_indices)})
+    ligand_cells_raw = list(cfg["ligand_cells"])
+    if len(ligand_indices) != len(ligand_cells_raw):
+        raise W90Error("FXE-W90-002", "ligand_indices and ligand_cells length mismatch", actual={"len_ligand_indices": len(ligand_indices), "len_ligand_cells": len(ligand_cells_raw)})
+    for ligand_atom in ligand_indices:
+        if ligand_atom in (f_i, f_j):
+            raise W90Error("FXE-W90-002", "Ligand list must exclude f_site_i/f_site_j", actual={"ligand_atom": ligand_atom, "f_site_i": f_i, "f_site_j": f_j})
+        _require_atom_in_map(atom_to_start, ligand_atom, "ligand_indices[*]")
+    ligand_cells = tuple(_cell_triplet(cell, "ligand_cells[*]") for cell in ligand_cells_raw)
+    return ligand_indices, ligand_cells
+
+
+def _site_indices(atom_to_start: dict[int, int], atom: int, f_dim_raw: int) -> tuple[int, ...]:
+    start = atom_to_start[atom]
+    return tuple(range(start, start + f_dim_raw))
+
+
+def _get_onsite_matrix(
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]],
+) -> NDArray[np.complexfloating]:
     onsite_key = (0, 0, 0)
     if onsite_key not in H_R:
-        raise W90Error("FXE-W90-002", "Onsite block R=(0,0,0) is required for denominator policy")
+        raise W90Error("FXE-W90-002", "Onsite block R=(0,0,0) is required")
     H0 = np.asarray(H_R[onsite_key], dtype=np.complex128)
     check_hermitian(H0, label="H0_wannier", eps=EPS_HERM, module="wannier90")
+    return H0
 
-    eps_f_i = np.real(np.diag(H0)[f_i_idx])
-    eps_f_j = np.real(np.diag(H0)[f_j_idx])
 
-    channel_ti: list[NDArray[np.complexfloating]] = []
-    channel_tj: list[NDArray[np.complexfloating]] = []
-    channel_delta: list[NDArray[np.floating]] = []
-    map_lig: list[dict[str, Any]] = []
-    R_io_list: list[tuple[int, int, int]] = []
-    R_jo_list: list[tuple[int, int, int]] = []
+def _extract_onsite(
+    H0: NDArray[np.complexfloating],
+    site_map: _SiteMap,
+) -> tuple[NDArray[np.complexfloating], NDArray[np.floating], NDArray[np.floating]]:
+    h_onsite_i = H0[np.ix_(site_map.f_i_idx, site_map.f_i_idx)]
+    h_onsite_j = H0[np.ix_(site_map.f_j_idx, site_map.f_j_idx)]
+    h_local_raw = 0.5 * (h_onsite_i + h_onsite_j)
+    eps_diag = np.real(np.diag(H0))
+    return h_local_raw, eps_diag[list(site_map.f_i_idx)], eps_diag[list(site_map.f_j_idx)]
 
-    for ligand_atom, cell_raw in zip(ligand_indices, ligand_cells):
-        if ligand_atom in (f_i, f_j):
-            raise W90Error(
-                "FXE-W90-002",
-                "Ligand list must exclude f_site_i/f_site_j",
-                actual={"ligand_atom": ligand_atom, "f_site_i": f_i, "f_site_j": f_j},
-            )
-        if ligand_atom not in atom_to_start:
-            raise W90Error(
-                "FXE-W90-002",
-                "Ligand index not found in all_wannier_atom_indices",
-                actual={"ligand_atom": ligand_atom, "all_wannier_atom_indices": atom_ids},
-            )
-        c_o = _cell_triplet(cell_raw, "ligand_cells[*]")
-        R_io = (c_o[0] - c_i[0], c_o[1] - c_i[1], c_o[2] - c_i[2])
-        R_jo = (c_o[0] - c_j[0], c_o[1] - c_j[1], c_o[2] - c_j[2])
-        R_io_list.append(R_io)
-        R_jo_list.append(R_jo)
 
-        lig_idx = list(range(atom_to_start[ligand_atom], atom_to_start[ligand_atom] + per_atom))
-        t_i_lig = extract_hopping_block(H_R, f_i_idx, lig_idx, R_io)  # (f_dim_raw, per_atom)
-        t_j_lig = extract_hopping_block(H_R, f_j_idx, lig_idx, R_jo)  # (f_dim_raw, per_atom)
+def _compute_ligand_correction(
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]],
+    H0: NDArray[np.complexfloating],
+    site_map: _SiteMap,
+    cfg: dict[str, Any],
+    soc_mode: str,
+    energy_scale: float,
+    eps_f_i: NDArray[np.floating],
+    eps_f_j: NDArray[np.floating],
+) -> _LigandCorrection:
+    del soc_mode
+    channels, R_io, R_jo = _collect_ligand_channels(H_R, H0, site_map, eps_f_i, eps_f_j)
+    if not channels:
+        return _LigandCorrection(matrix=np.zeros((site_map.f_dim_raw, site_map.f_dim_raw), dtype=DTYPE_COMPLEX), map_lig=[], R_io=[], R_jo=[])
+    delta_tensors = _resolve_delta_tensors(channels, cfg, energy_scale=energy_scale, f_dim_raw=site_map.f_dim_raw)
+    correction = _accumulate_ligand_correction(channels, delta_tensors, f_dim_raw=site_map.f_dim_raw)
+    map_lig = [_ligand_meta(channel) for channel in channels]
+    logger.debug("Computed ligand correction with %d channels", len(channels))
+    return _LigandCorrection(matrix=correction, map_lig=map_lig, R_io=R_io, R_jo=R_jo)
 
-        eps_lig = np.real(np.diag(H0)[lig_idx])
-        for p in range(per_atom):
-            # Channel tensors for this ligand orbital p.
-            channel_ti.append(t_i_lig[:, p].copy())
-            channel_tj.append(t_j_lig[:, p].copy())
-            map_lig.append(
-                {
-                    "ligand_atom": int(ligand_atom),
-                    "ligand_cell": [int(c_o[0]), int(c_o[1]), int(c_o[2])],
-                    "wannier_index": int(lig_idx[p]),
-                    "channel_index": int(len(map_lig)),
-                }
-            )
 
-            delta_uv = np.zeros((f_dim_raw, f_dim_raw), dtype=float)
-            for u in range(f_dim_raw):
-                for v in range(f_dim_raw):
-                    du = eps_f_i[u] - eps_lig[p]
-                    dv = eps_f_j[v] - eps_lig[p]
-                    denom = du + dv
-                    if abs(denom) < EPS_ZERO:
-                        delta_uv[u, v] = np.inf
-                    else:
-                        delta_uv[u, v] = 2.0 * du * dv / denom
-            channel_delta.append(delta_uv)
+def _collect_ligand_channels(
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]],
+    H0: NDArray[np.complexfloating],
+    site_map: _SiteMap,
+    eps_f_i: NDArray[np.floating],
+    eps_f_j: NDArray[np.floating],
+) -> tuple[list[_LigandChannel], list[tuple[int, int, int]], list[tuple[int, int, int]]]:
+    eps_diag = np.real(np.diag(H0))
+    channels: list[_LigandChannel] = []
+    R_io: list[tuple[int, int, int]] = []
+    R_jo: list[tuple[int, int, int]] = []
+    for ligand_atom, ligand_cell in zip(site_map.ligand_indices, site_map.ligand_cells):
+        R_io_item, R_jo_item = _relative_ligand_vectors(site_map, ligand_cell)
+        R_io.append(R_io_item)
+        R_jo.append(R_jo_item)
+        channels.extend(_collect_ligand_site_channels(H_R, site_map, eps_diag, eps_f_i, eps_f_j, ligand_atom, ligand_cell, R_io_item, R_jo_item, channel_offset=len(channels)))
+    return channels, R_io, R_jo
 
-    n_channel = len(channel_ti)
-    if n_channel == 0:
-        t_eff_raw = t_direct
-    else:
-        delta_mode = str(w90_cfg["delta_mode"])
-        delta_reduction = str(w90_cfg["delta_reduction"])
-        if delta_mode not in {"manual", "from_onsite"}:
-            raise W90Error("FXE-W90-002", f"Unsupported delta_mode: {delta_mode}")
-        if delta_reduction not in {"channelwise", "global_mean"}:
-            raise W90Error("FXE-W90-002", f"Unsupported delta_reduction: {delta_reduction}")
 
-        if delta_mode == "manual":
-            manual_kind = str(w90_cfg.get("delta_manual_kind", ""))
-            if manual_kind not in {"channelwise", "global_mean"}:
-                raise W90Error("FXE-W90-002", "delta_manual_kind must be channelwise/global_mean in manual mode")
-            if manual_kind != delta_reduction:
-                raise W90Error(
-                    "FXE-W90-002",
-                    "delta_manual_kind must match delta_reduction",
-                    actual={"delta_manual_kind": manual_kind, "delta_reduction": delta_reduction},
-                )
-            if manual_kind == "global_mean":
-                if "delta_manual_value" not in w90_cfg:
-                    raise W90Error("FXE-W90-002", "delta_manual_value is required for manual global_mean mode")
-                delta_global = float(w90_cfg["delta_manual_value"]) * energy_scale
-                delta_tensors = [np.full((f_dim_raw, f_dim_raw), delta_global, dtype=float) for _ in range(n_channel)]
-            else:
-                if "delta_manual_file" not in w90_cfg:
-                    raise W90Error("FXE-W90-002", "delta_manual_file is required for manual channelwise mode")
-                manual = np.load(str(w90_cfg["delta_manual_file"]))
-                if "Delta_puv" not in manual:
-                    raise W90Error("FXE-W90-002", "delta_manual_file must contain key Delta_puv")
-                delta_raw = np.asarray(manual["Delta_puv"], dtype=float) * energy_scale
-                if delta_raw.shape != (n_channel, f_dim_raw, f_dim_raw):
-                    raise W90Error(
-                        "FXE-W90-002",
-                        "Delta_puv shape mismatch",
-                        expected={"shape": [n_channel, f_dim_raw, f_dim_raw]},
-                        actual={"shape": list(delta_raw.shape)},
-                    )
-                delta_tensors = [delta_raw[i] for i in range(n_channel)]
-        else:
-            # from_onsite mode
-            delta_tensors = channel_delta
-            if delta_reduction == "global_mean":
-                all_finite = np.concatenate([d[np.isfinite(d)] for d in delta_tensors])
-                if all_finite.size == 0:
-                    raise W90Error("FXE-W90-002", "No finite onsite-derived denominators")
-                delta_global = float(np.mean(all_finite))
-                delta_tensors = [np.full((f_dim_raw, f_dim_raw), delta_global, dtype=float) for _ in range(n_channel)]
+def _relative_ligand_vectors(
+    site_map: _SiteMap,
+    ligand_cell: tuple[int, int, int],
+) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    return (
+        (ligand_cell[0] - site_map.c_i[0], ligand_cell[1] - site_map.c_i[1], ligand_cell[2] - site_map.c_i[2]),
+        (ligand_cell[0] - site_map.c_j[0], ligand_cell[1] - site_map.c_j[1], ligand_cell[2] - site_map.c_j[2]),
+    )
 
-        corr = np.zeros((f_dim_raw, f_dim_raw), dtype=DTYPE_COMPLEX)
-        for ch in range(n_channel):
-            ti = channel_ti[ch]  # (f_dim_raw,)
-            tj = channel_tj[ch]  # (f_dim_raw,)
-            Delta = delta_tensors[ch]
-            for u in range(f_dim_raw):
-                for v in range(f_dim_raw):
-                    den = float(Delta[u, v])
-                    if not np.isfinite(den) or abs(den) < EPS_ZERO:
-                        continue
-                    corr[u, v] += ti[u] * np.conj(tj[v]) / den
-        t_eff_raw = t_direct + corr
 
-    if soc_mode == "without_soc":
-        t_spin = _expand_without_soc_to_spinor(t_eff_raw)
-    else:
-        t_spin = t_eff_raw
-    if t_spin.shape != (n_orb, n_orb):
-        raise W90Error(
-            "FXE-W90-002",
-            "Spin-completed hopping has unexpected shape",
-            expected={"shape": [n_orb, n_orb]},
-            actual={"shape": list(t_spin.shape)},
+def _collect_ligand_site_channels(
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]],
+    site_map: _SiteMap,
+    eps_diag: NDArray[np.floating],
+    eps_f_i: NDArray[np.floating],
+    eps_f_j: NDArray[np.floating],
+    ligand_atom: int,
+    ligand_cell: tuple[int, int, int],
+    R_io: tuple[int, int, int],
+    R_jo: tuple[int, int, int],
+    *,
+    channel_offset: int,
+) -> list[_LigandChannel]:
+    lig_idx = _site_indices(site_map.atom_to_start, ligand_atom, site_map.per_atom)
+    t_i_lig = extract_hopping_block(H_R, list(site_map.f_i_idx), list(lig_idx), R_io)
+    t_j_lig = extract_hopping_block(H_R, list(site_map.f_j_idx), list(lig_idx), R_jo)
+    eps_lig = eps_diag[list(lig_idx)]
+    return [
+        _LigandChannel(
+            t_i=t_i_lig[:, p].copy(),
+            t_j=t_j_lig[:, p].copy(),
+            delta_from_onsite=_onsite_delta(eps_f_i, eps_f_j, float(eps_lig[p])),
+            ligand_atom=ligand_atom,
+            ligand_cell=ligand_cell,
+            wannier_index=int(lig_idx[p]),
+            channel_index=channel_offset + p,
         )
-
-    orbital_order_id = str(w90_cfg["orbital_order_id"])
-    U_r2c = build_U_r2c(orbital_order_id=orbital_order_id, spinor=True)
-    t_eff = apply_basis_transform(t_spin, U_r2c)
-
-    map_f_i = [
-        {
-            "channel_index": int(u),
-            "wannier_index": int(f_i_idx[u] if u < len(f_i_idx) else -1),
-            "site_atom": int(f_i),
-            "site_cell": [int(c_i[0]), int(c_i[1]), int(c_i[2])],
-        }
-        for u in range(f_dim_raw)
+        for p in range(site_map.per_atom)
     ]
-    map_f_j = [
-        {
-            "channel_index": int(v),
-            "wannier_index": int(f_j_idx[v] if v < len(f_j_idx) else -1),
-            "site_atom": int(f_j),
-            "site_cell": [int(c_j[0]), int(c_j[1]), int(c_j[2])],
-        }
-        for v in range(f_dim_raw)
-    ]
-    source_hashes = {
-        "hr_sha256": _sha256_file(Path(w90_cfg["hr_path"])),
-        "win_sha256": _sha256_file(Path(w90_cfg["win_path"])),
+
+
+def _onsite_delta(
+    eps_f_i: NDArray[np.floating],
+    eps_f_j: NDArray[np.floating],
+    eps_lig: float,
+) -> NDArray[np.floating]:
+    delta = np.zeros((len(eps_f_i), len(eps_f_j)), dtype=float)
+    for u, eps_u in enumerate(eps_f_i):
+        for v, eps_v in enumerate(eps_f_j):
+            du = float(eps_u) - eps_lig
+            dv = float(eps_v) - eps_lig
+            denom = du + dv
+            delta[u, v] = np.inf if abs(denom) < EPS_ZERO else 2.0 * du * dv / denom
+    return delta
+
+
+def _resolve_delta_tensors(
+    channels: list[_LigandChannel],
+    cfg: dict[str, Any],
+    *,
+    energy_scale: float,
+    f_dim_raw: int,
+) -> list[NDArray[np.floating]]:
+    delta_mode = str(cfg["delta_mode"])
+    delta_reduction = str(cfg["delta_reduction"])
+    if delta_mode == "from_onsite":
+        return _reduce_onsite_deltas(channels, delta_reduction)
+    manual_kind = str(cfg.get("delta_manual_kind", ""))
+    if manual_kind not in {"channelwise", "global_mean"}:
+        raise W90Error("FXE-W90-002", "delta_manual_kind must be channelwise/global_mean in manual mode")
+    if manual_kind != delta_reduction:
+        raise W90Error("FXE-W90-002", "delta_manual_kind must match delta_reduction", actual={"delta_manual_kind": manual_kind, "delta_reduction": delta_reduction})
+    if manual_kind == "global_mean":
+        return _manual_global_delta(cfg, energy_scale=energy_scale, shape=(len(channels), f_dim_raw, f_dim_raw))
+    return _manual_channelwise_delta(cfg, energy_scale=energy_scale, shape=(len(channels), f_dim_raw, f_dim_raw))
+
+
+def _reduce_onsite_deltas(
+    channels: list[_LigandChannel],
+    delta_reduction: str,
+) -> list[NDArray[np.floating]]:
+    if delta_reduction == "channelwise":
+        return [channel.delta_from_onsite for channel in channels]
+    finite = np.concatenate([delta[np.isfinite(delta)] for delta in (channel.delta_from_onsite for channel in channels)])
+    if finite.size == 0:
+        raise W90Error("FXE-W90-002", "No finite onsite-derived denominators")
+    delta_global = float(np.mean(finite))
+    return [np.full_like(channel.delta_from_onsite, delta_global, dtype=float) for channel in channels]
+
+
+def _manual_global_delta(
+    cfg: dict[str, Any],
+    *,
+    energy_scale: float,
+    shape: tuple[int, int, int],
+) -> list[NDArray[np.floating]]:
+    if "delta_manual_value" not in cfg:
+        raise W90Error("FXE-W90-002", "delta_manual_value is required for manual global_mean mode")
+    delta_global = float(cfg["delta_manual_value"]) * energy_scale
+    return [np.full(shape[1:], delta_global, dtype=float) for _ in range(shape[0])]
+
+
+def _manual_channelwise_delta(
+    cfg: dict[str, Any],
+    *,
+    energy_scale: float,
+    shape: tuple[int, int, int],
+) -> list[NDArray[np.floating]]:
+    if "delta_manual_file" not in cfg:
+        raise W90Error("FXE-W90-002", "delta_manual_file is required for manual channelwise mode")
+    with np.load(str(cfg["delta_manual_file"])) as manual:
+        if "Delta_puv" not in manual:
+            raise W90Error("FXE-W90-002", "delta_manual_file must contain key Delta_puv")
+        delta_raw = np.asarray(manual["Delta_puv"], dtype=float) * energy_scale
+    if delta_raw.shape != shape:
+        raise W90Error("FXE-W90-002", "Delta_puv shape mismatch", expected={"shape": list(shape)}, actual={"shape": list(delta_raw.shape)})
+    return [delta_raw[idx] for idx in range(shape[0])]
+
+
+def _accumulate_ligand_correction(
+    channels: list[_LigandChannel],
+    delta_tensors: list[NDArray[np.floating]],
+    *,
+    f_dim_raw: int,
+) -> NDArray[np.complexfloating]:
+    correction = np.zeros((f_dim_raw, f_dim_raw), dtype=DTYPE_COMPLEX)
+    for channel, delta in zip(channels, delta_tensors):
+        for u in range(f_dim_raw):
+            for v in range(f_dim_raw):
+                denom = float(delta[u, v])
+                if np.isfinite(denom) and abs(denom) >= EPS_ZERO:
+                    correction[u, v] += channel.t_i[u] * np.conj(channel.t_j[v]) / denom
+    return correction
+
+
+def _ligand_meta(channel: _LigandChannel) -> dict[str, Any]:
+    return {
+        "ligand_atom": int(channel.ligand_atom),
+        "ligand_cell": [int(x) for x in channel.ligand_cell],
+        "wannier_index": int(channel.wannier_index),
+        "channel_index": int(channel.channel_index),
     }
-    if str(w90_cfg.get("delta_mode", "")) == "manual" and "delta_manual_file" in w90_cfg:
-        source_hashes["delta_manual_sha256"] = _sha256_file(Path(w90_cfg["delta_manual_file"]))
 
-    meta = {
-        "soc_mode": soc_mode,
-        "energy_unit_input": energy_unit,
-        "energy_scale_to_ev": energy_scale,
-        "orbital_order_id": orbital_order_id,
-        "spin_completion_rule": w90_cfg.get("spin_completion_rule"),
-        "f_site_i_cell": [int(c_i[0]), int(c_i[1]), int(c_i[2])],
-        "f_site_j_cell": [int(c_j[0]), int(c_j[1]), int(c_j[2])],
-        "ligand_cells": [[int(x) for x in _cell_triplet(c, "ligand_cells[*]")] for c in ligand_cells],
-        "R_ij": [int(R_ij[0]), int(R_ij[1]), int(R_ij[2])],
-        "R_io": [[int(r[0]), int(r[1]), int(r[2])] for r in R_io_list],
-        "R_jo": [[int(r[0]), int(r[1]), int(r[2])] for r in R_jo_list],
-        "map_f_i": map_f_i,
-        "map_f_j": map_f_j,
-        "map_lig": map_lig,
+
+def _finalize_reduced_matrix(
+    matrix_raw: NDArray[np.complexfloating],
+    validated: _ValidatedConfig,
+    *,
+    n_orb: int,
+    label: str,
+) -> NDArray[np.complexfloating]:
+    matrix_spin = _expand_without_soc_to_spinor(matrix_raw) if validated.soc_mode == "without_soc" else matrix_raw
+    if matrix_spin.shape != (n_orb, n_orb):
+        raise W90Error("FXE-W90-002", f"{label} has unexpected spinor shape", expected={"shape": [n_orb, n_orb]}, actual={"shape": list(matrix_spin.shape)})
+    U_r2c = build_U_r2c(orbital_order_id=validated.orbital_order_id, spinor=True)
+    matrix_out = apply_basis_transform(matrix_spin, U_r2c)
+    if label == "h_local":
+        check_hermitian(matrix_out, label="h_local", eps=EPS_HERM, module="wannier90")
+    return matrix_out
+
+
+def _build_metadata(
+    cfg: dict[str, Any],
+    validated: _ValidatedConfig,
+    site_map: _SiteMap,
+    ligand: _LigandCorrection,
+    *,
+    num_wann: int,
+) -> dict[str, Any]:
+    return {
+        "soc_mode": validated.soc_mode,
+        "orbital_basis": validated.orbital_basis,
+        "orbital_order_id": validated.orbital_order_id,
+        "energy_unit_input": validated.energy_unit,
+        "energy_scale_to_ev": validated.energy_scale,
+        "spin_completion_rule": validated.spin_completion_rule,
+        "num_wann": int(num_wann),
+        "all_wannier_atom_indices": [int(atom) for atom in site_map.atom_ids],
+        "f_site_i": int(site_map.f_i),
+        "f_site_j": int(site_map.f_j),
+        "f_site_i_cell": [int(x) for x in site_map.c_i],
+        "f_site_j_cell": [int(x) for x in site_map.c_j],
+        "ligand_indices": [int(atom) for atom in site_map.ligand_indices],
+        "ligand_cells": [[int(x) for x in cell] for cell in site_map.ligand_cells],
+        "R_ij": [int(x) for x in site_map.R_ij],
+        "R_io": [[int(x) for x in triplet] for triplet in ligand.R_io],
+        "R_jo": [[int(x) for x in triplet] for triplet in ligand.R_jo],
+        "map_f_i": _build_site_channel_map(site_map.f_i_idx, site_atom=site_map.f_i, site_cell=site_map.c_i),
+        "map_f_j": _build_site_channel_map(site_map.f_j_idx, site_atom=site_map.f_j, site_cell=site_map.c_j),
+        "map_lig": ligand.map_lig,
         "order_ids": {
             "atom_order_id": "all_wannier_atom_indices_v1",
-            "orbital_order_id": orbital_order_id,
-            "spin_order_id": spin_order_id,
+            "orbital_order_id": validated.orbital_order_id,
+            "spin_order_id": site_map.spin_order_id,
             "ligand_order_id": "ligand_indices_input_v1",
         },
-        "file_hashes": source_hashes,
-        "delta_mode": str(w90_cfg["delta_mode"]),
-        "delta_reduction": str(w90_cfg["delta_reduction"]),
+        "delta_mode": validated.delta_mode,
+        "delta_reduction": validated.delta_reduction,
+        "file_hashes": _build_file_hashes(cfg, delta_mode=validated.delta_mode),
     }
-    if return_payload:
-        return {"t_mu": t_eff, "meta": meta}
-    return t_eff
+
+
+def _build_site_channel_map(
+    indices: tuple[int, ...],
+    *,
+    site_atom: int,
+    site_cell: tuple[int, int, int],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "channel_index": int(channel),
+            "wannier_index": int(wannier_index),
+            "site_atom": int(site_atom),
+            "site_cell": [int(x) for x in site_cell],
+        }
+        for channel, wannier_index in enumerate(indices)
+    ]
+
+
+def _build_file_hashes(cfg: dict[str, Any], *, delta_mode: str) -> dict[str, str]:
+    hashes = {
+        "hr_sha256": _sha256_file(Path(cfg["hr_path"])),
+        "win_sha256": _sha256_file(Path(cfg["win_path"])),
+    }
+    if delta_mode == "manual" and "delta_manual_file" in cfg:
+        hashes["delta_manual_sha256"] = _sha256_file(Path(cfg["delta_manual_file"]))
+    return hashes
 
 
 def _energy_scale_to_ev(unit: str) -> float:

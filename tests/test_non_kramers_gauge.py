@@ -1,8 +1,8 @@
 """Tests for non-Kramers doublet gauge-fixing functions."""
 import numpy as np
 
-from fexchange.core.multipole import analyze_multipole_carrying
-from fexchange.core.doublet_basis import (
+from fexchange.spectrum.multipole import analyze_multipole_carrying
+from fexchange.spectrum.doublet import (
     build_d3d_eg_doublet,
     build_oh_eg_doublet,
     gauge_fix_non_kramers_d3d,

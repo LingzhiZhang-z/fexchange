@@ -5,8 +5,8 @@ import numpy as np
 
 from fexchange.sopt.contraction import build_L2, build_L3, build_L4
 from fexchange.sopt.precompute import build_L0, build_L1
-from fexchange.representations.lsms import build_lsms
-from fexchange.representations.lsjm import build_lsjm, select_soc_lowest_subspace
+from fexchange.spectrum.lsms import build_lsms
+from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
 from fexchange.utils.checks import check_hermitian
 
 _F2 = 1.0

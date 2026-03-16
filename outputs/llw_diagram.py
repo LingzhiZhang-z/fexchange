@@ -18,8 +18,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fexchange.core.stevens import build_cef_stevens_operators
-from fexchange.core.symmetry import classify_irreps
-from fexchange.models.hcef import build_hcef_matrix_J
+from fexchange.spectrum.classify import classify_irreps
+from fexchange.hamiltonian.hcef import build_hcef_matrix_J
 
 
 J_CONFIG: dict[int, dict[str, list[str]]] = {

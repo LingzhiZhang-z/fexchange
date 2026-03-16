@@ -62,7 +62,6 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
                     r42=r42,
                     r62=r62,
                     scheme=scheme,
-                    hopping_name=cfg["sources"]["hopping_name"],
                 )
             elif level == "L3":
                 sopt = cfg["sopt"]
@@ -73,7 +72,6 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
                     r42=r42,
                     r62=r62,
                     scheme=scheme,
-                    hopping_name=cfg["sources"]["hopping_name"],
                     U=float(sopt["U"]),
                     Jh=float(sopt["Jh"]),
                     zeta=float(sopt["zeta"]),
@@ -113,4 +111,3 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
         },
         paths={"core_root": str(core_root)},
     )
-

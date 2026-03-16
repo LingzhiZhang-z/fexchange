@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fexchange.io.disk import fmt12
-from fexchange.io.run_input import STANDARD_VERSION
+from fexchange.utils.constants import STANDARD_VERSION
 from fexchange.utils.errors import InputError
 
 CORE_TOKEN_RE = re.compile(
@@ -35,7 +35,7 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     if level == "L2":
         return (
             f"L2|keyL1={level_key('L1', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
-            f"|hop={cfg['sources']['hopping_name']}|sv={sver}"
+            f"|sv={sver}"
         )
     if level == "L3":
         s = cfg["sopt"]
@@ -46,7 +46,7 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     if level == "L4":
         return (
             f"L4|keyL3={level_key('L3', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
-            f"|kramer={cfg['sources']['kramer_name']}|sv={sver}"
+            f"|sv={sver}"
         )
     raise InputError("FXE-INPUT-003", f"Unknown level for key generation: {level}")
 
@@ -63,4 +63,3 @@ def labels_abcd_lex(n_k: int) -> NDArray[np.int64]:
                 for d in range(n_k):
                     rows.append([a, b, c, d])
     return np.asarray(rows, dtype=np.int64)
-

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import numpy as np
 
-from fexchange.core.fock_basis import N_ORB, enumerate_dets, dim_sector
+from fexchange.core.fock import N_ORB, enumerate_dets, dim_sector
 
 
 def random_u2(seed: int) -> np.ndarray:

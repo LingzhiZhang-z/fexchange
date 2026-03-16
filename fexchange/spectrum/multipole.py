@@ -1,4 +1,4 @@
-"""Simplified multipole analysis and human-readable summary."""
+"""Multipole projection analysis and gauge fixing for CEF subspaces."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from numpy.typing import NDArray
 
 from fexchange.spectrum.doublet import gauge_fix_kramers_pair, project_to_eg_doublet
 from fexchange.core.space_j import (
+    _fix_column_phases,
+    build_space_j_operator,
     normalize_J,
     pauli_decompose,
     spin1_decompose,
@@ -16,12 +18,45 @@ from fexchange.core.space_j import (
 )
 from fexchange.core.stevens import build_multipole_operators
 from fexchange.utils.numerics import DTYPE_COMPLEX
+
 _MULTIPOLE_TYPES = (
     "magnetic_dipole",
     "electric_quadrupole",
     "magnetic_octupole",
 )
 
+
+# ---------------------------------------------------------------------------
+# Gauge fixing
+# ---------------------------------------------------------------------------
+
+def gauge_fix_subspace(
+    Psi: NDArray[np.complexfloating],
+    J: float,
+    *,
+    point_group: str | None = None,
+    tol: float = 1e-10,
+) -> tuple[NDArray[np.complexfloating], str]:
+    """Gauge-fix a degenerate subspace. Returns (basis, gauge_name)."""
+    d = int(Psi.shape[1])
+    half_int = int(2 * J) % 2 == 1
+
+    if d == 2 and half_int:
+        return gauge_fix_kramers_pair(Psi, tol=tol), "kramers"
+    if d == 2 and not half_int and point_group is not None:
+        return project_to_eg_doublet(J, Psi, point_group, tol=tol), f"non_kramers_{point_group.lower()}"
+    if d == 3:
+        Jz = build_space_j_operator(J, module="multipole")[0]
+        M_Jz = Psi.conj().T @ Jz @ Psi
+        evals, vecs = np.linalg.eigh(M_Jz)
+        basis = Psi @ vecs[:, np.argsort(evals.real)[::-1]]
+        return _fix_column_phases(basis), "triplet_jz"
+    return Psi, "none"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _traceless_fro_norm(mat: NDArray[np.complexfloating]) -> float:
     dim = int(mat.shape[0])
@@ -50,55 +85,42 @@ def _real_spin1(coeffs: dict[str, float], tol: float) -> dict[str, float]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Multipole analysis (assumes Psi is already gauge-fixed)
+# ---------------------------------------------------------------------------
+
 def analyze_multipole_carrying(
     Psi: NDArray[np.complexfloating],
     J: float,
     *,
     tol: float = 1e-10,
-    point_group: str | None = None,
 ) -> dict[str, Any]:
     """Analyze carried multipoles in a projected subspace.
 
-    Optional gauge-fixing for 2D subspaces:
-      - Kramers (half-integer J, odd electron): auto-detected via TR check.
-      - Non-Kramers: pass point_group so the canonical E_g projection/gauge can
-        be reconstructed from (J, point_group).
+    Assumes Psi columns are already gauge-fixed.
     """
     J = normalize_J(J, module="multipole")
     subspace_dim = int(Psi.shape[1])
 
-    used_gauge = "none"
-    basis = Psi
-    if subspace_dim == 2 and int(2 * J) % 2 == 0 and point_group is not None:
-        basis = project_to_eg_doublet(J, Psi, point_group, tol=tol)
-        used_gauge = f"non_kramers_{point_group.lower()}"
-    elif subspace_dim == 2 and int(2 * J) % 2 == 1:
-        basis = gauge_fix_kramers_pair(Psi, tol=tol)
-        used_gauge = "kramers"
     result: dict[str, Any] = {
         "subspace_dim": subspace_dim,
-        "used_gauge": used_gauge,
-        "used_kramers_gauge": used_gauge == "kramers",
         "multipoles": {},
     }
 
     for multipole_type in _MULTIPOLE_TYPES:
         ops = build_multipole_operators(J, multipole_type)
-        projected = project_operators_to_subspace(basis, ops, module="multipole")
+        projected = project_operators_to_subspace(Psi, ops, module="multipole")
 
         family: dict[str, Any] = {}
         for name, mat in projected.items():
-            expectation = None
             if subspace_dim == 1:
                 expectation = float(np.real(mat[0, 0]))
                 norm = abs(expectation)
             else:
+                expectation = None
                 norm = _traceless_fro_norm(mat)
             carried = bool(norm > tol)
-            payload: dict[str, Any] = {
-                "norm": norm,
-                "carried": carried,
-            }
+            payload: dict[str, Any] = {"norm": norm, "carried": carried}
             if carried:
                 if subspace_dim == 1 and expectation is not None:
                     payload["expectation"] = expectation

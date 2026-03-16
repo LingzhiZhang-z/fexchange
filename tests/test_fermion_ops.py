@@ -3,8 +3,8 @@
 import pytest
 import numpy as np
 
-from fexchange.core.fock_basis import N_ORB, enumerate_dets, dim_sector
-from fexchange.core.fermion_ops import (
+from fexchange.core.fock import N_ORB, enumerate_dets, dim_sector
+from fexchange.core.fermion import (
     apply_cdag, apply_c,
     cdag_matrix, c_matrix,
     one_body_operator_matrix,

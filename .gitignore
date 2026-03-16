@@ -1,12 +1,10 @@
 __pycache__
 .vscode
+.claude
 .DS_Store
-.pytest_cache/
+docs
+outputs
+.pytest_cache
 AGENTS.md
 CLAUDE.md
-*.egg-info/
-docs/*
-!docs/cfp
-docs/cfp/*
-!docs/cfp/*.tex
-!docs/cfp/*.bib
+data/

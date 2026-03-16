@@ -9,14 +9,12 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.core.fock_basis import N_ORB
 from fexchange.utils.errors import PhysError
+from fexchange.utils.constants import ELL, N_ORB
 from fexchange.utils.numerics import DTYPE_COMPLEX
 from fexchange.utils.checks import check_hermitian
 
 logger = logging.getLogger("fexchange")
-
-ELL: int = 3
 
 
 def orbital_map(p: int) -> tuple[int, float]:
@@ -142,7 +140,7 @@ def build_space_ls_matrix(
     Lz, Sz, Lp, Lm, Sp, Sm, Lx, Ly, Sx, Sy, Jz, Jp, Jm, Jx, Jy, L2, S2, J2.
     """
     # Lazy import keeps this module importable in environments without scipy.
-    from fexchange.core.fermion_ops import one_body_operator_matrix
+    from fexchange.core.fermion import one_body_operator_matrix
 
     one = build_space_ls_operator()
     out: dict[str, NDArray[np.complexfloating]] = {}
