@@ -22,6 +22,7 @@ from w90_decompose_h_local import (  # noqa: E402
     decompose_h_local,
     decompose_orbital_tensors,
     extract_cef_stevens_fit,
+    extract_local_stevens_fit,
     convert_akq_to_bkq,
 )
 
@@ -59,6 +60,20 @@ def _extract_h_local_soc(mat: str) -> np.ndarray:
     h_raw_14 = _permute_ud_to_du(h_raw_14)
     U14 = _build_U_r2c(spinor=True)
     return (U14 @ h_raw_14 @ U14.T.conj()) * 1000.0
+
+
+def _parse_ref_cef(path: Path) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        try:
+            out[key] = float(value)
+        except ValueError:
+            continue
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -222,3 +237,45 @@ class TestSOC:
             zeta=zeta, symmetry="C3v", mode_q3=MODE_Q3,
         )
         assert sb["cef_splitting_meV"][-1] > 1.0
+
+
+def test_soc_direct_local_fit_matches_ybocl_reference():
+    """Direct J0 fit from SOC h_local must reproduce the YbOCl HOLE reference."""
+    h_local = np.loadtxt(
+        DATA_DIR / "YbOCl" / "test" / "w90" / "w90_soc_h_local.dat",
+        dtype=complex,
+    )
+    h_local_hole = -h_local.conj()
+    zeta_hole, _ = decompose_h_local(h_local_hole, rtol=5e-3)
+    out = extract_local_stevens_fit(
+        h_local_hole,
+        n_ele=1,
+        zeta=zeta_hole,
+        symmetry="C3v",
+        mode_q3=MODE_Q3,
+    )
+    ref = _parse_ref_cef(DATA_DIR / "YbOCl" / "test" / "ref_cef_soc.txt")
+
+    assert abs(zeta_hole) == pytest.approx(ref["soc_lambda_meV"], abs=0.1)
+    assert out["stevens_fit_residual"] == pytest.approx(ref["cef_fit_error"], abs=1e-5)
+    assert out["B_params"]["B20"] == pytest.approx(ref["B20"], abs=1e-6)
+    assert out["B_params"]["B40"] == pytest.approx(ref["B40"], abs=1e-6)
+    assert out["B_params"]["B60"] == pytest.approx(ref["B60"], abs=1e-6)
+    assert out["B_params"]["B43"] == pytest.approx(ref["B43s"], abs=1e-6)
+    assert out["B_params"]["B63"] == pytest.approx(ref["B63s"], abs=1e-6)
+    assert out["B_params"]["B66"] == pytest.approx(ref["B66"], abs=1e-6)
+
+    expected = np.array(
+        [
+            ref["level_0"],
+            ref["level_1"],
+            ref["level_2"],
+            ref["level_3"],
+            ref["level_4"],
+            ref["level_5"],
+            ref["level_6"],
+            ref["level_7"],
+        ]
+    )
+    expected -= expected.min()
+    np.testing.assert_allclose(out["cef_splitting_meV"], expected, atol=2e-4)
