@@ -28,6 +28,9 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
 
     output_root = Path(cfg["paths"]["output_root"])
     core_root = output_root / "core"
+    sources = cfg.get("sources", {})
+    hopping_name = str(sources.get("hopping_name", "")) if isinstance(sources, dict) else ""
+    kramer_name = str(sources.get("kramer_name", "")) if isinstance(sources, dict) else ""
     if not core_root.exists():
         raise InputError(
             "FXE-INPUT-003",
@@ -62,6 +65,7 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
                     r42=r42,
                     r62=r62,
                     scheme=scheme,
+                    hopping_name=hopping_name,
                 )
             elif level == "L3":
                 sopt = cfg["sopt"]
@@ -72,9 +76,25 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
                     r42=r42,
                     r62=r62,
                     scheme=scheme,
+                    hopping_name=hopping_name,
                     U=float(sopt["U"]),
                     Jh=float(sopt["Jh"]),
                     zeta=float(sopt["zeta"]),
+                )
+            elif level == "L4":
+                sopt = cfg["sopt"]
+                path = build_stage_path(
+                    str(output_root),
+                    "L4",
+                    n=n_ele,
+                    r42=r42,
+                    r62=r62,
+                    scheme=scheme,
+                    hopping_name=hopping_name,
+                    U=float(sopt["U"]),
+                    Jh=float(sopt["Jh"]),
+                    zeta=float(sopt["zeta"]),
+                    kramer_name=kramer_name,
                 )
             else:
                 path = build_stage_path(str(output_root), level, n=n_ele, r42=r42, r62=r62, scheme=scheme)

@@ -97,37 +97,11 @@ with
 $J_x\equiv J_{xx}$, $J_y\equiv J_{yy}$, $J_z\equiv J_{zz}$.
 Diagonal elements are kept as-is (no extra remapping).
 
-### 3.2 Derived Decomposition (MUST, from $J$)
-In addition to raw $J$, module 04-03 must export the derived set from the raw
-$J$ matrix:
-- isotropic:
-  $J_{\mathrm{iso}}=\frac{1}{3}(J_x+J_y+J_z)$,
-- bond-default Kitaev parameter:
-  for default $z$-bond, define
-  $K^{(z\text{-bond})}=J_z-J_{\mathrm{iso}}$,
-- DM vector:
-  $D_x=\frac{1}{2}(J_{yz}-J_{zy})$,
-  $D_y=\frac{1}{2}(J_{zx}-J_{xz})$,
-  $D_z=\frac{1}{2}(J_{xy}-J_{yx})$,
-- symmetric anisotropy:
-  $\Gamma=\frac{1}{2}(J+J^\mathsf{T})-J_{\mathrm{diag}}$ with
-  $J_{\mathrm{diag}}=\mathrm{diag}(J_x,J_y,J_z)$.
-
-Note:
-- `K_mu` in this module means Kitaev-type exchange parameter, not the level-$L2$
-  kernel tensor `K`.
-
-### 3.3 Non-Exchange Terms (MUST define, optional in model fit)
-Identity and one-site terms are not part of the exchange-only model
-$\sum_{\alpha\beta}J_{\alpha\beta}S_i^\alpha S_j^\beta$.
-They are defined by
-
-Math:
-$$
-\mathrm{const}^{(\mu)} = C_{00}^{(\mu)},\quad
-h_{i,\alpha}^{(\mu)} = 2C_{\alpha 0}^{(\mu)},\quad
-h_{j,\alpha}^{(\mu)} = 2C_{0\alpha}^{(\mu)}.
-$$
+### 3.2 Derived Decomposition (OUT OF SCOPE FOR CURRENT RUNTIME)
+The current runtime exports only the raw exchange matrix $J_{\alpha\beta}^{(\mu)}$
+plus the mapping residual from Section 5.
+Any further decomposition (`J_iso`, `K`, `D`, `Gamma`, local fields, constants)
+is outside the current runtime output contract.
 
 ## 4) Gauge/Basis Rule (MUST)
 - Couplings depend on local Kramers gauge.
@@ -139,7 +113,7 @@ Per $\mu$:
 - Hermiticity of input $\mathrm{Heff}^{(\mu)}$.
 - Reconstruct
   $\widetilde H^{(\mu)}$ from exported
-  outputs $(J,J_{\mathrm{iso}},K,\mathbf D,\Gamma,\mathrm{const},\mathbf h_i,\mathbf h_j)$ and check
+  output $J$ and check
 
 Math:
 $$
@@ -154,12 +128,10 @@ r_\mu
 $$
 
 - Imaginary part leakage of exported real couplings must be below tolerance.
-- If `K` is exported for default $z$-bond, check
-  $K = J_z - J_{\mathrm{iso}}$.
 
 ## 6) Runtime I/O (Summary)
 Code form:
 ```text
 inputs_33  = {Heff_mu_abcd, labels_abcd, kramer_basis_id}
-outputs_33 = {J_mu[3,3], J_iso_mu, K_mu, D_mu[3], Gamma_mu[3,3], const_mu, h_i_mu[3], h_j_mu[3], residual_mu}
+outputs_33 = {J_mu[3,3], mapping_residual}
 ```

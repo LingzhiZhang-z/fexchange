@@ -31,6 +31,7 @@ from fexchange.pipeline.keys import labels_abcd_lex, three_sectors
 from fexchange.pipeline.validation import validate_labels_abcd
 from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
 from fexchange.spectrum.lsms import build_lsms
+from fexchange.sopt.spin12 import spin12_map
 from fexchange.utils.checks import check_orthonormal
 from fexchange.utils.errors import BindError
 
@@ -193,6 +194,7 @@ def ensure_l2(
     if "l2" in state:
         return
     output_root = cfg["paths"]["output_root"]
+    hopping_name = cfg["sources"]["hopping_name"]
     stage_dir = build_stage_path(
         output_root,
         "L2",
@@ -200,6 +202,7 @@ def ensure_l2(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=hopping_name,
     )
     loaded = try_load_l2(stage_dir)
     if loaded is not None:
@@ -251,6 +254,7 @@ def ensure_l3(
         return
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
+    hopping_name = cfg["sources"]["hopping_name"]
     stage_dir = build_stage_path(
         output_root,
         "L3",
@@ -258,6 +262,7 @@ def ensure_l3(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=hopping_name,
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
@@ -298,6 +303,8 @@ def ensure_l4(
         return
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
+    hopping_name = cfg["sources"]["hopping_name"]
+    kramer_name = cfg["sources"]["kramer_name"]
     stage_dir = build_stage_path(
         output_root,
         "L4",
@@ -305,9 +312,11 @@ def ensure_l4(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=hopping_name,
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
+        kramer_name=kramer_name,
     )
     loaded = try_load_l4(stage_dir)
     if loaded is not None:
@@ -330,6 +339,8 @@ def ensure_l4(
     validate_labels_abcd(labels, n_k=W.shape[1])
 
     result = build_L4(state["l3"], W)
+    if W.shape[1] == 2:
+        result.update(spin12_map(result["Heff_mu_abcd"]))
     state["l4"] = result
     state["labels_abcd"] = labels
     state["W"] = W

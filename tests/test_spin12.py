@@ -11,9 +11,8 @@ class TestSpin12:
         """Identity Heff should give zero exchange."""
         Heff = np.eye(4, dtype=np.complex128)
         result = spin12_map(Heff)
-        assert abs(result["J_iso"]) < 1e-10
-        assert abs(result["K"]) < 1e-10
-        assert np.allclose(result["D"], 0, atol=1e-10)
+        assert set(result.keys()) == {"J_mu", "mapping_residual"}
+        np.testing.assert_allclose(result["J_mu"], 0, atol=1e-10)
 
     def test_heisenberg(self):
         """Pure Heisenberg: H = J S_i · S_j = (J/4)(sigma_x x sigma_x + y + z)."""
@@ -23,10 +22,8 @@ class TestSpin12:
         sz = np.array([[1, 0], [0, -1]], dtype=complex)
         H = (J_val / 4) * (np.kron(sx, sx) + np.kron(sy, sy) + np.kron(sz, sz))
         result = spin12_map(H)
-        np.testing.assert_allclose(result["J_iso"], J_val, atol=1e-10)
-        np.testing.assert_allclose(result["K"], 0, atol=1e-10)
-        np.testing.assert_allclose(result["D"], 0, atol=1e-10)
-        assert result["residual"] < 1e-10
+        np.testing.assert_allclose(result["J_mu"], np.eye(3) * J_val, atol=1e-10)
+        assert result["mapping_residual"] < 1e-10
 
     def test_reconstruction_residual(self):
         """Random Hermitian 4x4 should reconstruct with small residual."""
@@ -34,4 +31,4 @@ class TestSpin12:
         A = rng.standard_normal((4, 4)) + 1j * rng.standard_normal((4, 4))
         H = (A + A.conj().T) / 2
         result = spin12_map(H)
-        assert result["residual"] < 1e-10
+        assert result["mapping_residual"] < 1e-10

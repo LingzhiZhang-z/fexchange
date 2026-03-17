@@ -13,6 +13,8 @@ from typing import Any
 
 from fexchange.utils.constants import (
     LEVEL_ORDER,
+    RE_DEFAULTS_BY_N_ELE,
+    RE_TO_N_ELE,
     RUN_SCHEMA_VERSION,
     STANDARD_VERSION,
     UPSTREAM_REQUIREMENTS,
@@ -31,6 +33,7 @@ _ALLOWED_TOP_LEVEL_SECTIONS = frozenset(
         "model",
         "sopt",
         "inputs",
+        "sources",
         "paths",
         "runtime",
         "checks",
@@ -66,6 +69,8 @@ def load_run_input(path: str | Path) -> dict[str, Any]:
     _validate_top_level(cfg)
     _validate_runtime(cfg)
     _validate_sections(cfg)
+    _normalize_sources(cfg)
+    _apply_re_defaults(cfg)
     _validate_window_required_sections(cfg)
     _validate_checks(cfg)
 
@@ -73,6 +78,7 @@ def load_run_input(path: str | Path) -> dict[str, Any]:
     _validate_physics(cfg)
     _validate_model(cfg)
     _validate_sopt(cfg)
+    _validate_sources(cfg)
     _validate_inputs(cfg)
     _validate_paths(cfg)
 
@@ -225,6 +231,7 @@ def _validate_window_required_sections(cfg: dict[str, Any]) -> None:
         required_sections.add("model")
     if any(includes(level) for level in ("L2", "L3", "L4")):
         required_sections.add("inputs")
+        required_sections.add("sources")
     if any(includes(level) for level in ("L3", "L4")):
         required_sections.add("sopt")
 
@@ -344,7 +351,7 @@ def _validate_sopt(cfg: dict[str, Any]) -> None:
             "sopt section must be a table/object",
             actual={"actual_type": type(sopt).__name__},
         )
-    for key in ("U", "Jh", "zeta"):
+    for key in ("U", "Jh"):
         if key not in sopt:
             raise InputError(
                 "FXE-INPUT-002",
@@ -357,6 +364,40 @@ def _validate_sopt(cfg: dict[str, Any]) -> None:
                 f"sopt.{key} must be numeric",
                 actual={key: sopt[key]},
             )
+    if "zeta" not in sopt:
+        raise InputError(
+            "FXE-INPUT-002",
+            "Missing required sopt field: zeta",
+            expected={"field_path": "sopt.zeta"},
+        )
+    if not _is_number(sopt["zeta"]):
+        raise InputError(
+            "FXE-INPUT-003",
+            "sopt.zeta must be numeric",
+            actual={"zeta": sopt["zeta"]},
+        )
+
+
+def _validate_sources(cfg: dict[str, Any]) -> None:
+    if "sources" not in cfg:
+        return
+    sources = cfg["sources"]
+    if not isinstance(sources, dict):
+        raise InputError(
+            "FXE-INPUT-003",
+            "sources section must be a table/object",
+            actual={"actual_type": type(sources).__name__},
+        )
+
+    rt = cfg["runtime"]
+    start = rt["start_level"]
+    end = rt["end_level"]
+    includes = lambda level: LEVEL_ORDER[start] <= LEVEL_ORDER[level] <= LEVEL_ORDER[end]
+
+    if any(includes(level) for level in ("L2", "L3", "L4")):
+        _require_non_empty_str(sources, "hopping_name", prefix="sources")
+    if includes("L4"):
+        _require_non_empty_str(sources, "kramer_name", prefix="sources")
 
 
 def _validate_inputs(cfg: dict[str, Any]) -> None:
@@ -379,6 +420,63 @@ def _validate_inputs(cfg: dict[str, Any]) -> None:
         _require_non_empty_str(inputs, "hopping_file", prefix="inputs")
     if includes("L4"):
         _require_non_empty_str(inputs, "projector_file", prefix="inputs")
+
+
+def _normalize_sources(cfg: dict[str, Any]) -> None:
+    if "sources" in cfg and not isinstance(cfg["sources"], dict):
+        return
+    if "inputs" in cfg and not isinstance(cfg["inputs"], dict):
+        return
+
+    inputs = cfg.get("inputs", {})
+    if "sources" not in cfg:
+        cfg["sources"] = {}
+    sources = cfg["sources"]
+
+    hopping_name = _first_non_empty_str(
+        sources.get("hopping_name"),
+        sources.get("hopping_label"),
+        inputs.get("hopping_label"),
+        _stem_or_empty(inputs.get("hopping_file")),
+    )
+    if hopping_name:
+        sources["hopping_name"] = hopping_name
+        sources.setdefault("hopping_label", hopping_name)
+
+    kramer_name = _first_non_empty_str(
+        sources.get("kramer_name"),
+        sources.get("projection_label"),
+        inputs.get("projection_label"),
+        _stem_or_empty(inputs.get("projector_file")),
+    )
+    if kramer_name:
+        sources["kramer_name"] = kramer_name
+        sources.setdefault("projection_label", kramer_name)
+
+
+def _apply_re_defaults(cfg: dict[str, Any]) -> None:
+    physics = cfg.get("physics")
+    if not isinstance(physics, dict):
+        return
+
+    re_name = _normalize_re_name(physics.get("RE", "auto"))
+    physics["RE"] = re_name
+    if re_name == "auto":
+        return
+
+    ref_n_ele = RE_TO_N_ELE[re_name]
+    defaults = RE_DEFAULTS_BY_N_ELE[ref_n_ele]
+    sopt = cfg.get("sopt")
+    if not isinstance(sopt, dict):
+        return
+
+    jh = sopt.get("Jh")
+    if _is_number(jh):
+        jh_value = float(jh)
+        physics.setdefault("F2", defaults["F2_per_Jh"] * jh_value)
+        physics.setdefault("F4", defaults["F4_per_Jh"] * jh_value)
+        physics.setdefault("F6", defaults["F6_per_Jh"] * jh_value)
+    sopt.setdefault("zeta", defaults["zeta"])
 
 
 def _validate_paths(cfg: dict[str, Any]) -> None:
@@ -425,6 +523,34 @@ def upstream_for_start_level(start_level: str) -> tuple[str, ...]:
 
 def _is_number(x: Any) -> bool:
     return not isinstance(x, bool) and isinstance(x, (int, float))
+
+
+def _first_non_empty_str(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _stem_or_empty(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return Path(value).stem
+
+
+def _normalize_re_name(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return "auto"
+    if value.strip().lower() == "auto":
+        return "auto"
+    canonical = value.strip().capitalize()
+    if canonical not in RE_TO_N_ELE:
+        raise InputError(
+            "FXE-INPUT-003",
+            "physics.RE must be one of the supported rare-earth presets or 'auto'",
+            actual={"physics.RE": value},
+        )
+    return canonical
 
 
 def _require_non_empty_str(d: dict[str, Any], key: str, *, prefix: str | None = None) -> None:

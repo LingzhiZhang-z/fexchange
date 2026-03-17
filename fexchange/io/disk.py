@@ -50,6 +50,11 @@ def fmt12(x: float) -> str:
     return f"{x:.12f}"
 
 
+def fmt6(x: float) -> str:
+    """Fixed-point 6-decimal formatting."""
+    return f"{x:.6f}"
+
+
 def core_dir_token(n: int, r42: float, r62: float, scheme: str = "RS") -> str:
     """Core path token: n-{n}_r42-{r42}_r62-{r62}_scheme-{scheme}."""
     return f"n-{n}_r42-{fmt12(r42)}_r62-{fmt12(r62)}_scheme-{scheme}"
@@ -58,6 +63,30 @@ def core_dir_token(n: int, r42: float, r62: float, scheme: str = "RS") -> str:
 def ujhz_dir_token(U: float, Jh: float, zeta: float) -> str:
     """U-Jh-zeta path token."""
     return f"U-{fmt12(U)}_Jh-{fmt12(Jh)}_z-{fmt12(zeta)}"
+
+
+def _safe_label_token(value: str) -> str:
+    token = value.strip()
+    token = token.replace(os.sep, "_").replace("/", "_")
+    token = token.replace(" ", "_")
+    return token or "auto"
+
+
+def point_result_filename(
+    *,
+    RE: str,
+    n_ele: int,
+    hopping_label: str,
+    projection_label: str,
+    U: float,
+    Jh: float,
+    zeta: float,
+) -> str:
+    return (
+        f"{_safe_label_token(RE)}_{n_ele}_"
+        f"{_safe_label_token(hopping_label)}_{_safe_label_token(projection_label)}_"
+        f"{fmt6(U)}_{fmt6(Jh)}_{fmt6(zeta)}.txt"
+    )
 
 
 def build_stage_path(
@@ -87,19 +116,57 @@ def build_stage_path(
     elif stage == "L1":
         return root / "core" / core / "L1"
     elif stage == "L2":
-        return root / "core" / core / "L2"
+        return root / "core" / core / "hopping" / _require_stage_token("hopping_name", hopping_name, stage) / "L2"
     elif stage == "L3":
-        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "L3"
+        return (
+            root
+            / "core"
+            / core
+            / "hopping"
+            / _require_stage_token("hopping_name", hopping_name, stage)
+            / ujhz_dir_token(U, Jh, zeta)
+            / "L3"
+        )
     elif stage == "L4":
-        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "L4"
+        return (
+            root
+            / "core"
+            / core
+            / "hopping"
+            / _require_stage_token("hopping_name", hopping_name, stage)
+            / ujhz_dir_token(U, Jh, zeta)
+            / "kramer"
+            / _require_stage_token("kramer_name", kramer_name, stage)
+            / "L4"
+        )
     elif stage == "spin12":
-        return root / "core" / core / ujhz_dir_token(U, Jh, zeta) / "spin12"
+        return (
+            root
+            / "core"
+            / core
+            / "hopping"
+            / _require_stage_token("hopping_name", hopping_name, stage)
+            / ujhz_dir_token(U, Jh, zeta)
+            / "kramer"
+            / _require_stage_token("kramer_name", kramer_name, stage)
+            / "spin12"
+        )
     else:
         raise IOError_(
             "FXE-IO-001",
             f"Unknown stage: {stage}",
             actual={"stage": stage},
         )
+
+
+def _require_stage_token(field_name: str, value: str, stage: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise IOError_(
+        "FXE-IO-001",
+        f"Missing required path token {field_name} for stage {stage}",
+        actual={"field_name": field_name, "stage": stage},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +362,8 @@ def append_index_record(
         "U",
         "Jh",
         "zeta",
+        "hopping_name",
+        "kramer_name",
         "content_hash",
     ):
         record.setdefault(field, None)
@@ -354,3 +423,48 @@ def build_meta(
     if extra:
         meta.update(extra)
     return meta
+
+
+def write_point_result_txt(
+    output_root: str,
+    *,
+    RE: str,
+    n_ele: int,
+    hopping_label: str,
+    projection_label: str,
+    U: float,
+    Jh: float,
+    zeta: float,
+    J_mu: NDArray[np.floating] | NDArray[np.complexfloating],
+    mapping_residual: float,
+) -> Path:
+    path = Path(output_root) / point_result_filename(
+        RE=RE,
+        n_ele=n_ele,
+        hopping_label=hopping_label,
+        projection_label=projection_label,
+        U=U,
+        Jh=Jh,
+        zeta=zeta,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    J = np.asarray(J_mu, dtype=float)
+    values = [
+        float(U),
+        float(Jh),
+        float(Jh) / float(U),
+        float(zeta),
+        float(J[0, 0]),
+        float(J[0, 1]),
+        float(J[0, 2]),
+        float(J[1, 0]),
+        float(J[1, 1]),
+        float(J[1, 2]),
+        float(J[2, 0]),
+        float(J[2, 1]),
+        float(J[2, 2]),
+        float(mapping_residual),
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(" ".join(f"{value:.12f}" for value in values) + "\n")
+    return path

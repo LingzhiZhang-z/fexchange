@@ -48,9 +48,8 @@ MUST:
   - `[physics]` (required if window includes `LMSM` or `L0`)
   - `[model]` (required if window includes `LMSM`)
   - `[sopt]` (required if window includes `L3` or `L4`)
+  - `[inputs]` (required if window includes `L2` or `L3` or `L4`)
   - `[sources]` (required if window includes `L2` or `L3` or `L4`)
-  - `[wannier90]` (required if `sources.hopping_source = "wannier90"` and window includes `L2` or `L3` or `L4`)
-  - `[kramer_input]` (required if `sources.kramer_source = "file"` and window includes `L4`)
 
 Code form:
 ```text
@@ -66,11 +65,13 @@ Validation:
 MUST:
 - `[physics]`:
   - `n_ele` (int, `1..13`)
-  - `F2` (float)
-  - `F4` (float)
-  - `F6` (float)
+  - `RE` (string, optional; `auto` or one of `Ce/Pr/Nd/Pm/Sm/Eu/Gd/Tb/Dy/Ho/Er/Tm/Yb`)
+  - `F2` (float; required unless derived from `RE` + `sopt.Jh`)
+  - `F4` (float; required unless derived from `RE` + `sopt.Jh`)
+  - `F6` (float; required unless derived from `RE` + `sopt.Jh`)
   - internal-derived only: `r42 = F4/F2`, `r62 = F6/F2`
   - constraint: `F2 != 0`
+  - if `RE != "auto"`, implementations may derive default `F2/F4/F6` from `RE` and `sopt.Jh`; explicit input values override defaults field-by-field
 - `[model]`:
   - `scheme` (string, currently `RS`)
   - `symmetry` (string: `Oh` or `C3v`)
@@ -78,7 +79,7 @@ MUST:
 - `[sopt]`:
   - `U` (float; physically $U = F^0$, the zeroth Slater-Condon parameter)
   - `Jh` (float)
-  - `zeta` (float)
+  - `zeta` (float; required unless derived from `physics.RE`)
 - `[sopt]` / `[physics]` cross-reference note (MUST):
   - `F^0` is NOT a field in `[physics]` because within a fixed `n` sector
     it contributes a constant $F^0 n(n-1)/2$ to all states and does not
@@ -88,14 +89,16 @@ MUST:
   - Implementations MUST use `sopt.U` as $F^0$ when reconstructing absolute
     LSJM energies across sectors for intermediate-state denominators.
 - `[sources]`:
-  - `hopping_source` (`wannier90` or `file`)
-  - `kramer_source` (`cef` or `file`)
-  - `hopping_name` (string, stable cache/key token for `L2/L3/L4`)
-  - `kramer_name` (string, required if window includes `L4`; stable cache/key token)
+  - `hopping_label` (string; user-facing label for `L2/L3/L4`)
+  - `projection_label` (string; user-facing label for `L4`)
+  - internal-canonical only:
+    - `hopping_name` (stable cache/key token normalized from `hopping_label`)
+    - `kramer_name` (stable cache/key token normalized from `projection_label`)
 - `[paths]`:
   - `output_root` (string, MUST equal `"./outputs"` in this standard version)
-  - if `hopping_source=file`: `hopping_file`
-  - if `kramer_source=file`: `kramer_file`
+- `[inputs]`:
+  - `hopping_file`
+  - `projector_file` (required if window includes `L4`)
 - `[runtime]`:
   - `start_level` (string: `LMSM`, `LSJM`, `L0`, `L1`, `L2`, `L3`, or `L4`)
   - `end_level` (string: `LMSM`, `LSJM`, `L0`, `L1`, `L2`, `L3`, or `L4`)
@@ -161,9 +164,9 @@ MUST:
   - if window includes `LSJM`: require upstream `LMSM` artifact
   - if window includes `L0`: require `[physics]`
   - if window includes `L1`: require upstream `LSJM` and `L0` artifacts
-  - if window includes `L2`: require `[sources]`, `sources.hopping_name`, and hopping input source
-  - if window includes `L3`: require `[sources]`, `sources.hopping_name`, and `[sopt]`
-  - if window includes `L4`: require `[sources]`, `sources.hopping_name`, `sources.kramer_name`, `[sopt]`, and Kramer input source
+  - if window includes `L2`: require `[inputs]`, `[sources]`, and canonical `sources.hopping_name`
+  - if window includes `L3`: require `[inputs]`, `[sources]`, canonical `sources.hopping_name`, and `[sopt]`
+  - if window includes `L4`: require `[inputs]`, `[sources]`, canonical `sources.hopping_name`, canonical `sources.kramer_name`, and `[sopt]`
 - `start_level = end_level` means compute that single level only;
   all upstream levels must already exist/validate, downstream levels are skipped.
 - Precompute-only mode is expressed by `end_level <= L2`.
@@ -179,7 +182,7 @@ Validation:
 - Missing/invalid `sopt.U/Jh/zeta` (when window includes `L3` or `L4`) is `FXE-INPUT-003`.
 - Missing/invalid upstream artifact at preflight is `FXE-IO-001/002`.
 - Missing window-required input field is `FXE-INPUT-002/003`.
-- Missing/invalid `sources.hopping_name`/`sources.kramer_name` (as required by window) is `FXE-INPUT-003`.
+- Missing/invalid canonical `sources.hopping_name`/`sources.kramer_name` (as required by window) is `FXE-INPUT-003`.
 - `paths.output_root != "./outputs"` is `FXE-INPUT-003`.
 
 ## 7) Minimal Readable Example (MUST)
@@ -192,9 +195,7 @@ title            = "N=6 single-point test"
 
 [physics]
 n_ele = 6
-F2    = 1.000000000000
-F4    = 1.000000000000
-F6    = 2.000000000000
+RE    = "Eu"
 
 [model]
 scheme       = "RS"
@@ -204,33 +205,17 @@ c3v_mode_q3  = "sin"
 [sopt]
 U    = 3.000000000000
 Jh   = 4.000000000000
-zeta = 5.000000000000
 
 [sources]
-hopping_source = "wannier90"
-kramer_source  = "cef"
-hopping_name   = "w90_demo_bond0"
-kramer_name    = "cef_lowest_doublet_v1"
+hopping_label    = "w90_demo_bond0"
+projection_label = "cef_lowest_doublet_v1"
+
+[inputs]
+hopping_file   = "./data/wannier90/w90_t_mu.npz"
+projector_file = "./data/cef/kramer.npz"
 
 [paths]
 output_root = "./outputs"
-
-[wannier90]
-soc_mode                  = "with_soc"
-hr_path                   = "./data/wannier90/wannier_hr.dat"
-win_path                  = "./data/wannier90/wannier.win"
-orbital_basis             = "real_harmonic_default_w90"
-orbital_order_id          = "w90_f_default_v1"
-energy_unit               = "eV"
-f_site_i                  = 0
-f_site_j                  = 1
-f_site_i_cell             = [0, 0, 0]
-f_site_j_cell             = [1, 0, 0]
-ligand_indices            = [2, 3, 4, 5]
-ligand_cells              = [[0, 0, 0], [0, 0, 0], [1, 0, 0], [1, 0, 0]]
-all_wannier_atom_indices  = [0, 1, 2, 3, 4, 5]
-delta_mode                = "from_onsite"
-delta_reduction           = "channelwise"
 
 [runtime]
 start_level         = "L1"

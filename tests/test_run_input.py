@@ -167,18 +167,75 @@ class TestRunInputValidation:
         cfg = load_run_input(path)
         assert cfg["inputs"]["hopping_file"] == str(hopping)
 
-    def test_sources_section_is_now_rejected(self, tmp_path):
+    def test_sources_labels_are_normalized_to_canonical_names(self, tmp_path):
+        hopping = tmp_path / "hop.npy"
+        projector = tmp_path / "proj.npy"
+        hopping.write_bytes(b"placeholder")
+        projector.write_bytes(b"placeholder")
+        path = _write(
+            tmp_path,
+            f"""
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "sources_normalized"
+            title = "sources section normalized"
+
+            [physics]
+            n_ele = 13
+            F2 = 1.0
+            F4 = 0.6
+            F6 = 0.4
+
+            [sources]
+            hopping_label = "YbOCl_bond1"
+            projection_label = "cef_ground"
+
+            [inputs]
+            hopping_file = "{hopping}"
+            projector_file = "{projector}"
+
+            [sopt]
+            U = 6.0
+            Jh = 0.3
+            zeta = 0.4
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L4"
+            end_level = "L4"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+            """,
+        )
+
+        cfg = load_run_input(path)
+        assert cfg["sources"]["hopping_label"] == "YbOCl_bond1"
+        assert cfg["sources"]["projection_label"] == "cef_ground"
+        assert cfg["sources"]["hopping_name"] == "YbOCl_bond1"
+        assert cfg["sources"]["kramer_name"] == "cef_ground"
+
+    def test_re_defaults_fill_missing_physics_and_zeta(self, tmp_path):
         path = _write(
             tmp_path,
             """
             schema_version = "fxe.run_input.v1"
             standard_version = "2026-02"
-            run_id = "sources_rejected"
-            title = "sources section rejected"
+            run_id = "re_defaults"
+            title = "re defaults"
 
-            [sources]
-            hopping_source = "file"
-            kramer_source = "file"
+            [physics]
+            n_ele = 13
+            RE = "Yb"
+
+            [sopt]
+            U = 6.0
+            Jh = 0.3
 
             [paths]
             output_root = "./outputs"
@@ -195,5 +252,50 @@ class TestRunInputValidation:
             """,
         )
 
-        with pytest.raises(InputError, match="Unsupported top-level section"):
-            load_run_input(path)
+        cfg = load_run_input(path)
+        assert cfg["physics"]["RE"] == "Yb"
+        assert cfg["physics"]["F2"] == pytest.approx(12.32692411 * 0.3)
+        assert cfg["physics"]["F4"] == pytest.approx(7.75712981 * 0.3)
+        assert cfg["physics"]["F6"] == pytest.approx(5.58743756 * 0.3)
+        assert cfg["sopt"]["zeta"] == pytest.approx(0.408)
+
+    def test_explicit_values_override_re_defaults(self, tmp_path):
+        path = _write(
+            tmp_path,
+            """
+            schema_version = "fxe.run_input.v1"
+            standard_version = "2026-02"
+            run_id = "re_override"
+            title = "re override"
+
+            [physics]
+            n_ele = 13
+            RE = "Yb"
+            F2 = 9.0
+            F6 = 7.0
+
+            [sopt]
+            U = 6.0
+            Jh = 0.3
+            zeta = 0.5
+
+            [paths]
+            output_root = "./outputs"
+
+            [runtime]
+            start_level = "L1"
+            end_level = "L1"
+            on_missing_upstream = "fail"
+            read_first = true
+
+            [checks]
+            strict_mode = true
+            eps_profile = "default"
+            """,
+        )
+
+        cfg = load_run_input(path)
+        assert cfg["physics"]["F2"] == pytest.approx(9.0)
+        assert cfg["physics"]["F4"] == pytest.approx(7.75712981 * 0.3)
+        assert cfg["physics"]["F6"] == pytest.approx(7.0)
+        assert cfg["sopt"]["zeta"] == pytest.approx(0.5)

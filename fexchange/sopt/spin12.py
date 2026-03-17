@@ -34,8 +34,7 @@ def spin12_map(
     ----------
     Heff : effective Hamiltonian matrix, shape (2,2,2,2) or (4,4).
 
-    Returns dict with J_mu (3x3), J_iso, K, D (3,), Gamma (3,3),
-    const, h_i (3,), h_j (3,), residual.
+    Returns dict with J_mu (3x3) and mapping_residual.
     """
     if Heff.shape == (2, 2, 2, 2):
         Heff_flat = Heff.reshape(4, 4)
@@ -66,25 +65,6 @@ def spin12_map(
     # Take real part (should be real for physical couplings)
     J_real = J_mu.real
 
-    # Derived decomposition (04-03 §3.2)
-    J_iso = (J_real[0, 0] + J_real[1, 1] + J_real[2, 2]) / 3.0
-    K = J_real[2, 2] - J_iso
-
-    D = np.array([
-        0.5 * (J_real[1, 2] - J_real[2, 1]),
-        0.5 * (J_real[2, 0] - J_real[0, 2]),
-        0.5 * (J_real[0, 1] - J_real[1, 0]),
-    ])
-
-    J_sym = 0.5 * (J_real + J_real.T)
-    J_diag = np.diag(np.diag(J_real))
-    Gamma = J_sym - J_diag
-
-    # Non-exchange terms (04-03 §3.3)
-    const = C[0, 0].real
-    h_i = np.array([2 * C[a + 1, 0].real for a in range(3)])
-    h_j = np.array([2 * C[0, b + 1].real for b in range(3)])
-
     # Reconstruction check (04-03 §5)
     H_reconstructed = np.zeros((4, 4), dtype=DTYPE_COMPLEX)
     for eta_idx in range(4):
@@ -103,17 +83,9 @@ def spin12_map(
             actual={"residual_name": "r_spin12", "residual_value": float(residual), "threshold": EPS_MAP},
         )
 
-    logger.info("Spin-1/2 mapping: J_iso=%.4f, K=%.4f, |D|=%.4f, residual=%.2e",
-                J_iso, K, np.linalg.norm(D), residual)
+    logger.info("Spin-1/2 mapping: residual=%.2e", residual)
 
     return {
         "J_mu": J_real,
-        "J_iso": float(J_iso),
-        "K": float(K),
-        "D": D,
-        "Gamma": Gamma,
-        "const": float(const),
-        "h_i": h_i,
-        "h_j": h_j,
-        "residual": float(residual),
+        "mapping_residual": float(residual),
     }

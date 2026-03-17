@@ -21,6 +21,9 @@ CORE_TOKEN_RE = re.compile(
 
 def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, Any]) -> str:
     sver = cfg.get("standard_version", STANDARD_VERSION)
+    sources = cfg.get("sources", {})
+    hopping_name = str(sources.get("hopping_name", "")) if isinstance(sources, dict) else ""
+    kramer_name = str(sources.get("kramer_name", "")) if isinstance(sources, dict) else ""
     if level == "LMSM":
         return f"LMSM|n={n_ele}|r42={fmt12(r42)}|r62={fmt12(r62)}|sv={sver}"
     if level == "LSJM":
@@ -35,6 +38,7 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     if level == "L2":
         return (
             f"L2|keyL1={level_key('L1', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
+            f"|hopping_name={hopping_name}"
             f"|sv={sver}"
         )
     if level == "L3":
@@ -46,6 +50,7 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     if level == "L4":
         return (
             f"L4|keyL3={level_key('L3', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
+            f"|kramer_name={kramer_name}"
             f"|sv={sver}"
         )
     raise InputError("FXE-INPUT-003", f"Unknown level for key generation: {level}")

@@ -46,6 +46,9 @@ def validate_upstream_artifacts(
     if not required:
         return
     output_root = cfg["paths"]["output_root"]
+    sources = cfg.get("sources", {})
+    hopping_name = str(sources.get("hopping_name", "")) if isinstance(sources, dict) else ""
+    kramer_name = str(sources.get("kramer_name", "")) if isinstance(sources, dict) else ""
     missing: list[str] = []
     invalid: list[str] = []
 
@@ -101,6 +104,7 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
+            hopping_name=hopping_name,
         )
         _check(d / "data.npz", ["M_A", "M_B"])
         try:
@@ -116,6 +120,7 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
+            hopping_name=hopping_name,
             U=float(s["U"]),
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
@@ -134,9 +139,11 @@ def validate_upstream_artifacts(
             r42=r42,
             r62=r62,
             scheme=scheme,
+            hopping_name=hopping_name,
             U=float(s["U"]),
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
+            kramer_name=kramer_name,
         )
         _check(d / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
         try:

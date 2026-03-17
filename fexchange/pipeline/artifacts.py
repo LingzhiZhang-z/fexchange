@@ -145,7 +145,12 @@ def try_load_l4(stage_dir: Path) -> dict[str, Any] | None:
         validate_meta(meta)
         h = np.asarray(d["h_mu_abcd"], dtype=np.complex128)
         heff = np.asarray(d["Heff_mu_abcd"], dtype=np.complex128)
-        return {"h_mu_abcd": h, "Heff_mu_abcd": heff, "n_k": int(h.shape[0])}
+        result = {"h_mu_abcd": h, "Heff_mu_abcd": heff, "n_k": int(h.shape[0])}
+        if "J_mu" in d:
+            result["J_mu"] = np.asarray(d["J_mu"], dtype=float)
+        if "mapping_residual" in d:
+            result["mapping_residual"] = float(np.asarray(d["mapping_residual"]).item())
+        return result
     except Exception as exc:
         logger.warning("Invalid cached L4 at %s (%s), recomputing", stage_dir, exc)
         return None
@@ -333,6 +338,7 @@ def persist_l2(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=cfg["sources"]["hopping_name"],
     )
     content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
@@ -348,6 +354,7 @@ def persist_l2(
         payload_files=["data.npz"],
         extra={
             "axis_order_id": {"M_A": "uvj1j2_v1", "M_B": "rsj1j2_v1"},
+            "hopping_name": cfg["sources"]["hopping_name"],
             "numerics_meta": numerics_meta(),
         },
     )
@@ -362,6 +369,7 @@ def persist_l2(
             "n": n_ele,
             "r42": r42,
             "r62": r62,
+            "hopping_name": cfg["sources"]["hopping_name"],
             "content_hash": content_hash,
         },
     )
@@ -385,6 +393,7 @@ def persist_l3(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=cfg["sources"]["hopping_name"],
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
@@ -399,6 +408,7 @@ def persist_l3(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
+            "hopping_name": cfg["sources"]["hopping_name"],
         },
         tensor_name="h_pre_j_mu",
         physical_meaning="Intermediate projected kernel before W projection",
@@ -422,6 +432,7 @@ def persist_l3(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
+            "hopping_name": cfg["sources"]["hopping_name"],
             "content_hash": content_hash,
         },
     )
@@ -447,17 +458,22 @@ def persist_l4(
         r42=r42,
         r62=r62,
         scheme=scheme,
+        hopping_name=cfg["sources"]["hopping_name"],
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
+        kramer_name=cfg["sources"]["kramer_name"],
     )
-    content_hash = atomic_write_npz(
-        stage_dir / "data.npz",
-        h_mu_abcd=result["h_mu_abcd"],
-        Heff_mu_abcd=result["Heff_mu_abcd"],
-        labels_abcd=labels,
-        W=W,
-    )
+    payload = {
+        "h_mu_abcd": result["h_mu_abcd"],
+        "Heff_mu_abcd": result["Heff_mu_abcd"],
+        "labels_abcd": labels,
+        "W": W,
+    }
+    if "J_mu" in result:
+        payload["J_mu"] = result["J_mu"]
+        payload["mapping_residual"] = np.asarray(result["mapping_residual"], dtype=float)
+    content_hash = atomic_write_npz(stage_dir / "data.npz", **payload)
     meta = build_meta(
         module="sopt.contraction",
         level="L4",
@@ -467,6 +483,8 @@ def persist_l4(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
+            "hopping_name": cfg["sources"]["hopping_name"],
+            "kramer_name": cfg["sources"]["kramer_name"],
         },
         tensor_name="h_mu_abcd, Heff_mu_abcd",
         physical_meaning="Final projected effective exchange tensor",
@@ -476,6 +494,10 @@ def persist_l4(
         payload_files=["data.npz"],
         extra={
             "labels_order_id": "abcd_lex_v1",
+            "jmu_available": "J_mu" in result,
+            "mapping_residual": result.get("mapping_residual"),
+            "hopping_name": cfg["sources"]["hopping_name"],
+            "kramer_name": cfg["sources"]["kramer_name"],
             "numerics_meta": numerics_meta(),
         },
     )
@@ -493,6 +515,8 @@ def persist_l4(
             "U": float(sopt["U"]),
             "Jh": float(sopt["Jh"]),
             "zeta": float(sopt["zeta"]),
+            "hopping_name": cfg["sources"]["hopping_name"],
+            "kramer_name": cfg["sources"]["kramer_name"],
             "content_hash": content_hash,
         },
     )

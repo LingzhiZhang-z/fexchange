@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from fexchange.io.disk import (
     append_error_record,
+    write_point_result_txt,
 )
 from fexchange.io.run_input import (
     load_run_input,
@@ -134,6 +135,7 @@ def _run_pipeline(toml_path: str) -> int:
         _emit_stage_summary(level=level, key=level_key, elapsed_s=time.time() - t_level)
 
     total = time.time() - t0
+    _maybe_write_point_result(cfg, state, n_ele=n_ele)
     logger.info("pipeline complete in %.3fs", total)
     print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}")
     return 0
@@ -179,6 +181,31 @@ def _emit_stage_summary(*, level: str, key: str, elapsed_s: float) -> None:
         "numerics_meta": numerics_meta(),
     }
     logger.info("stage_summary=%s", json.dumps(summary, default=str))
+
+
+def _maybe_write_point_result(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int) -> None:
+    l4 = state.get("l4")
+    if not isinstance(l4, dict):
+        return
+    if "J_mu" not in l4 or "mapping_residual" not in l4:
+        return
+
+    physics = cfg.get("physics", {})
+    sources = cfg.get("sources", {})
+    sopt = cfg["sopt"]
+    path = write_point_result_txt(
+        cfg["paths"]["output_root"],
+        RE=str(physics.get("RE", "auto")),
+        n_ele=n_ele,
+        hopping_label=str(sources.get("hopping_label", sources.get("hopping_name", "auto"))),
+        projection_label=str(sources.get("projection_label", sources.get("kramer_name", "auto"))),
+        U=float(sopt["U"]),
+        Jh=float(sopt["Jh"]),
+        zeta=float(sopt["zeta"]),
+        J_mu=l4["J_mu"],
+        mapping_residual=float(l4["mapping_residual"]),
+    )
+    logger.info("point_result=%s", path)
 
 
 def _safe_append_error(output_root: str, payload: dict[str, Any]) -> None:

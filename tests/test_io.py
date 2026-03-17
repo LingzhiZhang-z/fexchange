@@ -8,7 +8,7 @@ from pathlib import Path
 from fexchange.io.disk import (
     fmt12, core_dir_token, ujhz_dir_token,
     build_stage_path, atomic_write_npz, atomic_write_json,
-    build_meta,
+    build_meta, point_result_filename,
 )
 
 
@@ -26,6 +26,43 @@ class TestPathTokens:
     def test_build_stage_path(self):
         p = build_stage_path("./outputs", "LMSM", n=2, r42=0.5, r62=0.25)
         assert "LMSM" in str(p)
+
+    def test_l2_and_l4_paths_include_canonical_labels(self):
+        p_l2 = build_stage_path(
+            "./outputs",
+            "L2",
+            n=2,
+            r42=0.5,
+            r62=0.25,
+            hopping_name="bond_a",
+        )
+        p_l4 = build_stage_path(
+            "./outputs",
+            "L4",
+            n=2,
+            r42=0.5,
+            r62=0.25,
+            hopping_name="bond_a",
+            U=1.0,
+            Jh=2.0,
+            zeta=3.0,
+            kramer_name="proj_a",
+        )
+        assert "hopping/bond_a/L2" in str(p_l2)
+        assert "hopping/bond_a" in str(p_l4)
+        assert "kramer/proj_a/L4" in str(p_l4)
+
+    def test_point_result_filename_uses_fixed_6_decimals(self):
+        name = point_result_filename(
+            RE="Yb",
+            n_ele=13,
+            hopping_label="bond_a",
+            projection_label="proj_a",
+            U=8000.0,
+            Jh=300.0,
+            zeta=391.1234567,
+        )
+        assert name == "Yb_13_bond_a_proj_a_8000.000000_300.000000_391.123457.txt"
 
 
 class TestAtomicWrite:

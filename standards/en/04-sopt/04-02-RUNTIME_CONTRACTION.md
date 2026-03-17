@@ -163,7 +163,7 @@ This file covers $L2/L3/L4$ and uses three variable classes:
 Per-level definition:
 - $L2$: input `{A, B, t_mu}`; intermediate `{workspace}`; output `{M_A, M_B}`.
 - $L3$: input `{M_A, M_B, E_u}`; intermediate `{E_uv, E_rs, workspace}`; output `{h_pre_j_mu}`.
-- $L4$: input `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}`.
+- $L4$: input `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}` and, when the projected local space is `2 x 2`, optional `{J_mu, mapping_residual}`.
 
 ## 0.0.0) $E_u$ Intermediate-State Energy Source (MUST)
 `E_u` is a runtime-derived input for $L3$, not an independent persistent artifact.
