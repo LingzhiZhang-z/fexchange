@@ -6,6 +6,7 @@ All are Yb³⁺ (f¹³), D3d structure, C3v CEF branch with sin mode for q=3 ter
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,7 +31,17 @@ from w90_decompose_h_local import (  # noqa: E402
 # Shared constants
 # ---------------------------------------------------------------------------
 
-DATA_DIR = PROJECT_ROOT / "data"
+def _resolve_data_dir() -> Path:
+    local = PROJECT_ROOT / "data"
+    if local.exists():
+        return local
+    fallback = Path("/Users/lingzhi/Documents/Code/fexchange/data")
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError("Could not resolve repository data directory.")
+
+
+DATA_DIR = _resolve_data_dir()
 MATERIALS = ["YbOF", "YbOCl", "YbOBr"]
 
 N_ELE = 13
@@ -279,3 +290,37 @@ def test_soc_direct_local_fit_matches_ybocl_reference():
     )
     expected -= expected.min()
     np.testing.assert_allclose(out["cef_splitting_meV"], expected, atol=2e-4)
+
+
+def test_soc_direct_local_cli_writes_ybocl_reference(tmp_path):
+    """CLI direct-local mode must emit the YbOCl reference Stevens config."""
+    h_local = np.loadtxt(
+        DATA_DIR / "YbOCl" / "test" / "w90" / "w90_soc_h_local.dat",
+        dtype=complex,
+    )
+    h_local_hole = -h_local.conj()
+    h_local_path = tmp_path / "h_local_hole.dat"
+    np.savetxt(h_local_path, h_local_hole, fmt="%.12f")
+
+    cef_cfg = tmp_path / "cef_config.toml"
+    cmd = [
+        sys.executable,
+        str(TOOLS_DIR / "w90_decompose_h_local.py"),
+        "--h_local_dat", str(h_local_path),
+        "--rtol", "5e-3",
+        "--n_ele", "1",
+        "--symmetry", "C3v",
+        "--mode_q3", "sin",
+        "--direct_local_fit",
+        "--write_cef_config", str(cef_cfg),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+    cfg = _parse_ref_cef(cef_cfg)
+    ref = _parse_ref_cef(DATA_DIR / "YbOCl" / "test" / "ref_cef_soc.txt")
+    assert cfg["B20"] == pytest.approx(ref["B20"], abs=1e-6)
+    assert cfg["B40"] == pytest.approx(ref["B40"], abs=1e-6)
+    assert cfg["B60"] == pytest.approx(ref["B60"], abs=1e-6)
+    assert cfg["B43"] == pytest.approx(ref["B43s"], abs=1e-6)
+    assert cfg["B63"] == pytest.approx(ref["B63s"], abs=1e-6)
+    assert cfg["B66"] == pytest.approx(ref["B66"], abs=1e-6)

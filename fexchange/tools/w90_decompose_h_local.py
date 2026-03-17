@@ -522,6 +522,11 @@ if __name__ == "__main__":
     p.add_argument("--zeta_soc", type=float)
     p.add_argument("--symmetry", choices=("Oh", "C3v"), default="Oh")
     p.add_argument("--mode_q3", choices=("cos", "sin"), default="cos")
+    p.add_argument(
+        "--direct_local_fit",
+        action="store_true",
+        help="Fit Stevens parameters directly in the SOC-lowest J0 manifold",
+    )
     p.add_argument("--write_cef_config", type=str)
     args = p.parse_args()
 
@@ -537,11 +542,21 @@ if __name__ == "__main__":
     _print_scheme_a(decompose_orbital_tensors(h_cef))
 
     if args.n_ele is not None:
-        sb = extract_cef_stevens_fit(
-            h_cef, n_ele=args.n_ele,
-            zeta=args.zeta_soc or zeta,
-            symmetry=args.symmetry, mode_q3=args.mode_q3,
-        )
+        zeta_fit = args.zeta_soc or zeta
+        if args.direct_local_fit:
+            sb = extract_local_stevens_fit(
+                h_local,
+                n_ele=args.n_ele,
+                zeta=zeta_fit,
+                symmetry=args.symmetry,
+                mode_q3=args.mode_q3,
+            )
+        else:
+            sb = extract_cef_stevens_fit(
+                h_cef, n_ele=args.n_ele,
+                zeta=zeta_fit,
+                symmetry=args.symmetry, mode_q3=args.mode_q3,
+            )
         print()
         _print_scheme_b(sb, args.symmetry)
 
