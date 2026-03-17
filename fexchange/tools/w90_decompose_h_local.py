@@ -419,6 +419,73 @@ def extract_cef_stevens_fit(
     }
 
 
+def extract_local_stevens_fit(
+    h_local,
+    n_ele,
+    zeta,
+    symmetry="Oh",
+    mode_q3="cos",
+):
+    """
+    Project a full 14x14 local one-body Hamiltonian directly into the SOC-lowest
+    J0 subspace and fit Stevens parameters there.
+
+    This route is intended for SOC-included ``h_local`` matrices, where fitting
+    in the J0 manifold avoids errors from forcing an approximate
+    ``h_local = h_cef ⊗ I + zeta L·S`` separation at the orbital level.
+    """
+    h_local = np.asarray(h_local, dtype=complex)
+    if h_local.shape != (14, 14):
+        raise ValueError(f"h_local must be (14,14), got {h_local.shape}")
+
+    from fexchange.core.fermion import one_body_operator_matrix
+    from fexchange.spectrum.lsms import build_lsms
+    from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
+    from fexchange.utils.constants import N_ORB
+
+    h_local_fock = one_body_operator_matrix(h_local, n_ele, N_ORB)
+
+    lsms = build_lsms(n_ele, N_ORB, r42=0, r62=0)
+    lsjm = build_lsjm(lsms, N_ORB)
+    soc0 = select_soc_lowest_subspace(lsjm, F2=1, F4=0, F6=0, zeta=zeta)
+
+    U_j0 = soc0["U_n_soc0"]
+    h_local_j0 = U_j0.conj().T @ h_local_fock @ U_j0
+
+    fock_norm = np.linalg.norm(h_local_fock)
+    j0_weight = np.linalg.norm(h_local_j0) / fock_norm if fock_norm > 0 else 1.0
+
+    dim = h_local_j0.shape[0]
+    trace_avg = complex(np.trace(h_local_j0) / dim)
+    h_j0_0 = h_local_j0 - trace_avg * np.eye(dim, dtype=complex)
+
+    templates = _build_stevens_templates(soc0["J0"], symmetry=symmetry, mode_q3=mode_q3)
+    names, coeffs, h_fit_0 = _real_least_squares_coeffs(templates, h_j0_0)
+    h_fit = h_fit_0 + trace_avg * np.eye(dim, dtype=complex)
+
+    eigvals = np.linalg.eigvalsh(h_local_j0)
+    eigvals_fit = np.linalg.eigvalsh(h_fit)
+
+    return {
+        "alpha0": soc0["alpha0"],
+        "L0": soc0["L0"],
+        "S0": soc0["S0"],
+        "J0": soc0["J0"],
+        "n_j": soc0["n_j"],
+        "j0_weight": j0_weight,
+        "trace_avg_j0": trace_avg,
+        "stevens_fit_residual": _relative_residual(h_j0_0, h_fit_0),
+        "B_params": {name: float(coeffs[i]) for i, name in enumerate(names)},
+        "H_local_j0": h_local_j0,
+        "H_cef_j0": h_local_j0,
+        "H_cef_j0_fit": h_fit,
+        "eigvals_meV": eigvals,
+        "eigvals_fit_meV": eigvals_fit,
+        "cef_splitting_meV": eigvals - eigvals.min(),
+        "cef_splitting_fit_meV": eigvals_fit - eigvals_fit.min(),
+    }
+
+
 def _format_scalar(value):
     """Format scalar output compactly for CLI summaries."""
     value = complex(value)
@@ -455,6 +522,11 @@ if __name__ == "__main__":
     p.add_argument("--zeta_soc", type=float)
     p.add_argument("--symmetry", choices=("Oh", "C3v"), default="Oh")
     p.add_argument("--mode_q3", choices=("cos", "sin"), default="cos")
+    p.add_argument(
+        "--direct_local_fit",
+        action="store_true",
+        help="Fit Stevens parameters directly in the SOC-lowest J0 manifold",
+    )
     p.add_argument("--write_cef_config", type=str)
     args = p.parse_args()
 
@@ -470,11 +542,21 @@ if __name__ == "__main__":
     _print_scheme_a(decompose_orbital_tensors(h_cef))
 
     if args.n_ele is not None:
-        sb = extract_cef_stevens_fit(
-            h_cef, n_ele=args.n_ele,
-            zeta=args.zeta_soc or zeta,
-            symmetry=args.symmetry, mode_q3=args.mode_q3,
-        )
+        zeta_fit = args.zeta_soc or zeta
+        if args.direct_local_fit:
+            sb = extract_local_stevens_fit(
+                h_local,
+                n_ele=args.n_ele,
+                zeta=zeta_fit,
+                symmetry=args.symmetry,
+                mode_q3=args.mode_q3,
+            )
+        else:
+            sb = extract_cef_stevens_fit(
+                h_cef, n_ele=args.n_ele,
+                zeta=zeta_fit,
+                symmetry=args.symmetry, mode_q3=args.mode_q3,
+            )
         print()
         _print_scheme_b(sb, args.symmetry)
 

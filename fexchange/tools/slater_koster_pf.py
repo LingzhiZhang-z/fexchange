@@ -15,10 +15,21 @@ f-orbital ordering: ξ, η, ζ, A₂ᵤ, α, β, γ
 p-orbital ordering: x, y, z
 complex f ordering: Y₃,-3, Y₃,-2, Y₃,-1, Y₃,0, Y₃,1, Y₃,2, Y₃,3
 
-The literature transfer matrices included below are for A₂PrO₃ z bonds in
-the cubic harmonic basis and are transformed here to the complex spherical
-harmonic basis by a unitary change of basis.
+The primary purpose of this module is to provide the general Slater-Koster
+formulae:
+    - hopping_pf(...)
+    - hopping_fpf(...)
+
+The PRB A₂PrO₃ transfer matrices are included only as a literature preset built
+on top of those conventions.
+
+Usage:
+    python slater_koster_pf.py export --a-site K --basis complex --output t_mu.npz
 """
+
+import argparse
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -28,6 +39,11 @@ _BASIS_COMPLEX_F = ("Y3,-3", "Y3,-2", "Y3,-1", "Y3,0", "Y3,1", "Y3,2", "Y3,3")
 _SQRT6 = np.sqrt(6.0)
 _SQRT10 = np.sqrt(10.0)
 _SQRT15 = np.sqrt(15.0)
+
+
+# ---------------------------------------------------------------------------
+# Core Slater-Koster p-f / f-p-f formulae
+# ---------------------------------------------------------------------------
 
 def _eval_px(l: float, m: float, n: float) -> tuple[np.ndarray, np.ndarray]:
     """σ and π coefficient arrays for E_{px, f_λ}, shape (7,) each.
@@ -130,6 +146,10 @@ def hopping_fpf(
     return h_pf1.conj().T @ h_pf2 / delta_pf
 
 
+# ---------------------------------------------------------------------------
+# Basis transforms and spinor lifting
+# ---------------------------------------------------------------------------
+
 def _build_U_c2y(spinor=False):
     """
     Cubic-harmonic -> complex-harmonic unitary for f orbitals.
@@ -159,6 +179,27 @@ def to_complex_basis(h_cubic: np.ndarray) -> np.ndarray:
     u = _build_U_c2y()
     return u @ h_cubic @ u.conj().T
 
+
+def _expand_to_spinor_interleaved(mat: np.ndarray) -> np.ndarray:
+    """Expand a 7x7 orbital matrix to 14x14 interleaved (dn,up) spinor form."""
+    n = mat.shape[0]
+    out = np.zeros((2 * n, 2 * n), dtype=complex)
+    for i in range(n):
+        for j in range(n):
+            out[2 * i, 2 * j] = mat[i, j]
+            out[2 * i + 1, 2 * j + 1] = mat[i, j]
+    return out
+
+
+def to_complex_basis_spinor(h_cubic_spinor: np.ndarray) -> np.ndarray:
+    """Transform a 14x14 spinor matrix from cubic to complex spherical basis."""
+    u = _build_U_c2y(spinor=True)
+    return u @ h_cubic_spinor @ u.conj().T
+
+
+# ---------------------------------------------------------------------------
+# Literature preset: A2PrO3 nearest-neighbor transfer matrices
+# ---------------------------------------------------------------------------
 
 def _build_hermitian_from_lower_triangle(rows: list[list[complex]]) -> np.ndarray:
     if len(rows) != 7:
@@ -206,8 +247,8 @@ _A2PRO3_TRANSFER_LOWER_TRIANGLES = {
 }
 
 
-def literature_a2pro3_transfer_cubic(a_site: str) -> np.ndarray:
-    """Return the A₂PrO₃ z-bond nearest-neighbor transfer matrix in cubic basis."""
+def literature_a2pro3_transfer_cubic_7x7(a_site: str) -> np.ndarray:
+    """Return the A₂PrO₃ z-bond nearest-neighbor transfer matrix in 7x7 cubic basis."""
     key = a_site.strip().upper()
     if key not in _A2PRO3_TRANSFER_LOWER_TRIANGLES:
         allowed = ", ".join(sorted(_A2PRO3_TRANSFER_LOWER_TRIANGLES))
@@ -216,60 +257,71 @@ def literature_a2pro3_transfer_cubic(a_site: str) -> np.ndarray:
     return _build_hermitian_from_lower_triangle(_A2PRO3_TRANSFER_LOWER_TRIANGLES[key])
 
 
+def literature_a2pro3_transfer_cubic(a_site: str) -> np.ndarray:
+    """Return the A₂PrO₃ z-bond transfer matrix in 14x14 cubic spinor basis."""
+    return _expand_to_spinor_interleaved(literature_a2pro3_transfer_cubic_7x7(a_site))
+
+
 def literature_a2pro3_transfer_complex(a_site: str) -> np.ndarray:
-    """Return the A₂PrO₃ z-bond transfer matrix in complex spherical basis."""
-    return to_complex_basis(literature_a2pro3_transfer_cubic(a_site))
+    """Return the A₂PrO₃ z-bond transfer matrix in 14x14 complex spinor basis."""
+    return to_complex_basis_spinor(literature_a2pro3_transfer_cubic(a_site))
 
 
-def _format_matrix(matrix: np.ndarray) -> str:
-    with np.printoptions(precision=4, suppress=True, linewidth=140):
-        return np.array2string(np.asarray(matrix), separator=", ")
+# ---------------------------------------------------------------------------
+# Auxiliary export helper for literature preset
+# ---------------------------------------------------------------------------
+
+def _save_matrix(path: Path, key: str, matrix: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = path.suffix.lower()
+    if suffix == ".npz":
+        np.savez(path, **{key: matrix})
+        return
+    if suffix == ".npy":
+        np.save(path, matrix)
+        return
+    if suffix == ".dat":
+        np.savetxt(path, matrix, fmt="%.12f")
+        return
+    raise ValueError(f"Unsupported output suffix: {path.suffix}")
+
+
+def _build_literature_matrix(a_site: str, basis: str) -> np.ndarray:
+    basis_key = basis.lower()
+    if basis_key == "cubic_7x7":
+        return literature_a2pro3_transfer_cubic_7x7(a_site)
+    if basis_key == "cubic":
+        return literature_a2pro3_transfer_cubic(a_site)
+    if basis_key == "complex":
+        return literature_a2pro3_transfer_complex(a_site)
+    raise ValueError(f"Unsupported literature basis: {basis}")
+
+
+def _parse_export_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Export Slater-Koster literature hopping matrices.")
+    parser.add_argument("--a-site", choices=("K", "Rb", "Cs"), required=True)
+    parser.add_argument("--basis", choices=("cubic_7x7", "cubic", "complex"), default="complex")
+    parser.add_argument("--output", required=True, help="Output path (.npz/.npy/.dat)")
+    parser.add_argument("--key", default="t_mu", help="NPZ key for .npz output")
+    return parser.parse_args(argv)
+
+
+def _run_export(argv: list[str]) -> int:
+    args = _parse_export_args(argv)
+    matrix = _build_literature_matrix(args.a_site, args.basis)
+    out_path = Path(args.output)
+    _save_matrix(out_path, args.key, matrix)
+    return 0
 
 
 if __name__ == "__main__":
-    import sys
-
     usage = (
         f"Usage:\n"
-        f"  python {sys.argv[0]} <pf_sigma> <pf_pi> <delta_pf>\n"
-        f"  python {sys.argv[0]} literature"
+        f"  python {sys.argv[0]} export --a-site K --basis complex --output t_mu.npz\n"
     )
 
-    if len(sys.argv) == 2 and sys.argv[1] == "literature":
-        for a_site in ("K", "Rb", "Cs"):
-            h_cubic = literature_a2pro3_transfer_cubic(a_site)
-            h_complex = literature_a2pro3_transfer_complex(a_site)
-            print(f"t_lit_{a_site}_cubic:")
-            print(_format_matrix(h_cubic))
-            print()
-            print(f"t_lit_{a_site}_complex:")
-            print(_format_matrix(h_complex))
-            if a_site != "Cs":
-                print()
-        sys.exit(0)
+    if len(sys.argv) >= 2 and sys.argv[1] == "export":
+        sys.exit(_run_export(sys.argv[2:]))
 
-    if len(sys.argv) != 4:
-        print(usage)
-        sys.exit(1)
-
-    try:
-        pf_sigma = float(sys.argv[1])
-        pf_pi = float(sys.argv[2])
-        delta_pf = float(sys.argv[3])
-    except ValueError:
-        print(usage)
-        sys.exit(1)
-
-    # Geometry: f1=(0,0,0), f2=(1,-1,0), ligands at (1,0,0) and (0,-1,0),
-    # with direction convention d = R_p - R_f for the two f-p-f paths.
-    h_eff_cubic = (
-        hopping_fpf(1, 0, 0, 0, 1, 0, pf_sigma, pf_pi, delta_pf)
-        + hopping_fpf(0, -1, 0, -1, 0, 0, pf_sigma, pf_pi, delta_pf)
-    )
-    h_eff_complex = to_complex_basis(h_eff_cubic)
-
-    print("t_eff_cubic:")
-    print(_format_matrix(h_eff_cubic))
-    print()
-    print("t_eff_complex:")
-    print(_format_matrix(h_eff_complex))
+    print(usage)
+    sys.exit(1)
