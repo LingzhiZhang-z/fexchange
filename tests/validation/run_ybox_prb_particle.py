@@ -707,18 +707,15 @@ def build_prb_projector_literature(site_dir: Path) -> Path:
 
 
 def build_prb_hopping(site_dir: Path, a_site: str) -> Path:
-    hopping = site_dir / "prb_t_mu.dat"
+    base = site_dir / "prb_t_mu.dat"
+    hopping = site_dir / f"prb_t_mu_{a_site}.dat"
     run_cmd(
         [
             sys.executable,
             str(TOOLS_DIR / "slater_koster_pf.py"),
-            "export",
-            "--a-site",
-            a_site,
-            "--basis",
-            "complex",
+            "literature",
             "--output",
-            str(hopping),
+            str(base),
         ],
         cwd=site_dir,
     )

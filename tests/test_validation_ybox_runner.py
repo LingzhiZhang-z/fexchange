@@ -127,16 +127,13 @@ def test_build_prb_hopping_uses_identical_spin_blocks(tmp_path) -> None:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    cubic_7x7 = module.literature_a2pro3_transfer_cubic_7x7("K")
-    cubic = module.literature_a2pro3_transfer_cubic("K")
+    cubic_7x7 = module._hermitian_from_lower_triangle(module._A2PRO3_TRANSFER_LOWER_TRIANGLES["K"])
     assert cubic_7x7.shape == (7, 7)
-    assert cubic.shape == (14, 14)
     spinor_cubic = np.zeros((14, 14), dtype=complex)
     for i in range(7):
         for j in range(7):
             spinor_cubic[2 * i, 2 * j] = cubic_7x7[i, j]
             spinor_cubic[2 * i + 1, 2 * j + 1] = cubic_7x7[i, j]
-    assert np.allclose(cubic, spinor_cubic)
     u = module._build_U_c2y(spinor=True)
     expected = u @ spinor_cubic @ u.conj().T
     assert np.allclose(data, expected)
@@ -147,7 +144,7 @@ def test_build_prb_hopping_calls_slater_koster_tool(tmp_path, monkeypatch) -> No
 
     def fake_run_cmd(cmd: list[str], *, cwd: Path):
         calls.append(cmd)
-        np.savetxt(tmp_path / "prb_t_mu.dat", np.eye(14, dtype=complex), fmt="%.12f")
+        np.savetxt(tmp_path / "prb_t_mu_K.dat", np.eye(14, dtype=complex), fmt="%.12f")
         class Dummy:
             stdout = ""
         return Dummy()
@@ -157,4 +154,4 @@ def test_build_prb_hopping_calls_slater_koster_tool(tmp_path, monkeypatch) -> No
 
     assert calls
     assert calls[0][1].endswith("slater_koster_pf.py")
-    assert calls[0][2] == "export"
+    assert calls[0][2] == "literature"
