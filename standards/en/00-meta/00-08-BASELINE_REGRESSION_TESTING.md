@@ -1,3 +1,8 @@
+# Baseline Regression Testing
+
+This file records the current baseline regression-testing prompt/contract for
+fresh end-to-end validation runs.
+
 # fexchange 测试 Prompt
 
 把下面整段内容直接发给另一个 AI，让它按这个要求在当前仓库里做测试。
@@ -401,4 +406,4 @@ PRB 至少需要确认：
 如果你只需要一个最短执行目标，那么先完成这两件事：
 
 1. “在仓库根目录 fresh 跑 YbOBr/YbOCl/YbOF 的 `bond1`、`U=6 eV` 六个例子，`energy_reference = lsjm_ground`，输出 `summary.tsv`，并检查 branch 非法字段是否会被 loader 静默接受。”
-2. “对 PRB 跑一轮标准 projector 和 `Oh, J=5/2` projector 变体，生成曲线数据和 PNG 图片，并确认三套材料、四个 `U` 都落盘成功。”  
+2. “对 PRB 跑一轮标准 projector 和 `Oh, J=5/2` projector 变体，生成曲线数据和 PNG 图片，并确认三套材料、四个 `U` 都落盘成功。”
