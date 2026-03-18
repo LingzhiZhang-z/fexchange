@@ -24,18 +24,20 @@ Code form:
     n-{n}_r42-{r42}_r62-{r62}_scheme-{scheme}/
       LMSM/
       LSJM/
-      L1/
-      hopping/
-        {hopping_name}/
-          L2/
-          input_hopping.npz   (optional snapshot)
-          U-{U}_Jh-{Jh}_z-{zeta}/
-              L3/
-              kramer/
-                {kramer_name}/
-                  input_kramer.npz (optional snapshot)
-                  L4/
-                  spin12/           (optional, module 04-03)
+      branchsig-{hash}/      (optional)
+        L1/
+        hopping/
+          {hopping_name}/
+            L2/
+            input_hopping.npz   (optional snapshot)
+            U-{U}_Jh-{Jh}_z-{zeta}/
+                denomsig-{hash}/ (optional)
+                  L3/
+                  kramer/
+                    {kramer_name}/
+                      input_kramer.npz (optional snapshot)
+                      L4/
+                      spin12/           (optional, module 04-03)
 ```
 
 Note:
@@ -55,9 +57,10 @@ Code form:
 ./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LMSM/E_terms.npz
 ./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LSJM/V.npz
 ./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LSJM/E_terms.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/hopping/wannier/L2/data.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/L3/data.npz
-./outputs/core/.../hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/kramer/k1/L4/data.npz
+./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/L1/data.npz
+./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/hopping/wannier/L2/data.npz
+./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/denomsig-112233445566/L3/data.npz
+./outputs/core/.../branchsig-a1b2c3d4e5f6/hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/denomsig-112233445566/kramer/k1/L4/data.npz
 ```
 
 ## 4) Optional Snapshot Files (Audit-Only)

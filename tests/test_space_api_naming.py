@@ -62,7 +62,6 @@ def test_shared_constants_live_in_single_utils_entrypoint():
         "STANDARD_VERSION",
         "LEVELS",
         "LEVEL_ORDER",
-        "UPSTREAM_REQUIREMENTS",
     )
 
     for name in expected_names:
@@ -78,7 +77,6 @@ def test_runtime_files_do_not_redefine_shared_constants():
         r"^STANDARD_VERSION\s*=",
         r"^LEVELS\s*=",
         r"^LEVEL_ORDER\s*=",
-        r"^UPSTREAM_REQUIREMENTS\s*:",
     )
 
     runtime_files = [

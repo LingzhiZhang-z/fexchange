@@ -1,8 +1,4 @@
-"""
-TOML run-input loader with strict schema/field validation.
-
-Spec reference: 00-05-RUN_INPUT_SINGLE_FILE.
-"""
+"""TOML run-input loader.  Spec: 05-04-RUN_INPUT."""
 
 from __future__ import annotations
 
@@ -12,93 +8,52 @@ from pathlib import Path
 from typing import Any
 
 from fexchange.utils.constants import (
-    LEVEL_ORDER,
-    RE_DEFAULTS_BY_N_ELE,
-    RE_TO_N_ELE,
-    RUN_SCHEMA_VERSION,
-    STANDARD_VERSION,
-    UPSTREAM_REQUIREMENTS,
+    LEVEL_ORDER, RE_DEFAULTS_BY_N_ELE, RE_TO_N_ELE,
+    RUN_SCHEMA_VERSION, STANDARD_VERSION,
 )
 from fexchange.utils.errors import InputError, SchemaError
 
 logger = logging.getLogger("fexchange")
 
-_ALLOWED_TOP_LEVEL_SECTIONS = frozenset(
-    {
-        "schema_version",
-        "standard_version",
-        "run_id",
-        "title",
-        "physics",
-        "model",
-        "sopt",
-        "inputs",
-        "sources",
-        "paths",
-        "runtime",
-        "checks",
-        "_derived",
-    }
-)
+_UNIT_SCALE = {"meV": 1.0, "eV": 1000.0}
+_RE_ENERGY_SCALE = 1000.0
+_F_KEYS = ("F2_ratio", "F4_ratio", "F6_ratio")
+_ALLOWED = frozenset({
+    "schema_version", "standard_version", "run_id", "title",
+    "units", "physics", "physics_nm1", "physics_np1",
+    "model", "sopt", "sopt_nm1", "sopt_np1",
+    "inputs", "sources", "paths", "runtime", "checks",
+    "_derived", "_branches",
+})
 
+
+# ── Public API ──────────────────────────────────────────────────────────
 
 def load_run_input(path: str | Path) -> dict[str, Any]:
-    """
-    Load and validate a run_input.toml file.
-
-    Returns a parsed configuration dict with ``_derived`` fields.
-    """
+    """Load, validate, normalize, and build branches from run_input.toml."""
     path = Path(path)
-    if not path.exists():
-        raise InputError(
-            "FXE-INPUT-001",
-            f"Run input file not found: {path}",
-            paths={"input_file": str(path)},
-        )
-    if path.name != "run_input.toml":
-        raise InputError(
-            "FXE-INPUT-003",
-            "Canonical run-input filename must be run_input.toml",
-            expected={"filename": "run_input.toml"},
-            actual={"filename": path.name},
-            paths={"input_file": str(path)},
-        )
+    _chk(path.exists(), "001", f"File not found: {path}")
+    _chk(path.name == "run_input.toml", "003", "Filename must be run_input.toml")
 
     cfg = _load_toml(path)
+    _validate_structure(cfg)
+    _normalize(cfg)
+    _validate_fields(cfg)
+    _build_branches(cfg)
+    _assemble_derived(cfg)
 
-    _validate_top_level(cfg)
-    _validate_runtime(cfg)
-    _validate_sections(cfg)
-    _normalize_sources(cfg)
-    _apply_re_defaults(cfg)
-    _validate_window_required_sections(cfg)
-    _validate_checks(cfg)
-
-    # Section-level validation.  The window gate allows stricter checks on active stages.
-    _validate_physics(cfg)
-    _validate_model(cfg)
-    _validate_sopt(cfg)
-    _validate_sources(cfg)
-    _validate_inputs(cfg)
-    _validate_paths(cfg)
-
-    # Derived ratios (00-05 §4, 05-00 §3)
-    if "physics" in cfg:
-        p = cfg["physics"]
-        cfg["_derived"] = {
-            "r42": float(p["F4"]) / float(p["F2"]),
-            "r62": float(p["F6"]) / float(p["F2"]),
-        }
-
-    logger.info(
-        "Run input loaded: run_id=%s, title=%s, window=%s->%s",
-        cfg.get("run_id"),
-        cfg.get("title"),
-        cfg["runtime"]["start_level"],
-        cfg["runtime"]["end_level"],
-    )
+    logger.info("Loaded run_id=%s window=LMSM->%s",
+                cfg.get("run_id"), cfg["runtime"]["end_level"])
     return cfg
 
+
+def window_includes(cfg: dict[str, Any], level: str) -> bool:
+    """True if the execution window includes *level*."""
+    return LEVEL_ORDER.get(level, 99) <= LEVEL_ORDER.get(
+        cfg.get("runtime", {}).get("end_level", ""), 0)
+
+
+# ── TOML loading ───────────────────────────────────────────────────────
 
 def _load_toml(path: Path) -> dict[str, Any]:
     try:
@@ -108,457 +63,280 @@ def _load_toml(path: Path) -> dict[str, Any]:
             import tomli as tomllib  # type: ignore[no-redef]
     except ImportError:
         import tomli as tomllib  # type: ignore[no-redef]
-
     with open(path, "rb") as f:
-        loaded = tomllib.load(f)
-    if not isinstance(loaded, dict):
-        raise SchemaError(
-            "FXE-SCHEMA-002",
-            "run_input.toml must decode to a top-level object",
-            actual={"actual_type": type(loaded).__name__},
-        )
-    return loaded
+        data = tomllib.load(f)
+    if not isinstance(data, dict):
+        raise SchemaError("FXE-SCHEMA-002", "run_input.toml must be a mapping")
+    return data
 
 
-def _validate_top_level(cfg: dict[str, Any]) -> None:
-    for key in ("schema_version", "standard_version", "run_id", "title"):
-        if key not in cfg:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required top-level key: {key}",
-                expected={"field_path": key},
-            )
+# ── Validation ─────────────────────────────────────────────────────────
 
+def _validate_structure(cfg: dict[str, Any]) -> None:
+    """Required keys, schema version, unknown-section rejection."""
+    for k in ("schema_version", "standard_version", "run_id", "title"):
+        _chk(k in cfg, "002", f"Missing: {k}")
     if cfg["schema_version"] != RUN_SCHEMA_VERSION:
-        raise SchemaError(
-            "FXE-SCHEMA-001",
-            "schema_version mismatch",
-            expected={"schema_version": RUN_SCHEMA_VERSION},
-            actual={"schema_version": cfg["schema_version"]},
-        )
+        raise SchemaError("FXE-SCHEMA-001", "schema_version mismatch",
+                          expected={"schema_version": RUN_SCHEMA_VERSION},
+                          actual={"schema_version": cfg["schema_version"]})
     if cfg["standard_version"] != STANDARD_VERSION:
-        raise SchemaError(
-            "FXE-SCHEMA-001",
-            "standard_version mismatch",
-            expected={"standard_version": STANDARD_VERSION},
-            actual={"standard_version": cfg["standard_version"]},
-        )
-    _require_non_empty_str(cfg, "run_id")
-    _require_non_empty_str(cfg, "title")
+        raise SchemaError("FXE-SCHEMA-001", "standard_version mismatch",
+                          expected={"standard_version": STANDARD_VERSION},
+                          actual={"standard_version": cfg["standard_version"]})
+    for k in ("paths", "runtime", "checks"):
+        _chk(k in cfg, "002", f"Missing section: [{k}]")
+    extras = sorted(k for k in cfg if k not in _ALLOWED)
+    _chk(not extras, "003", f"Unknown sections: {extras}")
+    _chk("end_level" in cfg["runtime"], "002", "Missing: runtime.end_level")
+    _chk(cfg["runtime"]["end_level"] in LEVEL_ORDER, "003",
+         f"Invalid end_level: {cfg['runtime']['end_level']!r}")
 
 
-def _validate_sections(cfg: dict[str, Any]) -> None:
-    for section in ("paths", "runtime", "checks"):
-        if section not in cfg:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required section: [{section}]",
-                expected={"field_path": section},
-            )
-    extras = sorted(key for key in cfg if key not in _ALLOWED_TOP_LEVEL_SECTIONS)
-    if extras:
-        raise InputError(
-            "FXE-INPUT-003",
-            "Unsupported top-level section(s) in run_input.toml",
-            expected={"allowed_sections": sorted(_ALLOWED_TOP_LEVEL_SECTIONS)},
-            actual={"unsupported_sections": extras},
-        )
+def _validate_fields(cfg: dict[str, Any]) -> None:
+    """Field-level checks — runs AFTER normalization fills defaults."""
+    end = cfg["runtime"]["end_level"]
+    win = lambda lv: LEVEL_ORDER[lv] <= LEVEL_ORDER[end]
+
+    # window-based section requirements (physics/model always optional)
+    if any(win(lv) for lv in ("L2", "L3", "L4")):
+        for s in ("inputs", "sources"):
+            _chk(s in cfg, "002", f"[{s}] required for window ..{end}")
+    if any(win(lv) for lv in ("L3", "L4")):
+        _chk("sopt" in cfg, "002", f"[sopt] required for window ..{end}")
+
+    # checks
+    c = cfg["checks"]
+    _chk(isinstance(c.get("strict_mode"), bool), "003", "checks.strict_mode must be bool")
+    _chk(_nonempty(c.get("eps_profile")), "003", "checks.eps_profile must be non-empty string")
+
+    # paths
+    _chk(cfg["paths"].get("output_root") == "./outputs", "003",
+         "paths.output_root must be './outputs'")
+
+    # model (optional; only RS supported)
+    if "model" in cfg:
+        _chk(cfg["model"].get("scheme") == "RS", "003", "model.scheme must be 'RS'")
+
+    # physics (optional — can be inferred from disk)
+    if "physics" in cfg:
+        p = cfg["physics"]
+        _chk("n_ele" in p, "002", "Missing: physics.n_ele")
+        n = p["n_ele"]
+        _chk(not isinstance(n, bool) and isinstance(n, int) and 1 <= n <= 13,
+             "003", f"physics.n_ele must be int in [1,13], got {n!r}")
+        _validate_f_ratios(p, "physics")
+    for side in ("physics_nm1", "physics_np1"):
+        if side in cfg:
+            _validate_f_ratios(cfg[side], side)
+
+    # sopt (optional)
+    if "sopt" in cfg:
+        s = cfg["sopt"]
+        for k in ("U", "Jh", "zeta"):
+            _chk(k in s and _num(s[k]), "003", f"sopt.{k}: required, numeric")
+        if "offset" in s:
+            _chk(_num(s["offset"]), "003", "sopt.offset must be numeric")
+        if "energy_reference" in s:
+            _chk(s["energy_reference"] in {"lsjm_ground", "zero"}, "003",
+                 "sopt.energy_reference must be 'lsjm_ground' or 'zero'")
+
+    # sources / inputs (field presence depends on window)
+    if "sources" in cfg:
+        src = cfg["sources"]
+        if any(win(lv) for lv in ("L2", "L3", "L4")):
+            _chk(_nonempty(src.get("hopping_name")), "003", "sources.hopping_name required")
+        if win("L4"):
+            _chk(_nonempty(src.get("kramer_name")), "003", "sources.kramer_name required")
+    if "inputs" in cfg:
+        inp = cfg["inputs"]
+        if any(win(lv) for lv in ("L2", "L3", "L4")):
+            _chk(_nonempty(inp.get("hopping_file")), "003", "inputs.hopping_file required")
+        if win("L4"):
+            _chk(_nonempty(inp.get("projector_file")), "003", "inputs.projector_file required")
 
 
-def _validate_runtime(cfg: dict[str, Any]) -> None:
-    rt = cfg.get("runtime")
-    if not isinstance(rt, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "runtime section must be a table/object",
-            actual={"actual_type": type(rt).__name__},
-        )
-
-    for key in ("start_level", "end_level", "on_missing_upstream", "read_first"):
-        if key not in rt:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required runtime field: {key}",
-                expected={"field_path": f"runtime.{key}"},
-            )
-
-    start = rt["start_level"]
-    end = rt["end_level"]
-    if start not in LEVEL_ORDER:
-        raise InputError(
-            "FXE-INPUT-003",
-            f"Invalid runtime.start_level: {start!r}",
-            actual={"start_level": start},
-        )
-    if end not in LEVEL_ORDER:
-        raise InputError(
-            "FXE-INPUT-003",
-            f"Invalid runtime.end_level: {end!r}",
-            actual={"end_level": end},
-        )
-    if LEVEL_ORDER[start] > LEVEL_ORDER[end]:
-        raise InputError(
-            "FXE-INPUT-003",
-            f"Invalid level window: {start} > {end}",
-            actual={"start_level": start, "end_level": end},
-        )
-
-    if rt["on_missing_upstream"] != "fail":
-        raise InputError(
-            "FXE-INPUT-003",
-            "runtime.on_missing_upstream must be 'fail'",
-            expected={"runtime.on_missing_upstream": "fail"},
-            actual={"runtime.on_missing_upstream": rt["on_missing_upstream"]},
-        )
-    if rt["read_first"] is not True:
-        raise InputError(
-            "FXE-INPUT-003",
-            "runtime.read_first must be true",
-            actual={"read_first": rt["read_first"]},
-        )
-
-
-def _validate_window_required_sections(cfg: dict[str, Any]) -> None:
-    rt = cfg["runtime"]
-    start = rt["start_level"]
-    end = rt["end_level"]
-    includes = lambda level: LEVEL_ORDER[start] <= LEVEL_ORDER[level] <= LEVEL_ORDER[end]
-
-    required_sections: set[str] = set()
-    if any(includes(level) for level in ("LMSM", "L0")):
-        required_sections.add("physics")
-    if includes("LMSM"):
-        required_sections.add("model")
-    if any(includes(level) for level in ("L2", "L3", "L4")):
-        required_sections.add("inputs")
-        required_sections.add("sources")
-    if any(includes(level) for level in ("L3", "L4")):
-        required_sections.add("sopt")
-
-    for section in sorted(required_sections):
-        if section not in cfg:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required section for selected window: [{section}]",
-                expected={"field_path": section},
-            )
-
-
-def _validate_checks(cfg: dict[str, Any]) -> None:
-    checks = cfg.get("checks")
-    if not isinstance(checks, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "checks section must be a table/object",
-            actual={"actual_type": type(checks).__name__},
-        )
-    for key in ("strict_mode", "eps_profile"):
-        if key not in checks:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required checks field: {key}",
-                expected={"field_path": f"checks.{key}"},
-            )
-    if not isinstance(checks["strict_mode"], bool):
-        raise InputError(
-            "FXE-INPUT-003",
-            "checks.strict_mode must be bool",
-            actual={"actual_type": type(checks["strict_mode"]).__name__},
-        )
-    _require_non_empty_str(checks, "eps_profile", prefix="checks")
-
-
-def _validate_physics(cfg: dict[str, Any]) -> None:
-    if "physics" not in cfg:
+def _validate_f_ratios(section: dict[str, Any], name: str) -> None:
+    present = [k for k in _F_KEYS if k in section]
+    if not present:
         return
-    physics = cfg["physics"]
-    if not isinstance(physics, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "physics section must be a table/object",
-            actual={"actual_type": type(physics).__name__},
-        )
-
-    for key in ("n_ele", "F2", "F4", "F6"):
-        if key not in physics:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required physics field: {key}",
-                expected={"field_path": f"physics.{key}"},
-            )
-
-    n_ele = physics["n_ele"]
-    if isinstance(n_ele, bool) or not isinstance(n_ele, int):
-        raise InputError(
-            "FXE-INPUT-003",
-            "physics.n_ele must be integer",
-            actual={"actual_type": type(n_ele).__name__, "value": n_ele},
-        )
-    if not (1 <= n_ele <= 13):
-        raise InputError(
-            "FXE-INPUT-003",
-            "physics.n_ele must be in [1,13]",
-            actual={"n_ele": n_ele},
-        )
-
-    for key in ("F2", "F4", "F6"):
-        if not _is_number(physics[key]):
-            raise InputError(
-                "FXE-INPUT-003",
-                f"physics.{key} must be numeric",
-                actual={key: physics[key]},
-            )
-    if float(physics["F2"]) == 0.0:
-        raise InputError(
-            "FXE-INPUT-003",
-            "physics.F2 must not be zero",
-            actual={"F2": physics["F2"]},
-        )
+    _chk(len(present) == 3, "003", f"F_ratios must appear together in [{name}]")
+    for k in _F_KEYS:
+        _chk(_num(section[k]), "003", f"{name}.{k} must be numeric")
+    _chk(float(section["F2_ratio"]) != 0.0, "003", f"{name}.F2_ratio must not be zero")
 
 
-def _validate_model(cfg: dict[str, Any]) -> None:
-    if "model" not in cfg:
-        return
-    model = cfg["model"]
-    if not isinstance(model, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "model section must be a table/object",
-            actual={"actual_type": type(model).__name__},
-        )
-    if "scheme" not in model:
-        raise InputError(
-            "FXE-INPUT-002",
-            "Missing required model field: scheme",
-            expected={"field_path": "model.scheme"},
-        )
-    if model["scheme"] != "RS":
-        raise InputError(
-            "FXE-INPUT-003",
-            "model.scheme must be 'RS' in this standard version",
-            expected={"model.scheme": "RS"},
-            actual={"model.scheme": model["scheme"]},
-        )
+# ── Normalization ──────────────────────────────────────────────────────
 
+def _normalize(cfg: dict[str, Any]) -> None:
+    """Units → sources → RE physics defaults → sopt defaults."""
+    # units
+    if "units" not in cfg:
+        cfg["units"] = {"energy": "meV"}
+    unit = cfg["units"].get("energy", "meV")
+    _chk(unit in _UNIT_SCALE, "003", f"units.energy must be meV|eV, got {unit!r}")
+    cfg["units"]["energy"] = unit
+    scale = _UNIT_SCALE[unit]
+    for sec in ("sopt", "sopt_nm1", "sopt_np1"):
+        s = cfg.get(sec)
+        if not isinstance(s, dict):
+            continue
+        for f in ("U", "Jh", "zeta", "offset"):
+            if f in s and _num(s[f]):
+                s[f] = float(s[f]) * scale
 
-def _validate_sopt(cfg: dict[str, Any]) -> None:
-    if "sopt" not in cfg:
-        return
-    sopt = cfg["sopt"]
-    if not isinstance(sopt, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "sopt section must be a table/object",
-            actual={"actual_type": type(sopt).__name__},
-        )
-    for key in ("U", "Jh"):
-        if key not in sopt:
-            raise InputError(
-                "FXE-INPUT-002",
-                f"Missing required sopt field: {key}",
-                expected={"field_path": f"sopt.{key}"},
-            )
-        if not _is_number(sopt[key]):
-            raise InputError(
-                "FXE-INPUT-003",
-                f"sopt.{key} must be numeric",
-                actual={key: sopt[key]},
-            )
-    if "zeta" not in sopt:
-        raise InputError(
-            "FXE-INPUT-002",
-            "Missing required sopt field: zeta",
-            expected={"field_path": "sopt.zeta"},
-        )
-    if not _is_number(sopt["zeta"]):
-        raise InputError(
-            "FXE-INPUT-003",
-            "sopt.zeta must be numeric",
-            actual={"zeta": sopt["zeta"]},
-        )
-
-
-def _validate_sources(cfg: dict[str, Any]) -> None:
-    if "sources" not in cfg:
-        return
-    sources = cfg["sources"]
-    if not isinstance(sources, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "sources section must be a table/object",
-            actual={"actual_type": type(sources).__name__},
-        )
-
-    rt = cfg["runtime"]
-    start = rt["start_level"]
-    end = rt["end_level"]
-    includes = lambda level: LEVEL_ORDER[start] <= LEVEL_ORDER[level] <= LEVEL_ORDER[end]
-
-    if any(includes(level) for level in ("L2", "L3", "L4")):
-        _require_non_empty_str(sources, "hopping_name", prefix="sources")
-    if includes("L4"):
-        _require_non_empty_str(sources, "kramer_name", prefix="sources")
-
-
-def _validate_inputs(cfg: dict[str, Any]) -> None:
-    if "inputs" not in cfg:
-        return
-    inputs = cfg["inputs"]
-    if not isinstance(inputs, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "inputs section must be a table/object",
-            actual={"actual_type": type(inputs).__name__},
-        )
-
-    rt = cfg["runtime"]
-    start = rt["start_level"]
-    end = rt["end_level"]
-    includes = lambda level: LEVEL_ORDER[start] <= LEVEL_ORDER[level] <= LEVEL_ORDER[end]
-
-    if any(includes(level) for level in ("L2", "L3", "L4")):
-        _require_non_empty_str(inputs, "hopping_file", prefix="inputs")
-    if includes("L4"):
-        _require_non_empty_str(inputs, "projector_file", prefix="inputs")
-
-
-def _normalize_sources(cfg: dict[str, Any]) -> None:
-    if "sources" in cfg and not isinstance(cfg["sources"], dict):
-        return
-    if "inputs" in cfg and not isinstance(cfg["inputs"], dict):
-        return
-
+    # sources: canonical names from inputs fallbacks
     inputs = cfg.get("inputs", {})
-    if "sources" not in cfg:
-        cfg["sources"] = {}
-    sources = cfg["sources"]
+    src = cfg.setdefault("sources", {})
+    hn = _first(src.get("hopping_name"), src.get("hopping_label"),
+                inputs.get("hopping_label"), _stem(inputs.get("hopping_file")))
+    if hn:
+        src["hopping_name"] = hn
+        src.setdefault("hopping_label", hn)
+    kn = _first(src.get("kramer_name"), src.get("projection_label"),
+                inputs.get("projection_label"), _stem(inputs.get("projector_file")))
+    if kn:
+        src["kramer_name"] = kn
+        src.setdefault("projection_label", kn)
 
-    hopping_name = _first_non_empty_str(
-        sources.get("hopping_name"),
-        sources.get("hopping_label"),
-        inputs.get("hopping_label"),
-        _stem_or_empty(inputs.get("hopping_file")),
-    )
-    if hopping_name:
-        sources["hopping_name"] = hopping_name
-        sources.setdefault("hopping_label", hopping_name)
+    # physics RE preset → F_ratio defaults
+    p = cfg.get("physics")
+    if isinstance(p, dict):
+        re = _re(p.get("RE", "auto"))
+        p["RE"] = re
+        if re != "auto":
+            d = RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]
+            p.setdefault("F2_ratio", d["F2_per_Jh"])
+            p.setdefault("F4_ratio", d["F4_per_Jh"])
+            p.setdefault("F6_ratio", d["F6_per_Jh"])
 
-    kramer_name = _first_non_empty_str(
-        sources.get("kramer_name"),
-        sources.get("projection_label"),
-        inputs.get("projection_label"),
-        _stem_or_empty(inputs.get("projector_file")),
-    )
-    if kramer_name:
-        sources["kramer_name"] = kramer_name
-        sources.setdefault("projection_label", kramer_name)
-
-
-def _apply_re_defaults(cfg: dict[str, Any]) -> None:
-    physics = cfg.get("physics")
-    if not isinstance(physics, dict):
-        return
-
-    re_name = _normalize_re_name(physics.get("RE", "auto"))
-    physics["RE"] = re_name
-    if re_name == "auto":
-        return
-
-    ref_n_ele = RE_TO_N_ELE[re_name]
-    defaults = RE_DEFAULTS_BY_N_ELE[ref_n_ele]
+    # sopt defaults: offset, energy_reference, RE-derived zeta
     sopt = cfg.get("sopt")
-    if not isinstance(sopt, dict):
+    if isinstance(sopt, dict):
+        sopt.setdefault("offset", 0.0)
+        sopt.setdefault("energy_reference", "lsjm_ground")
+        if isinstance(p, dict):
+            re = p.get("RE", "auto")
+            if re != "auto":
+                sopt.setdefault("zeta",
+                                RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]["zeta"] * _RE_ENERGY_SCALE)
+
+
+# ── Branch construction ───────────────────────────────────────────────
+
+def _build_branches(cfg: dict[str, Any]) -> None:
+    physics = cfg.get("physics")
+    sopt = cfg.get("sopt")
+    if not isinstance(physics, dict) or not isinstance(sopt, dict):
         return
-
-    jh = sopt.get("Jh")
-    if _is_number(jh):
-        jh_value = float(jh)
-        physics.setdefault("F2", defaults["F2_per_Jh"] * jh_value)
-        physics.setdefault("F4", defaults["F4_per_Jh"] * jh_value)
-        physics.setdefault("F6", defaults["F6_per_Jh"] * jh_value)
-    sopt.setdefault("zeta", defaults["zeta"])
-
-
-def _validate_paths(cfg: dict[str, Any]) -> None:
-    paths = cfg.get("paths")
-    if not isinstance(paths, dict):
-        raise InputError(
-            "FXE-INPUT-003",
-            "paths section must be a table/object",
-            actual={"actual_type": type(paths).__name__},
-        )
-
-    if "output_root" not in paths:
-        raise InputError(
-            "FXE-INPUT-002",
-            "Missing required paths field: output_root",
-            expected={"field_path": "paths.output_root"},
-        )
-    if paths["output_root"] != "./outputs":
-        raise InputError(
-            "FXE-INPUT-003",
-            "paths.output_root must be './outputs'",
-            expected={"paths.output_root": "./outputs"},
-            actual={"paths.output_root": paths["output_root"]},
-        )
+    n = int(physics["n_ele"])
+    r42, r62 = _resolve_r42_r62(physics)
+    ms = {k: float(sopt[k]) for k in ("U", "Jh", "zeta")}
+    ms["offset"] = float(sopt.get("offset", 0.0))
+    bn = _make_branch(n, r42, r62, ms, name="n", re=physics.get("RE", "auto"))
+    cfg["_branches"] = {
+        "nm1": _build_side(cfg, "nm1", n - 1, bn),
+        "n":   bn,
+        "np1": _build_side(cfg, "np1", n + 1, bn),
+    }
 
 
-def window_includes(cfg: dict[str, Any], level: str) -> bool:
-    """Return True if the execution window includes `level`."""
-    rt = cfg.get("runtime", {})
-    start = rt.get("start_level", "")
-    end = rt.get("end_level", "")
-    return LEVEL_ORDER.get(start, 0) <= LEVEL_ORDER.get(level, 99) <= LEVEL_ORDER.get(end, 0)
+def _assemble_derived(cfg: dict[str, Any]) -> None:
+    if "_branches" in cfg:
+        cfg["_derived"] = dict(cfg["_branches"]["n"]["derived"])
+    elif "physics" in cfg:
+        f2 = float(cfg["physics"].get("F2_ratio", 0.0))
+        if f2 != 0.0:
+            p = cfg["physics"]
+            cfg["_derived"] = {"r42": float(p["F4_ratio"]) / f2,
+                               "r62": float(p["F6_ratio"]) / f2}
 
 
-def upstream_for_start_level(start_level: str) -> tuple[str, ...]:
-    """Upstream artifact requirements for the configured start level."""
-    if start_level not in UPSTREAM_REQUIREMENTS:
-        raise InputError(
-            "FXE-INPUT-003",
-            f"Unknown start level: {start_level!r}",
-            actual={"start_level": start_level},
-        )
-    return UPSTREAM_REQUIREMENTS[start_level]
+def _resolve_r42_r62(sec: dict[str, Any]) -> tuple[float, float]:
+    """r42=F4/F2, r62=F6/F2 from F_ratio keys or RE preset."""
+    if "F2_ratio" in sec:
+        f2 = float(sec["F2_ratio"])
+        return float(sec["F4_ratio"]) / f2, float(sec["F6_ratio"]) / f2
+    re = _re(sec.get("RE", "auto"))
+    _chk(re != "auto", "003", "Cannot resolve ratios: no F_ratios and RE=auto")
+    d = RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]
+    return d["F4_per_Jh"] / d["F2_per_Jh"], d["F6_per_Jh"] / d["F2_per_Jh"]
 
-def _is_number(x: Any) -> bool:
+
+def _make_branch(n: int, r42: float, r62: float, sopt: dict[str, float],
+                 *, name: str, re: str = "auto") -> dict[str, Any]:
+    f2, f4, f6 = _slater(r42, r62, sopt["Jh"], name)
+    return {
+        "physics": {"n_ele": n, "RE": re, "F2": f2, "F4": f4, "F6": f6},
+        "sopt": dict(sopt),
+        "derived": {"r42": r42, "r62": r62},
+    }
+
+
+def _build_side(cfg: dict[str, Any], side: str, n: int,
+                main: dict[str, Any]) -> dict[str, Any]:
+    """Build nm1/np1 branch; missing values fall back to main."""
+    po = cfg.get(f"physics_{side}") or {}
+    so = cfg.get(f"sopt_{side}") or {}
+
+    has_ratios = "F2_ratio" in po
+    has_re = "RE" in po and _re(po["RE"]) != "auto"
+    r42, r62 = (_resolve_r42_r62(po) if has_ratios or has_re
+                else (main["derived"]["r42"], main["derived"]["r62"]))
+    re = _re(po["RE"]) if has_re else str(main["physics"].get("RE", "auto"))
+
+    ms = main["sopt"]
+    ss = {
+        "U": float(so.get("U", ms["U"])),
+        "Jh": float(so.get("Jh", ms["Jh"])),
+        "zeta": float(so.get("zeta", ms["zeta"])),
+        "offset": float(so.get("offset", 0.0)),
+    }
+    if has_re and "zeta" not in so:
+        ss["zeta"] = RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]["zeta"] * _RE_ENERGY_SCALE
+
+    return _make_branch(n, r42, r62, ss, name=side, re=re)
+
+
+def _slater(r42: float, r62: float, jh: float, name: str) -> tuple[float, float, float]:
+    """F2, F4, F6 from Jh and derived ratios."""
+    denom = 286.0 + 195.0 * r42 + 250.0 * r62
+    _chk(denom != 0.0, "003", f"Jh denominator is zero in branch {name}")
+    if jh == 0.0:
+        return 0.0, 0.0, 0.0
+    f2 = 6435.0 * jh / denom
+    return f2, r42 * f2, r62 * f2
+
+
+# ── Helpers ────────────────────────────────────────────────────────────
+
+def _chk(cond: bool, code: str, msg: str, **ctx: Any) -> None:
+    if not cond:
+        raise InputError(f"FXE-INPUT-{code}", msg, **ctx)
+
+
+def _num(x: Any) -> bool:
     return not isinstance(x, bool) and isinstance(x, (int, float))
 
 
-def _first_non_empty_str(*values: Any) -> str:
-    for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def _nonempty(x: Any) -> bool:
+    return isinstance(x, str) and bool(x.strip())
+
+
+def _first(*vals: Any) -> str:
+    for v in vals:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
     return ""
 
 
-def _stem_or_empty(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        return ""
-    return Path(value).stem
+def _stem(v: Any) -> str:
+    return Path(v).stem if isinstance(v, str) and v.strip() else ""
 
 
-def _normalize_re_name(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
+def _re(v: Any) -> str:
+    if not isinstance(v, str) or not v.strip() or v.strip().lower() == "auto":
         return "auto"
-    if value.strip().lower() == "auto":
-        return "auto"
-    canonical = value.strip().capitalize()
-    if canonical not in RE_TO_N_ELE:
-        raise InputError(
-            "FXE-INPUT-003",
-            "physics.RE must be one of the supported rare-earth presets or 'auto'",
-            actual={"physics.RE": value},
-        )
-    return canonical
-
-
-def _require_non_empty_str(d: dict[str, Any], key: str, *, prefix: str | None = None) -> None:
-    value = d.get(key)
-    if not isinstance(value, str) or not value.strip():
-        field = f"{prefix}.{key}" if prefix else key
-        raise InputError(
-            "FXE-INPUT-003",
-            f"{field} must be a non-empty string",
-            actual={field: value},
-        )
+    c = v.strip().capitalize()
+    _chk(c in RE_TO_N_ELE, "003", f"Unknown RE preset: {v!r}")
+    return c

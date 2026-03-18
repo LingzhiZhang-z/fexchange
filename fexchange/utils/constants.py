@@ -56,15 +56,6 @@ LEVEL_ORDER = {
     "L3": 6,
     "L4": 7,
 }
-UPSTREAM_REQUIREMENTS: dict[str, tuple[str, ...]] = {
-    "LMSM": (),
-    "LSJM": ("LMSM",),
-    "L0": (),
-    "L1": ("LMSM", "LSJM", "L0"),
-    "L2": ("L1",),
-    "L3": ("L2",),
-    "L4": ("L3",),
-}
 
 SIGMA_0 = np.eye(2, dtype=DTYPE_COMPLEX)
 SIGMA_X = np.array([[0, 1], [1, 0]], dtype=DTYPE_COMPLEX)

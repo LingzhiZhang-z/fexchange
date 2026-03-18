@@ -81,12 +81,21 @@ def point_result_filename(
     U: float,
     Jh: float,
     zeta: float,
+    cfg_signature: str = "",
 ) -> str:
-    return (
+    name = (
         f"{_safe_label_token(RE)}_{n_ele}_"
         f"{_safe_label_token(hopping_label)}_{_safe_label_token(projection_label)}_"
-        f"{fmt6(U)}_{fmt6(Jh)}_{fmt6(zeta)}.txt"
+        f"{fmt6(U)}_{fmt6(Jh)}_{fmt6(zeta)}"
     )
+    if cfg_signature:
+        name += f"__{_safe_label_token(cfg_signature)}"
+    return name + ".txt"
+
+
+def point_result_cfg_signature(payload: dict[str, Any]) -> str:
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default).encode("utf-8")
+    return f"cfg-{hashlib.sha1(blob).hexdigest()[:12]}"
 
 
 def build_stage_path(
@@ -102,10 +111,15 @@ def build_stage_path(
     Jh: float = 0.0,
     zeta: float = 0.0,
     kramer_name: str = "",
+    branch_signature: str = "",
+    denom_signature: str = "",
 ) -> Path:
     """Build deterministic artifact path for a given stage (05-00 §2-3)."""
     root = Path(output_root)
     core = core_dir_token(n, r42, r62, scheme)
+    core_root = root / "core" / core
+    if branch_signature:
+        core_root = core_root / _safe_label_token(branch_signature)
 
     if stage == "fock":
         return root / "fock"
@@ -114,43 +128,39 @@ def build_stage_path(
     elif stage == "L0":
         return root / "fock"
     elif stage == "L1":
-        return root / "core" / core / "L1"
+        return core_root / "L1"
     elif stage == "L2":
-        return root / "core" / core / "hopping" / _require_stage_token("hopping_name", hopping_name, stage) / "L2"
+        return core_root / "hopping" / _require_stage_token("hopping_name", hopping_name, stage) / "L2"
     elif stage == "L3":
-        return (
-            root
-            / "core"
-            / core
+        u_root = (
+            core_root
             / "hopping"
             / _require_stage_token("hopping_name", hopping_name, stage)
             / ujhz_dir_token(U, Jh, zeta)
-            / "L3"
         )
+        if denom_signature:
+            u_root = u_root / _safe_label_token(denom_signature)
+        return u_root / "L3"
     elif stage == "L4":
-        return (
-            root
-            / "core"
-            / core
+        u_root = (
+            core_root
             / "hopping"
             / _require_stage_token("hopping_name", hopping_name, stage)
             / ujhz_dir_token(U, Jh, zeta)
-            / "kramer"
-            / _require_stage_token("kramer_name", kramer_name, stage)
-            / "L4"
         )
+        if denom_signature:
+            u_root = u_root / _safe_label_token(denom_signature)
+        return u_root / "kramer" / _require_stage_token("kramer_name", kramer_name, stage) / "L4"
     elif stage == "spin12":
-        return (
-            root
-            / "core"
-            / core
+        u_root = (
+            core_root
             / "hopping"
             / _require_stage_token("hopping_name", hopping_name, stage)
             / ujhz_dir_token(U, Jh, zeta)
-            / "kramer"
-            / _require_stage_token("kramer_name", kramer_name, stage)
-            / "spin12"
         )
+        if denom_signature:
+            u_root = u_root / _safe_label_token(denom_signature)
+        return u_root / "kramer" / _require_stage_token("kramer_name", kramer_name, stage) / "spin12"
     else:
         raise IOError_(
             "FXE-IO-001",
@@ -437,6 +447,8 @@ def write_point_result_txt(
     zeta: float,
     J_mu: NDArray[np.floating] | NDArray[np.complexfloating],
     mapping_residual: float,
+    cfg_signature: str = "",
+    cfg_meta: dict[str, Any] | None = None,
 ) -> Path:
     path = Path(output_root) / point_result_filename(
         RE=RE,
@@ -446,6 +458,7 @@ def write_point_result_txt(
         U=U,
         Jh=Jh,
         zeta=zeta,
+        cfg_signature=cfg_signature,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     J = np.asarray(J_mu, dtype=float)
@@ -467,4 +480,6 @@ def write_point_result_txt(
     ]
     with open(path, "w", encoding="utf-8") as f:
         f.write(" ".join(f"{value:.12f}" for value in values) + "\n")
+    if cfg_meta is not None:
+        atomic_write_json(path.with_suffix(".meta.json"), cfg_meta)
     return path

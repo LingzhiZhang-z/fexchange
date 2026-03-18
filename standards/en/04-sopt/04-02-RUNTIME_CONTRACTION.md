@@ -168,29 +168,51 @@ Per-level definition:
 ## 0.0.0) $E_u$ Intermediate-State Energy Source (MUST)
 `E_u` is a runtime-derived input for $L3$, not an independent persistent artifact.
 It is constructed at $L3$ entry from LSJM energy coefficient arrays (`E_terms.npz`)
-of the adjacent sectors ($f^{n-1}$, $f^{n+1}$) plus $F^0 = U$ from `[sopt].U`.
-By project convention, the ground-state reference is fixed as $E_0=0$ and no
-additional runtime shift is applied:
+of the adjacent sectors ($f^{n-1}$, $f^{n+1}$) using branch-resolved
+`F^0/F^2/F^4/F^6/\zeta/offset` parameters.
+The denominator reference is controlled by `[sopt].energy_reference`.
 
 Math:
 $$
-E_u^{(m)}[u] = F^0\cdot\mathrm{coef\_F0}[u]
-+ F^2\cdot\mathrm{coef\_F2}[u]
-+ F^4\cdot\mathrm{coef\_F4}[u]
-+ F^6\cdot\mathrm{coef\_F6}[u]
-+ \zeta\cdot\mathrm{coef\_zeta}[u],
+E_u^{(m)}[u] = \mathrm{offset}^{(m)}
++ F^{0,(m)}\cdot\mathrm{coef\_F0}[u]
++ F^{2,(m)}\cdot\mathrm{coef\_F2}[u]
++ F^{4,(m)}\cdot\mathrm{coef\_F4}[u]
++ F^{6,(m)}\cdot\mathrm{coef\_F6}[u]
++ \zeta^{(m)}\cdot\mathrm{coef\_zeta}[u],
 \quad m\in\{n+1,\,n-1\}.
 $$
 
+Main-sector reference:
+
+Math:
+$$
+E_{\mathrm{ref}} =
+\begin{cases}
+0, & \texttt{energy\_reference = "zero"} \\
+\mathrm{offset}^{(n)}
++ F^{0,(n)}\cdot\mathrm{coef\_F0}[u_0]
++ F^{2,(n)}\cdot\mathrm{coef\_F2}[u_0]
++ F^{4,(n)}\cdot\mathrm{coef\_F4}[u_0]
++ F^{6,(n)}\cdot\mathrm{coef\_F6}[u_0],
+& \texttt{energy\_reference = "lsjm\_ground"}
+\end{cases}
+$$
+
+where `u0` is the selected `f^n` reference state from LSJM.
+
 Code form:
 ```text
-E_u_np1 = E_lsjm_np1
-E_u_nm1 = E_lsjm_nm1
+E_u_np1 = E_lsjm_np1 - E_ref
+E_u_nm1 = E_lsjm_nm1 - E_ref
 ```
 
 Source artifacts:
 - `E_terms.npz` from LSJM outputs in sectors $n-1$, $n+1$ (disk path per `./standards/en/05-io/05-00-IO.md`).
-- $F^0 = U$ from `[sopt].U`, $F^2/F^4/F^6$ from `[physics]`, $\zeta$ from `[sopt].zeta`.
+- Branch defaults come from main `[physics]` / `[sopt]`; branch overrides come
+  from `[physics_nm1]/[physics_np1]` and `[sopt_nm1]/[sopt_np1]`.
+- `offset` is branch-local and defaults to `0`.
+- `E_ref` uses the main-sector (`f^n`) LSJM output when `energy_reference = "lsjm_ground"`.
 - `E_u` is NOT persisted as a separate disk artifact; it is computed on-the-fly at $L3$ entry.
 
 Validation:

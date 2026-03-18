@@ -182,10 +182,7 @@ projector_file = "$projector_file"
 output_root = "./outputs"
 
 [runtime]
-start_level = "LMSM"
 end_level = "L4"
-on_missing_upstream = "fail"
-read_first = true
 
 [checks]
 strict_mode = true
@@ -194,11 +191,16 @@ EOF
 }
 
 dump_heff_to_jmu() {
-    local l4_path="$1"
-    local heff_txt="$2"
+    local run_dir="$1"
+    local run_log="$2"
     local jmu_txt="$3"
-    run_repo_python "$DUMP_PY" --input "$l4_path" --output "$heff_txt" > /dev/null 2>&1
-    awk -f "$HEFF_TO_JMU_AWK" "$heff_txt" > "$jmu_txt"
+    local rel_path
+    rel_path="$(sed -n 's/.*point_result=//p' "$run_log" | tail -1)"
+    if [ -z "$rel_path" ]; then
+        echo "ERROR: No point_result in $run_log" >&2
+        return 1
+    fi
+    awk '{printf "%.12f %.12f %.12f\n%.12f %.12f %.12f\n%.12f %.12f %.12f\n", $5, $6, $7, $8, $9, $10, $11, $12, $13}' "$run_dir/$rel_path" > "$jmu_txt"
 }
 
 family_text_match() {
@@ -275,7 +277,7 @@ run_ybox_family() {
         cd "$first_case_dir"
         run_repo_python "$REPO_ROOT/fexchange/cli.py" run "run_input.toml" > "gauge_run.log" 2>&1
     )
-    dump_heff_to_jmu "$first_case_dir/$L4_REL" "$first_case_dir/gauge_heff.txt" "$first_case_dir/gauge_jmu.txt"
+    dump_heff_to_jmu "$first_case_dir" "$first_case_dir/gauge_run.log" "$first_case_dir/gauge_jmu.txt"
     source_from_command awk -v mode=best -v ref_file="$REFERENCE_DIR/result_HOLE_U6.00.dat" -v ratio=0.10 -f "$YBOX_COMPARE_AWK" "$first_case_dir/gauge_jmu.txt"
     family_gauge="$GAUGE_LABEL"
 
@@ -291,8 +293,8 @@ run_ybox_family() {
         printf "#U JH ratio Jxx Jxy Jxz Jyx Jyy Jyz Jzx Jzy Jzz error\n" > "$aligned_file"
         max_aligned="0.0"
 
+        U_LIST="6.0"
         if [ "$SMOKE" -eq 1 ]; then
-            U_LIST="6.0"
             RATIO_LIST="0.10"
         fi
 
@@ -302,9 +304,9 @@ run_ybox_family() {
                     "$case_dir/w90_t_mu.dat" "$projector_dir/projector.npz"
                 (
                     cd "$case_dir"
-                    run_repo_python "$REPO_ROOT/fexchange/cli.py" run "run_input.toml" >> "cli.log" 2>&1
+                    run_repo_python "$REPO_ROOT/fexchange/cli.py" run "run_input.toml" > "run_latest.log" 2>&1
                 )
-                dump_heff_to_jmu "$case_dir/$L4_REL" "$case_dir/heff.txt" "$case_dir/jmu.txt"
+                dump_heff_to_jmu "$case_dir" "$case_dir/run_latest.log" "$case_dir/jmu.txt"
                 source_from_command awk -v mode=apply -v ref_file="$REFERENCE_DIR/result_HOLE_U$(printf "%.2f" "$U").dat" -v ratio="$ratio" -v gauge="$family_gauge" -v U="$U" -f "$YBOX_COMPARE_AWK" "$case_dir/jmu.txt"
                 printf "%s\n" "$RAW_ROW" >> "$raw_file"
                 printf "%s\n" "$ALIGNED_ROW" >> "$aligned_file"
@@ -326,12 +328,12 @@ run_ybox() {
         run_ybox_family "YbOBr" "1st" "soc_1st_bond1.dat" >> "$log_file" 2>&1
         return
     fi
-    run_ybox_family "YbOBr" "1st" "soc_1st_*.dat" >> "$log_file" 2>&1
-    run_ybox_family "YbOBr" "2nd" "soc_2nd_*.dat" >> "$log_file" 2>&1
-    run_ybox_family "YbOCl" "1st" "soc_1st_*.dat" >> "$log_file" 2>&1
-    run_ybox_family "YbOCl" "2nd" "soc_2nd_*.dat" >> "$log_file" 2>&1
-    run_ybox_family "YbOF" "1st" "soc_1st_*.dat" >> "$log_file" 2>&1
-    run_ybox_family "YbOF" "2nd" "soc_2nd_*.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOBr" "1st" "soc_1st_bond1.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOBr" "2nd" "soc_2nd_bond1.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOCl" "1st" "soc_1st_bond1.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOCl" "2nd" "soc_2nd_bond1.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOF" "1st" "soc_1st_bond1.dat" >> "$log_file" 2>&1
+    run_ybox_family "YbOF" "2nd" "soc_2nd_bond1.dat" >> "$log_file" 2>&1
 }
 
 write_prb_projector() {
@@ -496,11 +498,10 @@ run_prb_variant() {
                     "$site_dir/prb_t_mu_${site}.dat" "$projector_file"
                 (
                     cd "$site_dir"
-                    run_repo_python "$REPO_ROOT/fexchange/cli.py" run "run_input.toml" >> "cli.log" 2>&1
+                    run_repo_python "$REPO_ROOT/fexchange/cli.py" run "run_input.toml" > "run_latest.log" 2>&1
                 )
-                heff_txt="$site_dir/heff.txt"
                 jmu_txt="$site_dir/jmu.txt"
-                dump_heff_to_jmu "$site_dir/$L4_REL" "$heff_txt" "$jmu_txt"
+                dump_heff_to_jmu "$site_dir" "$site_dir/run_latest.log" "$jmu_txt"
                 line="$(awk -v ratio="$ratio" -f "$PRB_CHANNELS_AWK" "$jmu_txt")"
                 printf "%s\n" "$line" >> "$site_dir/prb_curves_U$(printf "%.2f" "$U").dat"
             done

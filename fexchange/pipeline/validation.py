@@ -10,7 +10,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fexchange.io.disk import build_stage_path, load_json_checked, load_npz_checked, validate_meta
-from fexchange.pipeline.keys import three_sectors
+from fexchange.pipeline.artifacts import ARTIFACT_FILE_SPEC
+from fexchange.pipeline.keys import (
+    branch_signature,
+    denominator_signature,
+    extract_source_names,
+    sector_ratios,
+    three_sectors,
+)
 from fexchange.utils.errors import BindError, IOError_, SchemaError
 
 
@@ -46,9 +53,9 @@ def validate_upstream_artifacts(
     if not required:
         return
     output_root = cfg["paths"]["output_root"]
-    sources = cfg.get("sources", {})
-    hopping_name = str(sources.get("hopping_name", "")) if isinstance(sources, dict) else ""
-    kramer_name = str(sources.get("kramer_name", "")) if isinstance(sources, dict) else ""
+    sn = extract_source_names(cfg)
+    hopping_name = sn.hopping_name
+    kramer_name = sn.kramer_name
     missing: list[str] = []
     invalid: list[str] = []
 
@@ -60,26 +67,27 @@ def validate_upstream_artifacts(
             load_npz_checked(path, keys)
         except Exception:
             invalid.append(str(path))
-            return
+    
+    def _check_spec(d: Path, level: str) -> None:
+        for filename, keys in ARTIFACT_FILE_SPEC[level]:
+            if keys is not None:
+                _check(d / filename, keys)
+            else:
+                try:
+                    validate_meta(load_json_checked(d / filename))
+                except Exception:
+                    invalid.append(str(d / filename))
 
     if "LMSM" in required:
         for sec in three_sectors(n_ele):
-            d = build_stage_path(output_root, "LMSM", n=sec, r42=r42, r62=r62, scheme=scheme)
-            _check(d / "V.npz", ["V_fock"])
-            _check(d / "E_terms.npz", ["coef_F0", "coef_F2", "coef_F4", "coef_F6"])
-            try:
-                validate_meta(load_json_checked(d / "meta.json"))
-            except Exception:
-                invalid.append(str(d / "meta.json"))
+            sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
+            d = build_stage_path(output_root, "LMSM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
+            _check_spec(d, "LMSM")
     if "LSJM" in required:
         for sec in three_sectors(n_ele):
-            d = build_stage_path(output_root, "LSJM", n=sec, r42=r42, r62=r62, scheme=scheme)
-            _check(d / "V.npz", ["V_fock"])
-            _check(d / "E_terms.npz", ["coef_F0", "coef_F2", "coef_F4", "coef_F6", "coef_zeta"])
-            try:
-                validate_meta(load_json_checked(d / "meta.json"))
-            except Exception:
-                invalid.append(str(d / "meta.json"))
+            sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
+            d = build_stage_path(output_root, "LSJM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
+            _check_spec(d, "LSJM")
     if "L0" in required:
         d = build_stage_path(output_root, "fock")
         _check(d / f"n{n_ele}{n_ele + 1}.npz", ["X"])
@@ -90,12 +98,16 @@ def validate_upstream_artifacts(
             except Exception:
                 invalid.append(str(d / f"meta_n{sec}.json"))
     if "L1" in required:
-        d = build_stage_path(output_root, "L1", n=n_ele, r42=r42, r62=r62, scheme=scheme)
-        _check(d / "data.npz", ["A", "B"])
-        try:
-            validate_meta(load_json_checked(d / "meta.json"))
-        except Exception:
-            invalid.append(str(d / "meta.json"))
+        d = build_stage_path(
+            output_root,
+            "L1",
+            n=n_ele,
+            r42=r42,
+            r62=r62,
+            scheme=scheme,
+            branch_signature=branch_signature(cfg, n_ele=n_ele),
+        )
+        _check_spec(d, "L1")
     if "L2" in required:
         d = build_stage_path(
             output_root,
@@ -105,12 +117,9 @@ def validate_upstream_artifacts(
             r62=r62,
             scheme=scheme,
             hopping_name=hopping_name,
+            branch_signature=branch_signature(cfg, n_ele=n_ele),
         )
-        _check(d / "data.npz", ["M_A", "M_B"])
-        try:
-            validate_meta(load_json_checked(d / "meta.json"))
-        except Exception:
-            invalid.append(str(d / "meta.json"))
+        _check_spec(d, "L2")
     if "L3" in required:
         s = cfg["sopt"]
         d = build_stage_path(
@@ -124,12 +133,10 @@ def validate_upstream_artifacts(
             U=float(s["U"]),
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
+            branch_signature=branch_signature(cfg, n_ele=n_ele),
+            denom_signature=denominator_signature(cfg, n_ele=n_ele),
         )
-        _check(d / "data.npz", ["h_pre_j_mu"])
-        try:
-            validate_meta(load_json_checked(d / "meta.json"))
-        except Exception:
-            invalid.append(str(d / "meta.json"))
+        _check_spec(d, "L3")
     if "L4" in required:
         s = cfg["sopt"]
         d = build_stage_path(
@@ -144,12 +151,10 @@ def validate_upstream_artifacts(
             Jh=float(s["Jh"]),
             zeta=float(s["zeta"]),
             kramer_name=kramer_name,
+            branch_signature=branch_signature(cfg, n_ele=n_ele),
+            denom_signature=denominator_signature(cfg, n_ele=n_ele),
         )
-        _check(d / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
-        try:
-            validate_meta(load_json_checked(d / "meta.json"))
-        except Exception:
-            invalid.append(str(d / "meta.json"))
+        _check_spec(d, "L4")
 
     if missing:
         raise IOError_(

@@ -16,11 +16,11 @@ from typing import Any, Callable
 
 from fexchange.io.disk import (
     append_error_record,
+    point_result_cfg_signature,
     write_point_result_txt,
 )
 from fexchange.io.run_input import (
     load_run_input,
-    upstream_for_start_level,
     window_includes,
 )
 from fexchange.pipeline.keys import (
@@ -28,9 +28,6 @@ from fexchange.pipeline.keys import (
 )
 from fexchange.pipeline.resolve import resolve_core_params as _resolve_core_params
 from fexchange.pipeline import stages as _stages
-from fexchange.pipeline.validation import (
-    validate_upstream_artifacts as _validate_upstream_artifacts,
-)
 from fexchange.utils.constants import LEVELS, N_ORB
 from fexchange.utils.errors import (
     FexchangeError,
@@ -114,8 +111,6 @@ def _run_pipeline(toml_path: str) -> int:
     n_ele, r42, r62, scheme = _resolve_core_params(cfg)
     n_orb = N_ORB
 
-    _preflight(cfg, n_ele=n_ele, r42=r42, r62=r62, scheme=scheme)
-
     state: dict[str, Any] = {}
     for level in LEVELS:
         if not window_includes(cfg, level):
@@ -139,26 +134,6 @@ def _run_pipeline(toml_path: str) -> int:
     logger.info("pipeline complete in %.3fs", total)
     print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}")
     return 0
-
-
-def _preflight(
-    cfg: dict[str, Any],
-    *,
-    n_ele: int,
-    r42: float,
-    r62: float,
-    scheme: str,
-) -> None:
-    start_level = cfg["runtime"]["start_level"]
-    required_upstream = upstream_for_start_level(start_level)
-    _validate_upstream_artifacts(
-        cfg,
-        required_upstream,
-        n_ele=n_ele,
-        r42=r42,
-        r62=r62,
-        scheme=scheme,
-    )
 
 
 def _execute_level(
@@ -193,6 +168,23 @@ def _maybe_write_point_result(cfg: dict[str, Any], state: dict[str, Any], *, n_e
     physics = cfg.get("physics", {})
     sources = cfg.get("sources", {})
     sopt = cfg["sopt"]
+    branches = cfg.get("_branches", {})
+    cfg_meta = {
+        "cfg_signature": "",
+        "run_id": cfg.get("run_id"),
+        "title": cfg.get("title"),
+        "energy_unit": cfg.get("units", {}).get("energy", "meV"),
+        "energy_reference": str(sopt.get("energy_reference", "lsjm_ground")),
+        "sources": {
+            "hopping_label": str(sources.get("hopping_label", sources.get("hopping_name", "auto"))),
+            "projection_label": str(sources.get("projection_label", sources.get("kramer_name", "auto"))),
+            "hopping_name": str(sources.get("hopping_name", "auto")),
+            "kramer_name": str(sources.get("kramer_name", "auto")),
+        },
+        "resolved_branches": branches if isinstance(branches, dict) else {},
+    }
+    cfg_signature = point_result_cfg_signature(cfg_meta)
+    cfg_meta["cfg_signature"] = cfg_signature
     path = write_point_result_txt(
         cfg["paths"]["output_root"],
         RE=str(physics.get("RE", "auto")),
@@ -204,6 +196,8 @@ def _maybe_write_point_result(cfg: dict[str, Any], state: dict[str, Any], *, n_e
         zeta=float(sopt["zeta"]),
         J_mu=l4["J_mu"],
         mapping_residual=float(l4["mapping_residual"]),
+        cfg_signature=cfg_signature,
+        cfg_meta=cfg_meta,
     )
     logger.info("point_result=%s", path)
 

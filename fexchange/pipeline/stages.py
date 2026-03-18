@@ -27,7 +27,14 @@ from fexchange.pipeline.artifacts import (
     try_load_l4,
     try_load_stateset,
 )
-from fexchange.pipeline.keys import labels_abcd_lex, three_sectors
+from fexchange.pipeline.keys import (
+    branch_signature,
+    denominator_signature,
+    labels_abcd_lex,
+    sector_branch,
+    sector_ratios,
+    three_sectors,
+)
 from fexchange.pipeline.validation import validate_labels_abcd
 from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
 from fexchange.spectrum.lsms import build_lsms
@@ -47,19 +54,21 @@ def ensure_lsms_all_three(
     scheme: str,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
-    physics = cfg.get("physics", {})
     for sec in three_sectors(n_ele):
         key = f"lsms_{sec}"
         if key in state:
             continue
-        stage_dir = build_stage_path(output_root, "LMSM", n=sec, r42=r42, r62=r62, scheme=scheme)
+        sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
+        stage_dir = build_stage_path(output_root, "LMSM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
         loaded = try_load_stateset(stage_dir, level="LMSM", n_ele=sec)
         if loaded is not None:
             state[key] = loaded
             continue
 
-        result = build_lsms(sec, n_orb, r42=r42, r62=r62)
+        result = build_lsms(sec, n_orb, r42=sec_r42, r62=sec_r62)
         state[key] = result
+        branch = sector_branch(cfg, sec)
+        physics = branch["physics"] if isinstance(branch, dict) else cfg.get("physics", {})
         persist_stateset(
             stage_dir,
             result,
@@ -67,8 +76,8 @@ def ensure_lsms_all_three(
             n_ele=sec,
             cfg=cfg,
             physics=physics,
-            r42=r42,
-            r62=r62,
+            r42=sec_r42,
+            r62=sec_r62,
         )
 
 
@@ -83,14 +92,14 @@ def ensure_lsjm_all_three(
     scheme: str,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
-    physics = cfg.get("physics", {})
     ensure_lsms_all_three(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
 
     for sec in three_sectors(n_ele):
         key = f"lsjm_{sec}"
         if key in state:
             continue
-        stage_dir = build_stage_path(output_root, "LSJM", n=sec, r42=r42, r62=r62, scheme=scheme)
+        sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
+        stage_dir = build_stage_path(output_root, "LSJM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
         loaded = try_load_stateset(stage_dir, level="LSJM", n_ele=sec)
         if loaded is not None:
             state[key] = loaded
@@ -99,6 +108,8 @@ def ensure_lsjm_all_three(
         lsms = state[f"lsms_{sec}"]
         result = build_lsjm(lsms, n_orb)
         state[key] = result
+        branch = sector_branch(cfg, sec)
+        physics = branch["physics"] if isinstance(branch, dict) else cfg.get("physics", {})
         persist_stateset(
             stage_dir,
             result,
@@ -106,8 +117,8 @@ def ensure_lsjm_all_three(
             n_ele=sec,
             cfg=cfg,
             physics=physics,
-            r42=r42,
-            r62=r62,
+            r42=sec_r42,
+            r62=sec_r62,
         )
 
 
@@ -131,7 +142,7 @@ def ensure_l0(
 
     result = build_L0(n_ele, n_orb)
     state["l0"] = result
-    persist_l0(cfg, result, n_ele=n_ele)
+    persist_l0(stage_dir, cfg, result, n_ele=n_ele)
 
 
 def ensure_l1(
@@ -149,7 +160,16 @@ def ensure_l1(
     if "l1" in state:
         return
     output_root = cfg["paths"]["output_root"]
-    stage_dir = build_stage_path(output_root, "L1", n=n_ele, r42=r42, r62=r62, scheme=scheme)
+    branch_sig = branch_signature(cfg, n_ele=n_ele)
+    stage_dir = build_stage_path(
+        output_root,
+        "L1",
+        n=n_ele,
+        r42=r42,
+        r62=r62,
+        scheme=scheme,
+        branch_signature=branch_sig,
+    )
     loaded = try_load_l1(stage_dir)
     if loaded is not None:
         state["l1"] = loaded
@@ -169,12 +189,12 @@ def ensure_l1(
     )
     state["l1"] = result
     persist_l1(
+        stage_dir,
         cfg,
         result,
         n_ele=n_ele,
         r42=r42,
         r62=r62,
-        scheme=scheme,
         soc0=soc0,
     )
 
@@ -195,6 +215,7 @@ def ensure_l2(
         return
     output_root = cfg["paths"]["output_root"]
     hopping_name = cfg["sources"]["hopping_name"]
+    branch_sig = branch_signature(cfg, n_ele=n_ele)
     stage_dir = build_stage_path(
         output_root,
         "L2",
@@ -203,6 +224,7 @@ def ensure_l2(
         r62=r62,
         scheme=scheme,
         hopping_name=hopping_name,
+        branch_signature=branch_sig,
     )
     loaded = try_load_l2(stage_dir)
     if loaded is not None:
@@ -229,12 +251,12 @@ def ensure_l2(
     result = build_L2(state["l1"], t_mu)
     state["l2"] = result
     persist_l2(
+        stage_dir,
         cfg,
         result,
         n_ele=n_ele,
         r42=r42,
         r62=r62,
-        scheme=scheme,
     )
 
 
@@ -255,6 +277,8 @@ def ensure_l3(
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
     hopping_name = cfg["sources"]["hopping_name"]
+    branch_sig = branch_signature(cfg, n_ele=n_ele)
+    denom_sig = denominator_signature(cfg, n_ele=n_ele)
     stage_dir = build_stage_path(
         output_root,
         "L3",
@@ -266,6 +290,8 @@ def ensure_l3(
         U=float(sopt["U"]),
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
+        branch_signature=branch_sig,
+        denom_signature=denom_sig,
     )
     loaded = try_load_l3(stage_dir)
     if loaded is not None:
@@ -278,12 +304,12 @@ def ensure_l3(
     result = build_L3(state["l2"], E_u_np1, E_u_nm1, n_ele=n_ele)
     state["l3"] = result
     persist_l3(
+        stage_dir,
         cfg,
         result,
         n_ele=n_ele,
         r42=r42,
         r62=r62,
-        scheme=scheme,
     )
 
 
@@ -305,6 +331,8 @@ def ensure_l4(
     sopt = cfg["sopt"]
     hopping_name = cfg["sources"]["hopping_name"]
     kramer_name = cfg["sources"]["kramer_name"]
+    branch_sig = branch_signature(cfg, n_ele=n_ele)
+    denom_sig = denominator_signature(cfg, n_ele=n_ele)
     stage_dir = build_stage_path(
         output_root,
         "L4",
@@ -317,6 +345,8 @@ def ensure_l4(
         Jh=float(sopt["Jh"]),
         zeta=float(sopt["zeta"]),
         kramer_name=kramer_name,
+        branch_signature=branch_sig,
+        denom_signature=denom_sig,
     )
     loaded = try_load_l4(stage_dir)
     if loaded is not None:
@@ -345,12 +375,12 @@ def ensure_l4(
     state["labels_abcd"] = labels
     state["W"] = W
     persist_l4(
+        stage_dir,
         cfg,
         result,
         n_ele=n_ele,
         r42=r42,
         r62=r62,
-        scheme=scheme,
         labels=labels,
         W=W,
     )

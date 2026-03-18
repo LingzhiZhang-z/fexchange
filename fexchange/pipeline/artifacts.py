@@ -15,7 +15,6 @@ from fexchange.io.disk import (
     atomic_write_json,
     atomic_write_npz,
     build_meta,
-    build_stage_path,
     load_json_checked,
     load_npz_checked,
     validate_meta,
@@ -24,6 +23,42 @@ from fexchange.pipeline.keys import level_key, three_sectors
 from fexchange.utils.numerics import numerics_meta
 
 logger = logging.getLogger("fexchange")
+
+# Artifact file spec: maps level -> list of (filename, minimum_required_npz_keys_or_None_for_json).
+# These are the minimum keys needed for loading/validation, not the full set of stored keys.
+# Used by both try_load_* and validate_upstream_artifacts to maintain one source of truth.
+ARTIFACT_FILE_SPEC: dict[str, list[tuple[str, list[str] | None]]] = {
+    "LMSM": [
+        ("V.npz", ["V_fock"]),
+        ("E_terms.npz", ["coef_F0", "coef_F2", "coef_F4", "coef_F6"]),
+        ("meta.json", None),
+    ],
+    "LSJM": [
+        ("V.npz", ["V_fock"]),
+        ("E_terms.npz", ["coef_F0", "coef_F2", "coef_F4", "coef_F6", "coef_zeta"]),
+        ("meta.json", None),
+    ],
+    "L0": [
+        # L0 uses dynamic filenames (n{n_ele}{n_ele+1}.npz etc.), handled specially.
+        # This entry covers the meta files only.
+    ],
+    "L1": [
+        ("data.npz", ["A", "B"]),
+        ("meta.json", None),
+    ],
+    "L2": [
+        ("data.npz", ["M_A", "M_B"]),
+        ("meta.json", None),
+    ],
+    "L3": [
+        ("data.npz", ["h_pre_j_mu"]),
+        ("meta.json", None),
+    ],
+    "L4": [
+        ("data.npz", ["h_mu_abcd", "Heff_mu_abcd"]),
+        ("meta.json", None),
+    ],
+}
 
 
 def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, Any] | None:
@@ -226,13 +261,13 @@ def persist_stateset(
 
 
 def persist_l0(
+    stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
     *,
     n_ele: int,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
-    stage_dir = build_stage_path(output_root, "fock")
     hash_x = atomic_write_npz(stage_dir / f"n{n_ele}{n_ele + 1}.npz", X=result["X"])
     hash_y = atomic_write_npz(stage_dir / f"n{n_ele - 1}{n_ele}.npz", Y=result["Y"])
     for sec in three_sectors(n_ele):
@@ -264,17 +299,16 @@ def persist_l0(
 
 
 def persist_l1(
+    stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
-    scheme: str,
     soc0: dict[str, Any],
 ) -> None:
     output_root = cfg["paths"]["output_root"]
-    stage_dir = build_stage_path(output_root, "L1", n=n_ele, r42=r42, r62=r62, scheme=scheme)
     content_hash = atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
     meta = build_meta(
         module="sopt.precompute",
@@ -322,24 +356,15 @@ def persist_l1(
 
 
 def persist_l2(
+    stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
-    scheme: str,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
-    stage_dir = build_stage_path(
-        output_root,
-        "L2",
-        n=n_ele,
-        r42=r42,
-        r62=r62,
-        scheme=scheme,
-        hopping_name=cfg["sources"]["hopping_name"],
-    )
     content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
@@ -376,28 +401,16 @@ def persist_l2(
 
 
 def persist_l3(
+    stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
-    scheme: str,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
-    stage_dir = build_stage_path(
-        output_root,
-        "L3",
-        n=n_ele,
-        r42=r42,
-        r62=r62,
-        scheme=scheme,
-        hopping_name=cfg["sources"]["hopping_name"],
-        U=float(sopt["U"]),
-        Jh=float(sopt["Jh"]),
-        zeta=float(sopt["zeta"]),
-    )
     content_hash = atomic_write_npz(stage_dir / "data.npz", h_pre_j_mu=result["h_pre_j_mu"])
     meta = build_meta(
         module="sopt.contraction",
@@ -439,31 +452,18 @@ def persist_l3(
 
 
 def persist_l4(
+    stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
     *,
     n_ele: int,
     r42: float,
     r62: float,
-    scheme: str,
     labels: np.ndarray,
     W: np.ndarray,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     sopt = cfg["sopt"]
-    stage_dir = build_stage_path(
-        output_root,
-        "L4",
-        n=n_ele,
-        r42=r42,
-        r62=r62,
-        scheme=scheme,
-        hopping_name=cfg["sources"]["hopping_name"],
-        U=float(sopt["U"]),
-        Jh=float(sopt["Jh"]),
-        zeta=float(sopt["zeta"]),
-        kramer_name=cfg["sources"]["kramer_name"],
-    )
     payload = {
         "h_mu_abcd": result["h_mu_abcd"],
         "Heff_mu_abcd": result["Heff_mu_abcd"],

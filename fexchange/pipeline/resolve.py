@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fexchange.io.disk import build_stage_path
-from fexchange.io.run_input import upstream_for_start_level
-from fexchange.pipeline.keys import CORE_TOKEN_RE
+from fexchange.pipeline.keys import CORE_TOKEN_RE, extract_source_names
 from fexchange.utils.errors import InputError
 
 
@@ -28,9 +27,9 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
 
     output_root = Path(cfg["paths"]["output_root"])
     core_root = output_root / "core"
-    sources = cfg.get("sources", {})
-    hopping_name = str(sources.get("hopping_name", "")) if isinstance(sources, dict) else ""
-    kramer_name = str(sources.get("kramer_name", "")) if isinstance(sources, dict) else ""
+    sn = extract_source_names(cfg)
+    hopping_name = sn.hopping_name
+    kramer_name = sn.kramer_name
     if not core_root.exists():
         raise InputError(
             "FXE-INPUT-003",
@@ -39,8 +38,8 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
             paths={"core_root": str(core_root)},
         )
 
-    start_level = cfg["runtime"]["start_level"]
-    required = upstream_for_start_level(start_level)
+    # Always start from LMSM; no upstream preflight needed
+    required: tuple[str, ...] = ()
     candidates: list[tuple[int, float, float, str]] = []
 
     for d in sorted(core_root.iterdir()):
