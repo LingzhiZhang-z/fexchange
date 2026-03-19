@@ -2,7 +2,7 @@ __pycache__
 .vscode
 .claude
 .DS_Store
-docs
+docs/
 outputs/
 .pytest_cache
 AGENTS.md

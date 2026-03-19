@@ -27,3 +27,4 @@ include-package-data = false
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["fexchange*"]
+exclude = ["docs*"]
