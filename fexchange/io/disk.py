@@ -462,10 +462,11 @@ def write_point_result_txt(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     J = np.asarray(J_mu, dtype=float)
+    jh_over_u = float("nan") if float(U) == 0.0 else float(Jh) / float(U)
     values = [
         float(U),
         float(Jh),
-        float(Jh) / float(U),
+        jh_over_u,
         float(zeta),
         float(J[0, 0]),
         float(J[0, 1]),

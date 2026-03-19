@@ -115,6 +115,26 @@ class TestPathTokens:
         assert data["cfg_signature"] == "cfg-deadbeefcafe"
         assert data["resolved_branches"]["nm1"]["physics"]["F2"] == pytest.approx(2.0)
 
+    def test_write_point_result_txt_allows_zero_u(self, tmp_path):
+        path = write_point_result_txt(
+            str(tmp_path),
+            RE="Ce",
+            n_ele=1,
+            hopping_label="bond_zero_u",
+            projection_label="proj_zero_u",
+            U=0.0,
+            Jh=100.0,
+            zeta=99.6,
+            J_mu=np.eye(3),
+            mapping_residual=1.0e-10,
+        )
+
+        values = np.fromstring(path.read_text(), sep=" ")
+        assert values.shape == (14,)
+        assert values[0] == pytest.approx(0.0)
+        assert values[1] == pytest.approx(100.0)
+        assert np.isnan(values[2])
+
 
 class TestAtomicWrite:
     def test_round_trip_npz(self, tmp_path):
