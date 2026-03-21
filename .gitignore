@@ -1,6 +1,7 @@
 __pycache__
 .vscode
 .claude
+.worktrees/
 .DS_Store
 docs/
 outputs/
