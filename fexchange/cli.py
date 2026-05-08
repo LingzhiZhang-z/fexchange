@@ -2,7 +2,7 @@
 CLI entry point.
 
 Usage:
-    fexchange run run_input.toml
+    fexchange run INPUT_TOML
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fexchange")
     sub = parser.add_subparsers(dest="command")
     run_parser = sub.add_parser("run", help="Execute configured level window")
-    run_parser.add_argument("toml", type=str, help="Path to run_input.toml")
+    run_parser.add_argument("toml", type=str, help="Path to a run-input TOML file")
     run_parser.add_argument(
         "--log-level",
         default="INFO",

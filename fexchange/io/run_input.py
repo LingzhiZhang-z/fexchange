@@ -30,10 +30,9 @@ _ALLOWED = frozenset({
 # ── Public API ──────────────────────────────────────────────────────────
 
 def load_run_input(path: str | Path) -> dict[str, Any]:
-    """Load, validate, normalize, and build branches from run_input.toml."""
+    """Load, validate, normalize, and build branches from a run-input TOML."""
     path = Path(path)
     _chk(path.exists(), "001", f"File not found: {path}")
-    _chk(path.name == "run_input.toml", "003", "Filename must be run_input.toml")
 
     cfg = _load_toml(path)
     _validate_structure(cfg)
@@ -66,7 +65,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
     with open(path, "rb") as f:
         data = tomllib.load(f)
     if not isinstance(data, dict):
-        raise SchemaError("FXE-SCHEMA-002", "run_input.toml must be a mapping")
+        raise SchemaError("FXE-SCHEMA-002", "run-input TOML must be a mapping")
     return data
 
 
@@ -111,8 +110,8 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
     _chk(_nonempty(c.get("eps_profile")), "003", "checks.eps_profile must be non-empty string")
 
     # paths
-    _chk(cfg["paths"].get("output_root") == "./outputs", "003",
-         "paths.output_root must be './outputs'")
+    output_root = cfg["paths"].get("output_root")
+    _chk(_nonempty(output_root), "003", "paths.output_root must be a non-empty string")
 
     # model (optional; only RS supported)
     if "model" in cfg:

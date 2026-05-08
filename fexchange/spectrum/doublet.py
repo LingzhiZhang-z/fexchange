@@ -31,16 +31,22 @@ def gauge_fix_kramers_pair(
     U_T = build_time_reversal_operator(J, module="doublet_basis")
     U = np.eye(2, dtype=DTYPE_COMPLEX)
 
+    def align_jx_phase(current: NDArray[np.complexfloating]) -> NDArray[np.complexfloating]:
+        basis_now = Psi @ current
+        M_Jx_now = basis_now.conj().T @ Jx @ basis_now
+        off_diag_now = M_Jx_now[0, 1]
+        if abs(off_diag_now) <= tol:
+            return current
+        phase = np.angle(off_diag_now)
+        phase_fix = np.diag(
+            [np.exp(0.5j * phase), np.exp(-0.5j * phase)]
+        ).astype(DTYPE_COMPLEX)
+        return current @ phase_fix
+
     M_Jz = Psi.conj().T @ Jz @ Psi
     evals, vecs_z = np.linalg.eigh(M_Jz)
     U = U @ vecs_z[:, np.argsort(evals.real)[::-1]]
-
-    basis = Psi @ U
-    M_Jx = basis.conj().T @ Jx @ basis
-    off_diag = M_Jx[0, 1]
-    if abs(off_diag) > tol:
-        phase = np.angle(off_diag)
-        U = U @ np.diag([np.exp(-0.5j * phase), np.exp(0.5j * phase)]).astype(DTYPE_COMPLEX)
+    U = align_jx_phase(U)
 
     basis = Psi @ U
     w1 = basis[:, 0]
@@ -48,6 +54,7 @@ def gauge_fix_kramers_pair(
     basis_tr = np.column_stack([w1, w2])
     U_tr = basis.conj().T @ basis_tr
     U = U @ U_tr
+    U = align_jx_phase(U)
 
     basis = Psi @ U
     M_Jx = basis.conj().T @ Jx @ basis
