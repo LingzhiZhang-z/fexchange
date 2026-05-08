@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 
-# Add parent directory to path to import fexchange
-sys.path.insert(0, str(Path(__file__).parent.parent))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from fexchange.hamiltonian.hcef import build_hcef_matrix_J
 from fexchange.spectrum.classify import build_projectors, allowed_multipoles

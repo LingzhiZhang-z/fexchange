@@ -4,8 +4,12 @@ __pycache__
 .worktrees/
 .DS_Store
 docs/
+output/
 outputs/
 .pytest_cache
 AGENTS.md
 CLAUDE.md
 data/
+tmp/
+tests/
+fexchange/tools/tests

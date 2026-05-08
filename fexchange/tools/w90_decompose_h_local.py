@@ -10,6 +10,8 @@ Reads the h_local output from w90_extract, prints ζ, saves h_cef.
 from __future__ import annotations
 
 from functools import lru_cache
+import json
+from pathlib import Path
 import sys
 
 import numpy as np
@@ -354,6 +356,102 @@ def _real_least_squares_coeffs(template_map, target):
     return names, coeffs, fit
 
 
+_TRIVALENT_RE_HUND_LSJ = {
+    # n_ele: (L, S, J) for the trivalent rare-earth Hund-rule ground multiplet.
+    1: (3, 0.5, 2.5),    # Ce3+: 2F5/2
+    2: (5, 1.0, 4.0),    # Pr3+: 3H4
+    3: (6, 1.5, 4.5),    # Nd3+: 4I9/2
+    4: (6, 2.0, 4.0),    # Pm3+: 5I4
+    5: (5, 2.5, 2.5),    # Sm3+: 6H5/2
+    6: (3, 3.0, 0.0),    # Eu3+: 7F0
+    7: (0, 3.5, 3.5),    # Gd3+: 8S7/2
+    8: (3, 3.0, 6.0),    # Tb3+: 7F6
+    9: (5, 2.5, 7.5),    # Dy3+: 6H15/2
+    10: (6, 2.0, 8.0),   # Ho3+: 5I8
+    11: (6, 1.5, 7.5),   # Er3+: 4I15/2
+    12: (5, 1.0, 6.0),   # Tm3+: 3H6
+    13: (3, 0.5, 3.5),   # Yb3+: 2F7/2
+}
+
+
+def _select_trivalent_hund_subspace(lsjm_result, n_ele):
+    from fexchange.utils.constants import RE_DEFAULTS_BY_N_ELE
+
+    n_ele = int(n_ele)
+    if n_ele not in _TRIVALENT_RE_HUND_LSJ:
+        raise ValueError(f"n_ele={n_ele} out of trivalent RE range")
+
+    L_target, S_target, J_target = _TRIVALENT_RE_HUND_LSJ[n_ele]
+    twoS_target = int(round(2.0 * S_target))
+    twoJ_target = int(round(2.0 * J_target))
+
+    labels = lsjm_result["labels"]
+    d = RE_DEFAULTS_BY_N_ELE[n_ele]
+    F2 = float(d["F2_per_Jh"])
+    F4 = float(d["F4_per_Jh"])
+    F6 = float(d["F6_per_Jh"])
+    coef_F2 = lsjm_result["coef_F2"]
+    coef_F4 = lsjm_result["coef_F4"]
+    coef_F6 = lsjm_result["coef_F6"]
+
+    term_energies = {}
+    for idx, lab in enumerate(labels):
+        if int(lab["L"]) != int(L_target) or int(lab["twoS"]) != twoS_target:
+            continue
+        key = (int(lab["alpha"]), int(lab["L"]), int(lab["twoS"]))
+        term_energies.setdefault(
+            key,
+            F2 * float(coef_F2[idx])
+            + F4 * float(coef_F4[idx])
+            + F6 * float(coef_F6[idx]),
+        )
+    if not term_energies:
+        raise ValueError(
+            f"No LS term matching n_ele={n_ele}, L={L_target}, S={S_target}"
+        )
+    alpha0, L0, twoS0 = min(term_energies, key=term_energies.get)
+
+    col_indices = [
+        i for i, lab in enumerate(labels)
+        if int(lab["alpha"]) == alpha0
+        and int(lab["L"]) == L0
+        and int(lab["twoS"]) == twoS0
+        and int(lab["twoJ"]) == twoJ_target
+    ]
+    n_j = twoJ_target + 1
+    if len(col_indices) != n_j:
+        raise ValueError(
+            f"Expected {n_j} states for n_ele={n_ele}, J={J_target}, "
+            f"found {len(col_indices)}"
+        )
+
+    return {
+        "U_n_soc0": lsjm_result["V_fock"][:, col_indices],
+        "J0": float(J_target),
+        "alpha0": alpha0,
+        "L0": float(L0),
+        "S0": float(twoS0) / 2.0,
+        "n_j": n_j,
+        "col_indices": col_indices,
+        "j_source": "trivalent_RE_Hund_rule",
+    }
+
+
+@lru_cache(maxsize=None)
+def _cached_soc_lowest_subspace(n_ele, zeta_sign):
+    """Cache the many-body Hund-ground J0 subspace for repeated local fits."""
+    from fexchange.spectrum.lsms import build_lsms
+    from fexchange.spectrum.lsjm import build_lsjm
+    from fexchange.utils.constants import N_ORB, RE_DEFAULTS_BY_N_ELE
+
+    d = RE_DEFAULTS_BY_N_ELE[int(n_ele)]
+    r42 = float(d["F4_per_Jh"]) / float(d["F2_per_Jh"])
+    r62 = float(d["F6_per_Jh"]) / float(d["F2_per_Jh"])
+    lsms = build_lsms(int(n_ele), N_ORB, r42=r42, r62=r62)
+    lsjm = build_lsjm(lsms, N_ORB)
+    return _select_trivalent_hund_subspace(lsjm, int(n_ele))
+
+
 def extract_cef_stevens_fit(
     h_cef,
     n_ele,
@@ -364,24 +462,21 @@ def extract_cef_stevens_fit(
     """
     Project h_cef into the SOC-lowest J0 subspace and fit Stevens parameters.
 
-    Slater integrals fixed (F2=1, F4=F6=0) — only affect J0 selection,
-    which is insensitive to their values.
+    The J0 manifold is selected from the trivalent rare-earth Hund-rule ground
+    multiplet.  This avoids using an underdetermined F2-only Coulomb reference
+    to decide the atomic ground term.
     """
     h_cef = np.asarray(h_cef, dtype=complex)
     if h_cef.shape != (7, 7):
         raise ValueError(f"h_cef must be (7,7), got {h_cef.shape}")
 
     from fexchange.core.fermion import one_body_operator_matrix
-    from fexchange.spectrum.lsms import build_lsms
-    from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
     from fexchange.utils.constants import N_ORB
 
     h_1b = np.kron(h_cef, np.eye(2))
     h_cef_fock = one_body_operator_matrix(h_1b, n_ele, N_ORB)
 
-    lsms = build_lsms(n_ele, N_ORB, r42=0, r62=0)
-    lsjm = build_lsjm(lsms, N_ORB)
-    soc0 = select_soc_lowest_subspace(lsjm, F2=1, F4=0, F6=0, zeta=zeta)
+    soc0 = _cached_soc_lowest_subspace(n_ele, 1.0 if zeta >= 0 else -1.0)
 
     U_j0 = soc0["U_n_soc0"]
     h_cef_j0 = U_j0.conj().T @ h_cef_fock @ U_j0
@@ -439,15 +534,11 @@ def extract_local_stevens_fit(
         raise ValueError(f"h_local must be (14,14), got {h_local.shape}")
 
     from fexchange.core.fermion import one_body_operator_matrix
-    from fexchange.spectrum.lsms import build_lsms
-    from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
     from fexchange.utils.constants import N_ORB
 
     h_local_fock = one_body_operator_matrix(h_local, n_ele, N_ORB)
 
-    lsms = build_lsms(n_ele, N_ORB, r42=0, r62=0)
-    lsjm = build_lsjm(lsms, N_ORB)
-    soc0 = select_soc_lowest_subspace(lsjm, F2=1, F4=0, F6=0, zeta=zeta)
+    soc0 = _cached_soc_lowest_subspace(n_ele, 1.0 if zeta >= 0 else -1.0)
 
     U_j0 = soc0["U_n_soc0"]
     h_local_j0 = U_j0.conj().T @ h_local_fock @ U_j0
@@ -513,6 +604,189 @@ def _print_scheme_b(sb, symmetry):
         print(f"  level {i}: {e:.4f} meV")
 
 
+def _complex_payload(value):
+    value = complex(value)
+    return {"real": float(value.real), "imag": float(value.imag)}
+
+
+def _scheme_a_summary(sa, *, threshold=1e-10):
+    return {
+        "tensor_fit_residual": float(sa["residual"]),
+        "trace_avg_meV": _complex_payload(sa["trace_avg"]),
+        "a_kq": [
+            {
+                "k": int(k),
+                "q": int(q),
+                "real_meV": float(v.real),
+                "imag_meV": float(v.imag),
+            }
+            for (k, q), v in sorted(sa["a_kq"].items())
+            if abs(v) > threshold
+        ],
+    }
+
+
+def _scheme_b_summary(sb):
+    return {
+        "alpha0": str(sb["alpha0"]),
+        "L0": float(sb["L0"]),
+        "S0": float(sb["S0"]),
+        "J0": float(sb["J0"]),
+        "n_j": int(sb["n_j"]),
+        "j0_weight": float(sb["j0_weight"]),
+        "trace_avg_j0_meV": _complex_payload(sb["trace_avg_j0"]),
+        "stevens_fit_residual": float(sb["stevens_fit_residual"]),
+        "B_params_meV": {name: float(val) for name, val in sb["B_params"].items()},
+        "eigvals_meV": [float(x) for x in sb["eigvals_meV"]],
+        "eigvals_fit_meV": [float(x) for x in sb["eigvals_fit_meV"]],
+        "cef_splitting_meV": [float(x) for x in sb["cef_splitting_meV"]],
+        "cef_splitting_fit_meV": [float(x) for x in sb["cef_splitting_fit_meV"]],
+    }
+
+
+def decompose_h_local_summary(
+    h_local,
+    *,
+    rtol=1e-2,
+    n_ele=None,
+    zeta_soc=None,
+    symmetry="Oh",
+    mode_q3="cos",
+    direct_local_fit=False,
+):
+    """
+    Return structured decomposition results for a 14x14 h_local matrix in meV.
+    """
+    zeta, h_cef = decompose_h_local(h_local, rtol=rtol)
+    scheme_a = decompose_orbital_tensors(h_cef)
+    summary = {
+        "units": {
+            "h_local": "meV",
+            "h_cef": "meV",
+            "zeta": "meV",
+            "B_params": "meV",
+        },
+        "rtol": float(rtol),
+        "zeta_meV": float(zeta),
+        "h_cef_trace_avg_meV": _complex_payload(np.trace(h_cef) / h_cef.shape[0]),
+        "scheme_a": _scheme_a_summary(scheme_a),
+    }
+
+    scheme_b = None
+    if n_ele is not None:
+        zeta_fit = zeta if zeta_soc is None else zeta_soc
+        if direct_local_fit:
+            scheme_b = extract_local_stevens_fit(
+                h_local,
+                n_ele=n_ele,
+                zeta=zeta_fit,
+                symmetry=symmetry,
+                mode_q3=mode_q3,
+            )
+            summary["scheme_b"] = {
+                "method": "many_body_direct_local",
+                "n_ele": int(n_ele),
+                "zeta_fit_meV": float(zeta_fit),
+                "symmetry": symmetry,
+                "mode_q3": mode_q3,
+                "direct_local_fit": bool(direct_local_fit),
+                **_scheme_b_summary(scheme_b),
+            }
+        else:
+            scheme_b = extract_cef_stevens_fit(
+                h_cef,
+                n_ele=n_ele,
+                zeta=zeta_fit,
+                symmetry=symmetry,
+                mode_q3=mode_q3,
+            )
+            summary["scheme_b"] = {
+                "method": "many_body_h_cef",
+                "n_ele": int(n_ele),
+                "zeta_fit_meV": float(zeta_fit),
+                "symmetry": symmetry,
+                "mode_q3": mode_q3,
+                "direct_local_fit": bool(direct_local_fit),
+                **_scheme_b_summary(scheme_b),
+            }
+
+    return {
+        "zeta": zeta,
+        "h_cef": h_cef,
+        "scheme_a": scheme_a,
+        "scheme_b": scheme_b,
+        "summary": summary,
+    }
+
+
+def save_decomposition_outputs(
+    h_local_dat,
+    *,
+    output_prefix=None,
+    summary_json=None,
+    rtol=1e-2,
+    n_ele=None,
+    zeta_soc=None,
+    symmetry="Oh",
+    mode_q3="cos",
+    direct_local_fit=False,
+    write_cef_config=None,
+):
+    """
+    Decompose a saved h_local matrix and write h_cef plus JSON diagnostics.
+    """
+    h_local_dat = Path(h_local_dat)
+    h_local = np.loadtxt(h_local_dat, dtype=complex)
+    prefix = Path(output_prefix) if output_prefix is not None else h_local_dat.with_name(
+        h_local_dat.stem.replace("h_local", "local") if "h_local" in h_local_dat.stem else h_local_dat.stem
+    )
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+
+    result = decompose_h_local_summary(
+        h_local,
+        rtol=rtol,
+        n_ele=n_ele,
+        zeta_soc=zeta_soc,
+        symmetry=symmetry,
+        mode_q3=mode_q3,
+        direct_local_fit=direct_local_fit,
+    )
+
+    h_cef_path = prefix.with_name(prefix.name + "_h_cef.dat")
+    np.savetxt(h_cef_path, result["h_cef"], fmt="%.12f", delimiter="  ")
+
+    summary_path = Path(summary_json) if summary_json is not None else prefix.with_name(
+        prefix.name + "_decompose_summary.json"
+    )
+    summary = dict(result["summary"])
+    summary["paths"] = {
+        "h_local": str(h_local_dat),
+        "h_cef": str(h_cef_path),
+    }
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+    cef_config_path = None
+    if write_cef_config and result["scheme_b"] is not None:
+        cef_config_path = Path(write_cef_config)
+        sb = result["scheme_b"]
+        lines = [
+            f'point_group = "{symmetry}"',
+            f"J = {sb['J0']}",
+            f'mode_q3 = "{mode_q3}"',
+            "",
+        ]
+        for name, val in sb["B_params"].items():
+            lines.append(f"{name} = {val}")
+        cef_config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return {
+        "h_cef": h_cef_path,
+        "summary": summary_path,
+        "cef_config": cef_config_path,
+        "result": result,
+    }
+
+
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Decompose h_local into CEF + SOC")
@@ -527,6 +801,8 @@ if __name__ == "__main__":
         action="store_true",
         help="Fit Stevens parameters directly in the SOC-lowest J0 manifold",
     )
+    p.add_argument("--output_prefix", type=str)
+    p.add_argument("--summary_json", type=str)
     p.add_argument("--write_cef_config", type=str)
     args = p.parse_args()
 
@@ -572,5 +848,19 @@ if __name__ == "__main__":
             with open(args.write_cef_config, "w") as f:
                 f.write("\n".join(lines) + "\n")
             print(f"\nSaved config: {args.write_cef_config}")
+
+    if args.output_prefix or args.summary_json:
+        save_decomposition_outputs(
+            args.h_local_dat,
+            output_prefix=args.output_prefix,
+            summary_json=args.summary_json,
+            rtol=args.rtol,
+            n_ele=args.n_ele,
+            zeta_soc=args.zeta_soc,
+            symmetry=args.symmetry,
+            mode_q3=args.mode_q3,
+            direct_local_fit=args.direct_local_fit,
+            write_cef_config=args.write_cef_config if args.write_cef_config else None,
+        )
 
     print(f"Saved h_cef: {out_path}")

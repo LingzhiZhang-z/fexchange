@@ -1,8 +1,8 @@
 """
 Independent Wannier90 extraction tool.
 
-Extract hopping matrix (t_mu) and onsite Hamiltonian (h_local)
-from Wannier90 hr.dat output.
+Extract hopping matrix (t_mu), bond-averaged onsite Hamiltonian (h_local),
+and per-f-site local Hamiltonians from Wannier90 hr.dat output.
 
 Usage:
     # Programmatic
@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import sys
 import tomllib
 import warnings
@@ -170,6 +171,43 @@ def _permute_ud_to_du(mat):
     return mat[np.ix_(perm, perm)].copy()
 
 
+def _resolve_n_orb_counts(n_orb_per_atom, *, num_wann, spinor):
+    """
+    Resolve per-atom orbital counts against ``num_wann``.
+
+    ``n_orb_per_atom`` may be either unexpanded orbital counts, e.g.
+    [7, ..., 3] with ``spinor=True``, or already spin-expanded counts,
+    e.g. [14, ..., 6]. The returned counts always sum to ``num_wann``.
+    """
+    counts = [int(n) for n in n_orb_per_atom]
+    total = sum(counts)
+    if total == num_wann:
+        return counts
+    if spinor and 2 * total == num_wann:
+        return [2 * n for n in counts]
+    raise ValueError(
+        "Could not reconcile n_orb_per_atom with num_wann: "
+        f"sum={total}, spinor={spinor}, num_wann={num_wann}"
+    )
+
+
+def _site_tuple(site):
+    atom, cell = site
+    cell_tuple = tuple(int(x) for x in cell)
+    if len(cell_tuple) != 3:
+        raise ValueError(f"site cell must contain exactly 3 integers, got {cell!r}")
+    return int(atom), cell_tuple
+
+
+def _site_orbitals(counts, atom):
+    if atom < 0 or atom >= len(counts):
+        raise ValueError(f"Atom index out of range: {atom}")
+    offsets = [0]
+    for count in counts:
+        offsets.append(offsets[-1] + count)
+    return list(range(offsets[atom], offsets[atom + 1]))
+
+
 def _extract_w90_blocks(H_R, n_orb_per_atom, f_sites, ligands):
     """
     Extract raw blocks from Wannier90 H_R data.
@@ -274,6 +312,14 @@ def _finalize(t_mu_raw, h_local_raw, is_soc):
     return U @ t_mu_raw @ U.T.conj(), U @ h_local_raw @ U.T.conj()
 
 
+def _finalize_h_local(h_local_raw, is_soc):
+    """Apply spin expansion if needed and real->complex f-shell transform."""
+    if not is_soc:
+        h_local_raw = _expand_to_spinor(h_local_raw)
+    U = _build_U_r2c(spinor=True)
+    return U @ h_local_raw @ U.T.conj()
+
+
 # ---------------------------------------------------------------------------
 # Main extraction
 # ---------------------------------------------------------------------------
@@ -291,8 +337,7 @@ def w90_extract(hr_path, n_orb_per_atom, f_sites, ligands=None,
     if scale != 1.0:
         H_R = {R: scale * mat for R, mat in H_R.items()}
 
-    spin_mult = 2 if spinor else 1
-    norbs = [ n_orb * spin_mult for n_orb in n_orb_per_atom ]
+    norbs = _resolve_n_orb_counts(n_orb_per_atom, num_wann=num_wann, spinor=spinor)
     # Phase 1: Extract raw blocks from Wannier90 data
     h_local_raw, t_ff, ligand_hops, eps_i, eps_j = _extract_w90_blocks(
         H_R, norbs, f_sites, ligands)
@@ -315,6 +360,103 @@ def w90_extract(hr_path, n_orb_per_atom, f_sites, ligands=None,
     return {"t_mu": t_mu, "h_local": h_local}
 
 
+def w90_extract_f_site_local(
+    hr_path,
+    n_orb_per_atom,
+    f_site,
+    *,
+    spinor=False,
+    energy_unit="eV",
+    remove_trace=True,
+    hermitianize=True,
+):
+    """
+    Extract one f site's local 14x14 Hamiltonian from Wannier90 hr.dat.
+
+    The returned ``h_local`` is in complex-harmonic f basis with internal
+    interleaved (down, up) spin ordering, matching ``w90_decompose_h_local``.
+    ``h_local_real`` is the corresponding real-harmonic matrix after the same
+    spin-order convention and trace handling.
+    """
+    if energy_unit not in _ENERGY_SCALE:
+        raise ValueError(f"Unknown energy_unit: {energy_unit!r}. Choose from {list(_ENERGY_SCALE)}")
+
+    H_R, num_wann = read_hr(hr_path)
+    scale = _ENERGY_SCALE[energy_unit]
+    if scale != 1.0:
+        H_R = {R: scale * mat for R, mat in H_R.items()}
+
+    counts = _resolve_n_orb_counts(n_orb_per_atom, num_wann=num_wann, spinor=spinor)
+    atom, cell = _site_tuple(f_site)
+    if cell != (0, 0, 0):
+        raise ValueError("local onsite extraction expects f_site cell [0, 0, 0]")
+
+    indices = _site_orbitals(counts, atom)
+    if len(indices) not in (7, 14):
+        raise ValueError(
+            f"f-site {atom} has {len(indices)} orbitals; expected 7 (nsoc) or 14 (soc)"
+        )
+
+    h_raw = H_R[(0, 0, 0)][np.ix_(indices, indices)].copy()
+    hermiticity_error = float(np.max(np.abs(h_raw - h_raw.conj().T)))
+    if hermitianize:
+        h_raw = 0.5 * (h_raw + h_raw.conj().T)
+
+    if spinor:
+        h_real = _permute_ud_to_du(h_raw)
+    else:
+        h_real = _expand_to_spinor(h_raw)
+
+    trace_avg = complex(np.trace(h_real) / h_real.shape[0])
+    if remove_trace:
+        h_real = h_real - trace_avg * np.eye(h_real.shape[0], dtype=complex)
+
+    h_local = _finalize_h_local(h_real, is_soc=True)
+
+    return {
+        "h_local": h_local,
+        "h_local_real": h_real,
+        "trace_avg": trace_avg,
+        "trace_removed": bool(remove_trace),
+        "hermiticity_error": hermiticity_error,
+        "site": {"atom": atom, "cell": [int(x) for x in cell]},
+        "num_wann": int(num_wann),
+        "n_orb_per_atom_resolved": counts,
+    }
+
+
+def save_f_site_local_outputs(prefix, result):
+    """Save per-site local extraction outputs with ``prefix``."""
+    prefix = Path(prefix)
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    outputs = {
+        "h_local": prefix.with_name(prefix.name + "_h_local.dat"),
+        "h_local_real": prefix.with_name(prefix.name + "_h_local_real.dat"),
+        "metadata": prefix.with_name(prefix.name + "_local_metadata.json"),
+    }
+    np.savetxt(outputs["h_local"], result["h_local"] * 1000.0, fmt="%.12f")
+    np.savetxt(outputs["h_local_real"], result["h_local_real"] * 1000.0, fmt="%.12f")
+    payload = {
+        "site": result["site"],
+        "units": {
+            "h_local": "meV",
+            "h_local_real": "meV",
+            "trace_avg": "eV",
+            "hermiticity_error": "eV",
+        },
+        "trace_removed": bool(result["trace_removed"]),
+        "trace_avg_eV": {
+            "real": float(result["trace_avg"].real),
+            "imag": float(result["trace_avg"].imag),
+        },
+        "hermiticity_error_eV": float(result["hermiticity_error"]),
+        "num_wann": int(result["num_wann"]),
+        "n_orb_per_atom_resolved": [int(x) for x in result["n_orb_per_atom_resolved"]],
+    }
+    outputs["metadata"].write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return outputs
+
+
 # ---------------------------------------------------------------------------
 # TOML config entry point
 # ---------------------------------------------------------------------------
@@ -323,6 +465,20 @@ def w90_extract_from_toml(toml_path):
     """Load config from TOML file, extract, and save results as txt."""
     with open(toml_path, "rb") as f:
         cfg = tomllib.load(f)
+
+    if cfg.get("mode") == "local" or "f_site" in cfg:
+        site = cfg["f_site"]
+        result = w90_extract_f_site_local(
+            hr_path=cfg["hr_path"],
+            n_orb_per_atom=cfg["n_orb_per_atom"],
+            f_site=(site["atom"], site["cell"]),
+            spinor=cfg.get("spinor", False),
+            energy_unit=cfg.get("energy_unit", "eV"),
+            remove_trace=cfg.get("remove_trace", True),
+            hermitianize=cfg.get("hermitianize", True),
+        )
+        save_f_site_local_outputs(cfg.get("output", "w90_local"), result)
+        return result
 
     fi = cfg["f_site_i"]
     fj = cfg["f_site_j"]
