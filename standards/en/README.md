@@ -41,6 +41,10 @@ If EN and ZH conflict, EN is authoritative.
 - `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
 - `./standards/en/04-sopt/04-REF-DERIVATION.md`
 
+### 04-fopt/ — Fourth-order perturbation preprocessing
+- `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+- `./standards/en/04-fopt/04-01-PREPROCESSING.md`
+
 ### 05-io/ — Disk I/O, layout, Wannier90, run-input contract
 - `./standards/en/05-io/05-00-IO.md`
 - `./standards/en/05-io/05-01-IO_LAYOUT.md`
@@ -84,11 +88,13 @@ directory.
 23. `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`
 24. `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
 25. `./standards/en/04-sopt/04-REF-DERIVATION.md`
-26. `./standards/en/05-io/05-00-IO.md`
-27. `./standards/en/05-io/05-01-IO_LAYOUT.md`
-28. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
-29. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
-30. `./standards/en/05-io/05-04-RUN_INPUT.md`
+26. `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+27. `./standards/en/04-fopt/04-01-PREPROCESSING.md`
+28. `./standards/en/05-io/05-00-IO.md`
+29. `./standards/en/05-io/05-01-IO_LAYOUT.md`
+30. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
+31. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
+32. `./standards/en/05-io/05-04-RUN_INPUT.md`
 
 ## Conflict Rule
 If standards conflict, stop immediately and report using:

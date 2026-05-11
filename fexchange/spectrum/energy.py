@@ -101,3 +101,42 @@ def compute_intermediate_energies(
     E_np1 = _energy(state[f"lsjm_{n_ele + 1}"], branch_np1) - E_ref
     E_nm1 = _energy(state[f"lsjm_{n_ele - 1}"], branch_nm1) - E_ref
     return E_np1, E_nm1
+
+
+def compute_ligand_energies(
+    spectrum: dict[str, Any],
+    *,
+    Delta: float,
+    U_p: float,
+    lambda_p: float = 0.0,
+) -> NDArray[np.floating]:
+    """Assemble ligand p^N intermediate-state energies from spectrum coefficients.
+
+    Mirrors the LSJM `_energy` helper above (Slater params * coef arrays), but
+    for the ligand p-shell model:
+
+        E_p^N[i] = Delta * coef_Delta[i] + U_p * coef_U_p[i] + lambda_p * coef_lambda_p[i]
+
+    Parameters
+    ----------
+    spectrum : payload from `spectrum.ligand.build_ligand_spectrum`.
+    Delta    : ligand-to-f charge-transfer cost (uniform per state, scaled by n_hole).
+    U_p      : ligand p-shell onsite Hubbard U (uniform per state, scaled by hole-pair count).
+    lambda_p : ligand atomic SOC strength (per-state, traceless contribution).
+
+    Returns
+    -------
+    NDArray[float] of shape (spectrum["dim"],), in the SOC eigenbasis ordering
+    (i.e., aligned with `spectrum["V_fock"]` columns).
+    """
+    if not all(np.isfinite([Delta, U_p, lambda_p])):
+        raise InputError(
+            "FXE-INPUT-003",
+            "Delta / U_p / lambda_p must be finite",
+            actual={"Delta": Delta, "U_p": U_p, "lambda_p": lambda_p},
+        )
+    return (
+        float(Delta)    * np.asarray(spectrum["coef_Delta"],    dtype=float)
+        + float(U_p)    * np.asarray(spectrum["coef_U_p"],      dtype=float)
+        + float(lambda_p) * np.asarray(spectrum["coef_lambda_p"], dtype=float)
+    )
