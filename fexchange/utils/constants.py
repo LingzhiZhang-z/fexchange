@@ -56,6 +56,8 @@ LEVEL_ORDER = {
     "L3": 6,
     "L4": 7,
 }
+BRANCHES = ("sopt", "fopt")
+BRANCH_TERMINAL = dict(sopt="L4", fopt="L3")
 
 SIGMA_0 = np.eye(2, dtype=DTYPE_COMPLEX)
 SIGMA_X = np.array([[0, 1], [1, 0]], dtype=DTYPE_COMPLEX)

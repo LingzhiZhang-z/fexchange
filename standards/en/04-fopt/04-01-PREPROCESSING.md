@@ -12,10 +12,10 @@ This file covers only FOPT `L0/L1/L2`.
 
 Per-level definition:
 - `L0`: input `{charge_sectors, n_f_orb, n_p_orb}`; output
-  `{F_create_raw, P_annihilate_raw}`.
-- `L1`: input `{F_create_raw, P_annihilate_raw, U_f, U_p, R_f, R_p}`;
-  output `{F_create_rot, P_annihilate_rot}`.
-- `L2`: input `{F_create_rot, P_annihilate_rot, t_r_lambda, charge_pairs}`;
+  `{F_create_raw, P_create_raw}`.
+- `L1`: input `{F_create_raw, P_create_raw, U_f, U_p, R_f, R_p}`;
+  output `{F_create_rot, P_create_rot}`.
+- `L2`: input `{F_create_rot, P_create_rot, t_r_lambda, charge_pairs}`;
   output `{V_plus}`.
 
 Constraint:
@@ -34,8 +34,10 @@ Validation:
 ## 1) Level 0: Raw Local Primitives (MUST)
 MUST:
 - Build f-site creation primitives on canonical f-shell determinant bases.
-- Build ligand annihilation primitives on canonical ligand p-shell determinant
+- Build ligand creation primitives on canonical ligand p-shell determinant
   bases.
+- Downstream code must consume the adjoint when an annihilation action is
+  required; reverse primitives are not stored independently.
 - Use matrix elements in bra-ket convention with state vectors as columns.
 - Preserve determinant ordering, parity-below-index signs, dtype policy, and
   orbital index ordering inherited from the core standards.
@@ -51,15 +53,15 @@ $$
 
 Math:
 $$
-P_{\mathrm{raw}}^{b}[N_p]_{\rho\delta}
+P_{\mathrm{raw}}^{\dagger,b}[N_p]_{\rho\delta}
 =
-\langle \rho^{N_p-1}|p_b|\delta^{N_p}\rangle.
+\langle \rho^{N_p+1}|p_b^\dagger|\delta^{N_p}\rangle.
 $$
 
 Code form:
 ```text
 F_create_raw[N_f][a].shape = (dim_f(N_f+1), dim_f(N_f))
-P_annihilate_raw[N_p][b].shape = (dim_p(N_p-1), dim_p(N_p))
+P_create_raw[N_p][b].shape = (dim_p(N_p+1), dim_p(N_p))
 ```
 
 Index:
@@ -70,9 +72,9 @@ Index:
 
 Validation:
 - `F_create_raw[N_f][a]` must fail for invalid `N_f` or `a`.
-- `P_annihilate_raw[N_p][b]` must fail for invalid `N_p` or `b`.
-- `P_annihilate_raw[N_p][b]` must equal the adjoint of the corresponding
-  ligand creation matrix from `N_p-1` to `N_p`.
+- `P_create_raw[N_p][b]` must fail for invalid `N_p` or `b`.
+- Ligand annihilation from `N_p+1` to `N_p` must be consumed as the adjoint of
+  `P_create_raw[N_p][b]`.
 - Creation on an occupied orbital and annihilation on an empty orbital must
   produce zero matrix elements.
 
@@ -80,6 +82,9 @@ Validation:
 MUST:
 - Rotate/bind raw primitives into site-specific f working bases and
   ligand-specific p working bases.
+- The f working basis is selected by `model.scheme`: LSJM adjacent-sector
+  transforms for `RS`, and IONED adjacent-sector transforms for `ED`.
+- The main-sector f leg remains the SOC-lowest LSJM subspace in both schemes.
 - Apply physical one-particle frame rotations on the primitive orbital axis.
 - Keep f-site labels `r` and ligand labels `lambda` explicit.
 - Record all state-basis and one-particle-frame order ids in metadata.
@@ -110,12 +115,13 @@ $$
 Code form:
 ```text
 F_create_rot[r][N_f][alpha] = sum_a R_f[r][a,alpha] * U_f_out^dag @ F_create_raw[N_f][a] @ U_f_in
-P_annihilate_rot[lambda][N_p][beta] = sum_b R_p[lambda][b,beta] * U_p_out^dag @ P_annihilate_raw[N_p][b] @ U_p_in
+P_create_rot[lambda][N_p][beta] = sum_b R_p[lambda][b,beta] * U_p_out^dag @ P_create_raw[N_p][b] @ U_p_in
 ```
 
 Index:
 - `U_f[r,N]` maps canonical f determinants in sector `N` to the selected
-  f-site working basis for that sector.
+  f-site working basis for that sector. For adjacent sectors this is LSJM in
+  `RS` and IONED in `ED`.
 - `U_p[lambda,N]` maps canonical ligand determinants in sector `N` to the
   selected ligand working basis for that sector.
 - `R_f[r]` maps physical f orbital labels used by hopping into canonical raw
@@ -154,7 +160,7 @@ $$
 
 Code form:
 ```text
-V_plus[r,lambda,N_f,N_p] = sum_alpha_beta t[alpha,beta] * kron(F_create_rot[r][N_f][alpha], P_annihilate_rot[lambda][N_p][beta])
+V_plus[r,lambda,N_f,N_p] = sum_alpha_beta t[alpha,beta] * kron(F_create_rot[r][N_f][alpha], P_create_rot[lambda][N_p-1][beta]^dagger)
 ```
 
 Index:
@@ -192,8 +198,8 @@ Validation:
 
 ## 5) Test Requirements (MUST)
 MUST:
-- Test raw f creation and ligand annihilation shapes.
-- Test ligand annihilation against creation-adjoint consistency.
+- Test raw f creation and ligand creation shapes.
+- Test ligand annihilation by consuming the stored creation primitive adjoint.
 - Test `L1` shape binding with identity transforms and with at least one
   nontrivial unitary rotation.
 - Test `L2` zero hopping.

@@ -10,6 +10,7 @@ outputs/
 AGENTS.md
 CLAUDE.md
 data/
+data_test/
 tmp/
 tests/
 fexchange/tools/tests

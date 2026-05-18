@@ -160,7 +160,7 @@ def llw_scan(J: float, n_points: int = 801) -> dict[str, Any]:
         "F6": F6,
         "x_grid": x_grid,
         "energies": energies,
-        "irreps": irreps,
+        "irreps": irreps.tolist(),
     }
 
 
@@ -184,7 +184,7 @@ def plot_llw_diagram(J: float, scan: dict[str, Any], outpath: str | Path) -> Non
 
     x_grid = scan["x_grid"]
     energies = scan["energies"]
-    irreps = scan["irreps"]
+    irreps = np.asarray(scan["irreps"], dtype=object)
     x_mesh = np.repeat(x_grid[:, None], energies.shape[1], axis=1)
 
     fig, ax = plt.subplots(figsize=(10.5, 7.0))

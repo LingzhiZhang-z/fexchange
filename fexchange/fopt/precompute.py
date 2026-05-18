@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -48,14 +48,6 @@ def compute_L0_p() -> dict[str, Any]:
     }
 
 
-def build_L0(n_ele: int, n_orb_f: int = N_ORB_F) -> dict[str, Any]:
-    """L0 = f-side (sector by n_ele) + p-side (fixed sectors)."""
-    return {
-        "f": compute_L0_f(n_ele, n_orb_f),
-        "p": compute_L0_p(),
-    }
-
-
 def compute_L1_f(
     l0_f: dict[str, Any],
     U_np1: NDArray[np.complexfloating],
@@ -81,9 +73,9 @@ def compute_L1_f(
 
 def compute_L1_p(
     l0_p: dict[str, Any],
-    U_p_6: Optional[NDArray[np.complexfloating]] = None,
-    U_p_5: Optional[NDArray[np.complexfloating]] = None,
-    U_p_4: Optional[NDArray[np.complexfloating]] = None,
+    U_p_6: NDArray[np.complexfloating] | None = None,
+    U_p_5: NDArray[np.complexfloating] | None = None,
+    U_p_4: NDArray[np.complexfloating] | None = None,
 ) -> dict[str, Any]:
     """p-shell rotated creation tensors at fixed sectors {4, 5, 6}.
 
@@ -122,23 +114,4 @@ def compute_L1_p(
         "n_u_6": n_u_6,
         "n_j_5": n_j_5,
         "n_v_4": n_v_4,
-    }
-
-
-def build_L1(
-    l0: dict[str, Any],
-    U_f_per_site: dict[int, tuple],
-    U_p_per_ligand: Optional[dict[int, tuple]] = None,
-) -> dict[str, Any]:
-    """L1 cluster-level: per f-site f-rotation, per ligand p-rotation.
-
-    U_f_per_site   : {f_site: (U_np1, U_n_soc0, U_nm1)} for each f site.
-    U_p_per_ligand : {ligand: (U_p_6, U_p_5, U_p_4)}    for each ligand.
-                     Default = {1: (None, None, None), 2: (None, None, None)} (identity).
-    """
-    if U_p_per_ligand is None:
-        U_p_per_ligand = {1: (None, None, None), 2: (None, None, None)}
-    return {
-        "f": {fs: compute_L1_f(l0["f"], *Us) for fs, Us in U_f_per_site.items()},
-        "p": {lg: compute_L1_p(l0["p"], *Us) for lg, Us in U_p_per_ligand.items()},
     }

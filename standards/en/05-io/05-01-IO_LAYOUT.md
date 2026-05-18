@@ -13,54 +13,57 @@ Normative requirements are in `./standards/en/05-io/05-00-IO.md`.
 Code form:
 ```text
 ./outputs/
-  fock/
-    meta_n{n-1}.json
-    meta_n{n}.json
-    meta_n{n+1}.json
-    n{n}{n+1}.npz
-    n{n-1}{n}.npz
-
   core/
-    n-{n}_r42-{r42}_r62-{r62}_scheme-{scheme}/
-      LMSM/
-      LSJM/
-      branchsig-{hash}/      (optional)
-        L1/
-        hopping/
-          {hopping_name}/
-            L2/
-            input_hopping.npz   (optional snapshot)
-            U-{U}_Jh-{Jh}_z-{zeta}/
-                denomsig-{hash}/ (optional)
-                  L3/
-                  kramer/
-                    {kramer_name}/
-                      input_kramer.npz (optional snapshot)
-                      L4/
-                      spin12/           (optional, module 04-03)
+    L0/
+      f_create_{n}_to_{n+1}.npz
+      f_create_{n-1}_to_{n}.npz
+      p_create_4_to_5.npz
+      p_create_5_to_6.npz
+    LMSM/
+      n-{n}_r42-{r42:.8f}_r62-{r62:.8f}_scheme-{scheme}/
+    LSJM/
+      n-{n}_r42-{r42:.8f}_r62-{r62:.8f}_scheme-{scheme}/
+    ligand/
+      soc/n-{N}/
+      nsoc/n-{N}/
+    L1/
+      F/n_ele-{n}_r42-{r42:.8f}_r62-{r62:.8f}_scheme-{scheme}/
+      P/n-4_to_5_{soc|nsoc}/
+      P/n-5_to_6_{soc|nsoc}/
+
+  <run_name>/
+    source.txt
+    IONED/
+      n-{n-1}/states.npz
+      n-{n+1}/states.npz
+    L1/
+      F/data.npz
+    L2/
+    L3/
+      U-{U:.8f}_Jh-{Jh:.8f}/
+      U-{U:.8f}_Jh-{Jh:.8f}_lig1.U_p-{U_p1:.8f}_lig2.U_p-{U_p2:.8f}/
+    L4/
+      U-{U:.8f}_Jh-{Jh:.8f}/kramer-{kramer_name}/
 ```
 
 Note:
 - `LMSM` is a path alias of module 03-00 LSMS output directory.
-- `level="L0"` maps to disk subtree `./outputs/fock/`.
+- `level="L0"` maps to disk subtree `./outputs/core/L0/`.
 
 ## 3) Concrete Example (`n=6`)
 Code form:
 ```text
-./outputs/fock/meta_n5.json
-./outputs/fock/meta_n6.json
-./outputs/fock/meta_n7.json
-./outputs/fock/n67.npz
-./outputs/fock/n56.npz
-
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LMSM/V.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LMSM/E_terms.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LSJM/V.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/LSJM/E_terms.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/L1/data.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/hopping/wannier/L2/data.npz
-./outputs/core/n-6_r42-1.000000000000_r62-2.000000000000_scheme-RS/branchsig-a1b2c3d4e5f6/hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/denomsig-112233445566/L3/data.npz
-./outputs/core/.../branchsig-a1b2c3d4e5f6/hopping/wannier/U-3.000000000000_Jh-4.000000000000_z-5.000000000000/denomsig-112233445566/kramer/k1/L4/data.npz
+./outputs/core/L0/f_create_6_to_7.npz
+./outputs/core/L0/f_create_5_to_6.npz
+./outputs/core/LMSM/n-6_r42-1.00000000_r62-2.00000000_scheme-RS/LMSM.npz
+./outputs/core/LSJM/n-6_r42-1.00000000_r62-2.00000000_scheme-RS/LSJM.npz
+./outputs/core/L1/F/n_ele-6_r42-1.00000000_r62-2.00000000_scheme-RS/data.npz
+./outputs/demo_run/IONED/n-5/states.npz
+./outputs/demo_run/IONED/n-7/states.npz
+./outputs/demo_run/L1/F/data.npz
+./outputs/demo_run/L2/data.npz
+./outputs/demo_run/L3/U-3.00000000_Jh-4.00000000/data.npz
+./outputs/demo_run/L4/U-3.00000000_Jh-4.00000000/kramer-k1/data.npz
 ```
 
 ## 4) Optional Snapshot Files (Audit-Only)

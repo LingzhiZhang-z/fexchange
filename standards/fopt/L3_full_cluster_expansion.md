@@ -1,6 +1,6 @@
-# L3 四类 path1 的完整四站点展开与 spectator-$\delta$ 化简
+# L3 五类 path1 的完整四站点展开与 spectator-$\delta$ 化简
 
-本文只做一件事：对四类 representative path 各写一个例子，从完整四站点中间态
+本文只做一件事：对五类 representative path 各写一个例子，从完整四站点中间态
 
 $$
 S_1=(u_1,u_2,\rho_1,\rho_2),\quad
@@ -1587,6 +1587,11 @@ G_3[\beta,\gamma]
 G(a,\beta,\gamma,\Omega_2).
 $$
 
+$G_1$ 是 1 f-site（$f_1$ 激发 + $p_1$ 激发），$G_2$ 是 2 f-site 的
+4-D 分母（两 f 两 p 全激发），$G_3$ 是 1 f-site（$f_2$ 激发 +
+$p_1$ 激发）。对应 $E_0$ 偏移：$s_1,s_3$ 减 $1\cdot E_0$，$s_2$ 减
+$2\cdot E_0$。
+
 对应 einsum：
 
 ```python
@@ -1620,7 +1625,429 @@ h = δ ∈ p2^5
 
 ---
 
-# 6. 四个 type 的最终对照
+# 6. Type 5 path1：$A_{11}A_{22}B_{11}B_{22}$
+
+## 6.1 Path 与 charge sequence
+
+$$
+h_1=A_{11},\qquad
+h_2=A_{22},\qquad
+h_3=B_{11},\qquad
+h_4=B_{22}.
+$$
+
+即
+
+$$
+p_1\to f_1,\qquad
+p_2\to f_2,\qquad
+f_1\to p_1,\qquad
+f_2\to p_2.
+$$
+
+charge sequence 是
+
+$$
+(n,n,6,6)
+\rightarrow
+(n+1,n,5,6)
+\rightarrow
+(n+1,n+1,5,5)
+\rightarrow
+(n,n+1,6,5)
+\rightarrow
+(n,n,6,6).
+$$
+
+中央态是
+
+$$
+f_1^{n+1}f_2^{n+1}p_1^5p_2^5.
+$$
+
+这是 two-ligand uncrossed onion path：与 Type 4 不同，第三、四步
+$B_{11},B_{22}$ 让每个 f-site 各自把电子还回**自己**借来的 ligand
+（Type 4 是交叉还 $B_{12},B_{21}$）。
+
+---
+
+## 6.2 第一步 $A_{11}$
+
+同 Type 4 第一步：
+
+$$
+\begin{aligned}
+&
+\langle u_1,u_2,\rho_1,\rho_2|
+A_{11}
+|c,d,\Omega_1,\Omega_2\rangle
+\\
+&=
+s_1
+M_{11}^{(n,6)}[u_1,\rho_1,c,\Omega_1]
+\delta_{u_2,d}
+\delta_{\rho_2,\Omega_2}.
+\end{aligned}
+$$
+
+非零条件：
+
+$$
+u_1\in f_1^{n+1},
+\qquad
+\rho_1\in p_1^5,
+$$
+
+$$
+u_2=d,
+\qquad
+\rho_2=\Omega_2.
+$$
+
+---
+
+## 6.3 第二步 $A_{22}$
+
+同 Type 4 第二步：
+
+$$
+A_{22}:p_2\rightarrow f_2.
+$$
+
+active sector 是
+
+$$
+(f_2^n,p_2^6)\rightarrow(f_2^{n+1},p_2^5).
+$$
+
+所以
+
+$$
+\begin{aligned}
+&
+\langle v_1,v_2,\sigma_1,\sigma_2|
+A_{22}
+|u_1,u_2,\rho_1,\rho_2\rangle
+\\
+&=
+s_2
+M_{22}^{(n,6)}[v_2,\sigma_2,u_2,\rho_2]
+\delta_{v_1,u_1}
+\delta_{\sigma_1,\rho_1}.
+\end{aligned}
+$$
+
+非零条件：
+
+$$
+v_2\in f_2^{n+1},
+\qquad
+\sigma_2\in p_2^5,
+$$
+
+$$
+v_1=u_1,
+\qquad
+\sigma_1=\rho_1.
+$$
+
+结合第一步：
+
+$$
+S_2=(u_1,v_2,\rho_1,\sigma_2).
+$$
+
+四个 block 全部活跃：
+
+$$
+f_1^{n+1},\quad f_2^{n+1},\quad p_1^5,\quad p_2^5.
+$$
+
+（到此与 Type 4 §5.2–5.3 一字不差。）
+
+---
+
+## 6.4 第三步 $B_{11}$
+
+$$
+B_{11}:f_1\rightarrow p_1.
+$$
+
+active sector 是
+
+$$
+(f_1^{n+1},p_1^5)\rightarrow(f_1^n,p_1^6).
+$$
+
+$B_{11}=A_{11}^{\dagger}$，matrix element 用 $\left[M_{11}^{(n,6)}\right]^*$；
+vertex 作用在 $f_1,p_1$，spectator 是 $f_2,p_2$。所以
+
+$$
+\begin{aligned}
+&
+\langle w_1,w_2,\tau_1,\tau_2|
+B_{11}
+|v_1,v_2,\sigma_1,\sigma_2\rangle
+\\
+&=
+s_3
+\left[
+M_{11}^{(n,6)}[v_1,\sigma_1,w_1,\tau_1]
+\right]^*
+\delta_{w_2,v_2}
+\delta_{\tau_2,\sigma_2}.
+\end{aligned}
+$$
+
+非零条件：
+
+$$
+w_1\in f_1^n,
+\qquad
+\tau_1=\Omega_1\in p_1^6,
+$$
+
+$$
+w_2=v_2,
+\qquad
+\tau_2=\sigma_2.
+$$
+
+所以
+
+$$
+S_3=(w_1,v_2,\Omega_1,\sigma_2).
+$$
+
+与 Type 4 §5.4 的唯一区别：Type 4 第三步 $B_{12}$ 关掉 $p_2$、保留
+$p_1=\rho_1$；这里 $B_{11}$ 关掉 $p_1$（$\tau_1=\Omega_1$）、保留
+$p_2=\sigma_2$。
+
+---
+
+## 6.5 第四步 $B_{22}$
+
+$$
+B_{22}:f_2\rightarrow p_2.
+$$
+
+active sector 是
+
+$$
+(f_2^{n+1},p_2^5)\rightarrow(f_2^n,p_2^6).
+$$
+
+所以
+
+$$
+\begin{aligned}
+&
+\langle a,b,\Omega_1,\Omega_2|
+B_{22}
+|w_1,w_2,\tau_1,\tau_2\rangle
+\\
+&=
+s_4
+\left[
+M_{22}^{(n,6)}[w_2,\tau_2,b,\Omega_2]
+\right]^*
+\delta_{a,w_1}
+\delta_{\Omega_1,\tau_1}.
+\end{aligned}
+$$
+
+非零条件：
+
+$$
+w_2\in f_2^{n+1},
+\qquad
+\tau_2\in p_2^5,
+$$
+
+$$
+w_1=a,
+\qquad
+\tau_1=\Omega_1.
+$$
+
+---
+
+## 6.6 所有 $\delta$ 合并
+
+constraints 是
+
+$$
+u_2=d,\qquad \rho_2=\Omega_2,
+$$
+
+$$
+v_1=u_1,\qquad \sigma_1=\rho_1,
+$$
+
+$$
+w_2=v_2,\qquad \tau_2=\sigma_2,\qquad \tau_1=\Omega_1,
+$$
+
+$$
+w_1=a.
+$$
+
+剩余自由求和指标：
+
+$$
+u_1,\quad v_2,\quad \rho_1,\quad \sigma_2.
+$$
+
+重命名为
+
+$$
+u_1=\alpha\in f_1^{n+1},
+$$
+
+$$
+v_2=\beta\in f_2^{n+1},
+$$
+
+$$
+\rho_1=\gamma\in p_1^5,
+$$
+
+$$
+\sigma_2=\delta\in p_2^5.
+$$
+
+三个完整中间态是
+
+$$
+S_1=(\alpha,d,\gamma,\Omega_2),
+$$
+
+$$
+S_2=(\alpha,\beta,\gamma,\delta),
+$$
+
+$$
+S_3=(a,\beta,\Omega_1,\delta).
+$$
+
+$S_1,S_2$ 与 Type 4 逐字相同；只有 $S_3$ 不同：Type 4 是
+$(a,\beta,\gamma,\Omega_2)$（$p_1$ 仍激发、$p_2$ 复原），这里是
+$(a,\beta,\Omega_1,\delta)$（$p_1$ 复原、$p_2$ 仍激发）。
+$S_2$ 同样含四个 active index，故 Type 5 也不是两站点中间态。
+
+---
+
+## 6.7 化简后的 Type 5 公式
+
+$$
+\begin{aligned}
+H_{T5}[a,b,c,d]
+=
+\sigma_5
+\sum_{\alpha,\beta,\gamma,\delta}
+&
+\left[
+M_{22}^{(n,6)}[\beta,\delta,b,\Omega_2]
+\right]^*
+G_3[\beta,\delta]
+\\
+&\times
+\left[
+M_{11}^{(n,6)}[\alpha,\gamma,a,\Omega_1]
+\right]^*
+G_2[\alpha,\beta,\gamma,\delta]
+\\
+&\times
+M_{22}^{(n,6)}[\beta,\delta,d,\Omega_2]
+G_1[\alpha,\gamma]
+\\
+&\times
+M_{11}^{(n,6)}[\alpha,\gamma,c,\Omega_1].
+\end{aligned}
+$$
+
+其中
+
+$$
+G_1[\alpha,\gamma]
+=
+G(\alpha,d,\gamma,\Omega_2),
+$$
+
+$$
+G_2[\alpha,\beta,\gamma,\delta]
+=
+G(\alpha,\beta,\gamma,\delta),
+$$
+
+$$
+G_3[\beta,\delta]
+=
+G(a,\beta,\Omega_1,\delta).
+$$
+
+$G_1$ 是 1 f-site（$f_1$ 激发 + $p_1$ 激发），$G_2$ 是 2 f-site 的
+4-D 分母（两 f 两 p 全激发，与 Type 4 同形），$G_3$ 是 1 f-site
+（$f_2$ 激发 + $p_2$ 激发）。对应 $E_0$ 偏移：$s_1,s_3$ 减 $1\cdot E_0$，
+$s_2$ 减 $2\cdot E_0$（同 Type 4）。
+
+对应 einsum：
+
+```python
+H_type5_path1 = sigma_5 * np.einsum(
+    'yhb,yh,xga,xygh,yhd,xg,xgc->abcd',
+    B22_n6, G3,
+    B11_n6, G2,
+    A22_n6, G1,
+    A11_n6,
+    optimize=True,
+)
+```
+
+其中
+
+```text
+B22_n6[y,h,b]       = (M22^(n,6)[β,δ,b,Ω2])*
+B11_n6[x,g,a]       = (M11^(n,6)[α,γ,a,Ω1])*
+A22_n6[y,h,d]       =  M22^(n,6)[β,δ,d,Ω2]
+A11_n6[x,g,c]       =  M11^(n,6)[α,γ,c,Ω1]
+```
+
+index 对应：
+
+```text
+x = α ∈ f1^(n+1)
+y = β ∈ f2^(n+1)
+g = γ ∈ p1^5
+h = δ ∈ p2^5
+```
+
+（对照 Type 4 einsum `'ygb,yg,xha,xygh,yhd,xg,xgc->abcd'`：唯一变化是
+$B$-vertex 的 p-索引——Type 4 的 $B_{12}$ 用 $p_2{=}h$、$B_{21}$ 用
+$p_1{=}g$；Type 5 的 $B_{11}$ 用 $p_1{=}g$、$B_{22}$ 用 $p_2{=}h$。
+随之 $G_3$ 从 Type 4 的 $[y,g]$ 变为 $[y,h]$。）
+
+返回顺序对调（先还 $f_2$ 再还 $f_1$，即 $A_{11}A_{22}B_{22}B_{11}$）
+得到 pattern B，结构同形，由对称性给出（与 Type 4 的 pattern A/B 关系
+相同），在 `contraction.py` 的 Process-5 中实现。
+
+### 6.8 数值验证记录
+
+§6.2–6.7 的 δ-collapse、$S_1,S_2,S_3$、$G_1,G_2,G_3$ 及 einsum 串经
+独立数值校验：按 §1 完整 12-重 cluster sum（用 §6.2–6.5 的逐步矩阵元
++ spectator-$\delta$ 直接构造）对照化简后的 einsum，随机复数
+$M_{11},M_{22},G_1,G_2,G_3$ 下两者到机器精度相等。
+
+- Pattern A `'yhb,yh,xga,xygh,yhd,xg,xgc->abcd'`：max|full−einsum| ≈ 8e-15 → PASS
+- Pattern B `'xga,xg,yhb,xygh,yhd,xg,xgc->abcd'`（$G_3\equiv G_1$）：≈ 8e-15 → PASS
+
+cluster sign（`fopt_path_type5.md` 的 8 条 path）由 `docs/fopt_l3_review_prompt.md §B`
+规则的模拟器生成；该模拟器先对 Type 1–4 全部 24 条已知 path 复现其
+`Total=10n+const`（$n=1$ 与 $n=3$ 均一致）后才用于 Type 5。
+
+---
+
+# 7. 五个 type 的最终对照
 
 | Type | path1 | 完整中间态 $S_1$ | 完整中间态 $S_2$ | 完整中间态 $S_3$ | 剩余求和指标 |
 |---|---|---|---|---|---|
@@ -1628,12 +2055,17 @@ h = δ ∈ p2^5
 | Type 2 | $A_{11}A_{21}B_{11}B_{21}$ | $(\alpha,d,\gamma_1,\Omega_2)$ | $(\alpha,\beta,\gamma_2,\Omega_2)$ | $(a,\beta,\gamma_3,\Omega_2)$ | $\alpha,\beta,\gamma_1,\gamma_2,\gamma_3$ |
 | Type 3 | $A_{11}B_{21}A_{22}B_{12}$ | $(\alpha,d,\gamma,\Omega_2)$ | $(\alpha,\beta,\Omega_1,\Omega_2)$ | $(\alpha,b,\Omega_1,\delta)$ | $\alpha,\beta,\gamma,\delta$ |
 | Type 4 | $A_{11}A_{22}B_{12}B_{21}$ | $(\alpha,d,\gamma,\Omega_2)$ | $(\alpha,\beta,\gamma,\delta)$ | $(a,\beta,\gamma,\Omega_2)$ | $\alpha,\beta,\gamma,\delta$ |
+| Type 5 | $A_{11}A_{22}B_{11}B_{22}$ | $(\alpha,d,\gamma,\Omega_2)$ | $(\alpha,\beta,\gamma,\delta)$ | $(a,\beta,\Omega_1,\delta)$ | $\alpha,\beta,\gamma,\delta$ |
+
+Type 4 与 Type 5 的 $S_1,S_2$ 相同，仅 $S_3$ 不同：Type 4（crossed）
+$S_3$ 留 $p_1{=}\gamma$，Type 5（uncrossed，各借各还）$S_3$ 留
+$p_2{=}\delta$。
 
 关键结论：
 
 $$
 \boxed{
-\text{L3 并没有把四站点虚过程近似成两站点虚过程。}
+\text{L3 并没有把四站点虚过程近似成两站点虚过程（五类皆然）。}
 }
 $$
 
@@ -1646,7 +2078,7 @@ $$
 }
 $$
 
-因此，Type 2 的 $p_1^4$ 和 Type 4 的 $p_1^5p_2^5$ 中央态都显式保留在求和与 denominator 里。
+因此，Type 2 的 $p_1^4$，Type 4、Type 5 的 $p_1^5p_2^5$ 中央态都显式保留在求和与 denominator 里。
 
 最终输出只有 $H[a,b,c,d]$，是因为外部 $P$-space 中
 

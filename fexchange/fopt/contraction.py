@@ -12,6 +12,7 @@ from fexchange.utils.numerics import DTYPE_COMPLEX
 from fexchange.utils.errors import BindError
 
 logger = logging.getLogger("fexchange")
+FOPT_PROCESS_LABELS = ("P1", "P2", "P3", "P4", "P5")
 
 
 # (sector_label, f_creation_key in compute_L1_f output, p_creation_key in compute_L1_p output)
@@ -25,22 +26,22 @@ _SECTORS = (
 def _compute_pair_V_plus(
     F_creation: NDArray[np.complexfloating],
     P_creation: NDArray[np.complexfloating],
-    t_pf: NDArray[np.complexfloating],
+    t_fp: NDArray[np.complexfloating],
 ) -> dict[str, Any]:
     """V_+ 4-leg tensor for one (f_site, ligand) pair x one sector."""
     n_orb_f, dim_high_f, dim_low_f = F_creation.shape
     n_orb_p, dim_high_p, dim_low_p = P_creation.shape
 
-    if t_pf.shape != (n_orb_f, n_orb_p):
+    if t_fp.shape != (n_orb_f, n_orb_p):
         raise BindError(
             "FXE-BIND-003",
-            f"t_pf shape {tuple(t_pf.shape)} != ({n_orb_f}, {n_orb_p})",
-            actual={"t_shape": list(t_pf.shape), "expected": [n_orb_f, n_orb_p]},
+            f"t_fp shape {tuple(t_fp.shape)} != ({n_orb_f}, {n_orb_p})",
+            actual={"t_shape": list(t_fp.shape), "expected": [n_orb_f, n_orb_p]},
         )
 
     V_plus = np.einsum(
         "ab,aik,blj->ijkl",
-        t_pf.astype(DTYPE_COMPLEX),
+        t_fp.astype(DTYPE_COMPLEX),
         F_creation,
         P_creation.conj(),
         optimize=True,
@@ -62,15 +63,15 @@ def build_L2(
     """V_+ blocks: 4 (f_site, ligand) pairs x 3 sectors = 12 blocks."""
     return {
         (f_site, ligand, sector): _compute_pair_V_plus(
-            l1["f"][f_site][f_key], l1["p"][ligand][p_key], t_pf,
+            l1["f"][f_site][f_key], l1["p"][ligand][p_key], t_fp,
         )
-        for (f_site, ligand), t_pf in t.items()
+        for (f_site, ligand), t_fp in t.items()
         for sector, f_key, p_key in _SECTORS
     }
 
 
 # ---------------------------------------------------------------------------
-# L3 skeleton: H_eff from 24 path amplitudes, with W projection applied here
+# L3 skeleton: H_eff from 32 path amplitudes, with W projection applied here
 # (no separate L4 since W is consumed inside L3).
 # ---------------------------------------------------------------------------
 
@@ -88,6 +89,19 @@ def project_W(
     W_conj = W.conj()
     result: dict[tuple[int, int, str], dict[str, Any]] = {}
     for (f_site, ligand, sector), block in l2.items():
+        expected = block["dim_high_f"] if sector == "fnm1_p6" else block["dim_low_f"]
+        if W.shape[0] != expected:
+            raise BindError(
+                "FXE-BIND-003",
+                f"W.shape[0]={W.shape[0]} != dim_soc_lowest(n)={expected}"
+                f" at block (f_site={f_site}, ligand={ligand}, sector={sector!r})",
+                expected={"W_shape_0": expected},
+                actual={
+                    "W_shape": list(W.shape),
+                    "expected": expected,
+                    "block_key": [f_site, ligand, sector],
+                },
+            )
         V_plus = block["V_plus"]
         new_block = dict(block)
         if sector == "fnm1_p6":
@@ -169,7 +183,7 @@ def _path_amplitude_process1(
     G_s3 = -1.0 / (E_np1[:, None] + E_p5 [None, :] -       E_0)  # 1 f-site
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
-    # (ref: standards/fopt/L3_four_type_full_cluster_expansion.md §2)
+    # (ref: standards/fopt/L3_full_cluster_expansion.md §2)
     #
     # Start: full 4-site cluster sum with 12 indices (S_1, S_2, S_3 each carry
     # 4 block indices on (f_1, f_2, p_1, p_2)):
@@ -255,7 +269,7 @@ def _path_amplitude_process2(
     G_s2 = -1.0 / (E_np1[:, None, None] + E_np1[None, :, None] + E_p4[None, None, :] - 2.0 * E_0)               # 2 f-sites
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
-    # (ref: standards/fopt/L3_four_type_full_cluster_expansion.md §3, Pattern A path)
+    # (ref: standards/fopt/L3_full_cluster_expansion.md §3, Pattern A path)
     #
     # Example path A_11 A_21 B_11 B_21 (Pattern A FIFO on lig=1):
     #     V_1 = A_11 (p_1 -> f_1):  δ_{u_2,d}   δ_{ρ_2,Ω_2}
@@ -310,11 +324,12 @@ def _path_amplitude_process3(
     V_4: NDArray[np.complexfloating],
     E_np1: NDArray[np.floating],
     E_nm1: NDArray[np.floating],
-    E_p5:  NDArray[np.floating],
+    E_p5_a: NDArray[np.floating],
+    E_p5_b: NDArray[np.floating],
     *,
     E_0: float = 0.0,
 ) -> NDArray[np.complexfloating]:
-    """Process-3 (alternating cross-ligand): V_1/V_2 on lig_first, V_3/V_4 on lig_other.
+    """Process-3 (alternating cross-ligand): V_1/V_2 on lig_a, V_3/V_4 on lig_b.
 
     Same f-site dynamics as process 1 (r_X particle nested with r_Y hole),
     but the two p^5 hole excursions live on different ligands.
@@ -323,8 +338,8 @@ def _path_amplitude_process3(
                               V_1        V_2        V_3        V_4
         r_X (particle)    :  [═══════════════════════════════]
         r_Y (hole)        :             [══════════]
-        lig_first (hole)  :  [┄┄┄┄┄┄┄┄┄]
-        lig_other (hole)  :                        [┄┄┄┄┄┄┄┄┄]
+        lig_a (hole)      :  [┄┄┄┄┄┄┄┄┄]
+        lig_b (hole)      :                        [┄┄┄┄┄┄┄┄┄]
 
     Denominators: s_1, s_3 subtract 1*E_0; s_2 subtracts 2*E_0.
     """
@@ -333,12 +348,12 @@ def _path_amplitude_process3(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5[None, :] -       E_0)   # 1 f-site (lig_first p^5)
+    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)   # 1 f-site (lig_a p^5)
     G_s2 = -1.0 / (E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0)   # 2 f-sites
-    G_s3 = -1.0 / (E_np1[:, None] + E_p5[None, :] -       E_0)   # 1 f-site (lig_other p^5)
+    G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)   # 1 f-site (lig_b p^5)
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
-    # (ref: standards/fopt/L3_four_type_full_cluster_expansion.md §4)
+    # (ref: standards/fopt/L3_full_cluster_expansion.md §4)
     #
     # Example path A_11 B_21 A_22 B_12 (V_1, V_2 on lig_1; V_3, V_4 on lig_2):
     #     V_1 = A_11 (p_1 -> f_1):  δ_{u_2,d}   δ_{ρ_2,Ω_2}
@@ -350,7 +365,7 @@ def _path_amplitude_process3(
     # σ_1 = τ_1 = Ω_1.  Four free dummies remain (the two ligand photons now
     # live on different ligands, distinguishing γ on lig_1 from δ on lig_2):
     #     α = u_1 ∈ f_1^{n+1}     β = v_2 ∈ f_2^{n-1}
-    #     γ = ρ_1 ∈ lig_first p^5  δ = τ_2 ∈ lig_other p^5
+    #     γ = ρ_1 ∈ lig_a p^5  δ = τ_2 ∈ lig_b p^5
     #
     # Reduced S:  S_1 = (α, d, γ, Ω_2)   S_2 = (α, β, Ω_1, Ω_2)   S_3 = (α, b, Ω_1, δ)
     # Same structural shape as process 1 (Σ over 4 dummies); only the two
@@ -358,7 +373,7 @@ def _path_amplitude_process3(
     #
     #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,H,a] G_s3[A,H] M3[b,H,B] G_s2[A,B] M2*[d,G,B] G_s1[A,G] M1[A,G,c]
     #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3 ─┘ └─/E_s2─┘ └─ V_2† ─┘ └─/E_s1─┘ └─ V_1 ─┘
-    # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n-1})  G = γ (lig_first p^5)  H = δ (lig_other p^5)
+    # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n-1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
     # Free outputs  : a = r_X_fin        b = r_Y_fin        c = r_X_init           d = r_Y_init   (n_k doublet)
     return np.einsum(
         "AHa, AH, bHB, AB, dGB, AG, AGc -> abcd",
@@ -376,7 +391,8 @@ def _path_amplitude_process4(
     V_3: NDArray[np.complexfloating],
     V_4: NDArray[np.complexfloating],
     E_np1: NDArray[np.floating],
-    E_p5:  NDArray[np.floating],
+    E_p5_a: NDArray[np.floating],
+    E_p5_b: NDArray[np.floating],
     *,
     pattern: str,
     E_0: float = 0.0,
@@ -406,17 +422,17 @@ def _path_amplitude_process4(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5[None, :] - E_0)                                            # 1 f-site
+    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)                                            # 1 f-site
     G_s2 = -1.0 / (
         E_np1[:, None, None, None]
       + E_np1[None, :, None, None]
-      + E_p5[None, None, :, None]
-      + E_p5[None, None, None, :]
+      + E_p5_a[None, None, :, None]
+      + E_p5_b[None, None, None, :]
       - 2.0 * E_0
     )                                                                                                # 2 f-sites (4-D)
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
-    # (ref: standards/fopt/L3_four_type_full_cluster_expansion.md §5, Pattern A path)
+    # (ref: standards/fopt/L3_full_cluster_expansion.md §5, Pattern A path)
     #
     # Example path A_11 A_22 B_12 B_21 (Pattern A FIFO: V_3 lowers V_1's site):
     #     V_1 = A_11 (p_1 -> f_1):  δ_{u_2,d}     δ_{ρ_2,Ω_2}
@@ -435,7 +451,7 @@ def _path_amplitude_process4(
     # Renaming A=α, B=β, G=γ, H=δ.
 
     if pattern == "A":
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5[None, :] - E_0)  # (B, G)  1 f-site (r_Y still up on lig_a)
+        G_s3 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)  # (B, G)  1 f-site (r_Y still up on lig_a)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[B,G,a] G_s3[B,G] M3*[A,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
@@ -452,7 +468,7 @@ def _path_amplitude_process4(
         # LIFO: V_3 lowers r_Y via lig_a, V_4 lowers r_X via lig_b.  Same δ-collapse
         # produces the same 4 free dummies; V_3/V_4 site-pairings swap so M_3*, M_4*
         # high_f labels swap A <-> B compared with FIFO.
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5[None, :] - E_0)  # (A, H)  1 f-site (r_X still up on lig_b)
+        G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)  # (A, H)  1 f-site (r_X still up on lig_b)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,H,a] G_s3[A,H] M3*[B,G,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         # Free outputs (LIFO): a = r_X_fin, b = r_Y_fin, c = r_X_init, d = r_Y_init.
         return np.einsum(
@@ -466,8 +482,81 @@ def _path_amplitude_process4(
     raise ValueError(f"Unknown process-4 pattern: {pattern!r}")
 
 
+def _path_amplitude_process5(
+    V_1: NDArray[np.complexfloating],
+    V_2: NDArray[np.complexfloating],
+    V_3: NDArray[np.complexfloating],
+    V_4: NDArray[np.complexfloating],
+    E_np1: NDArray[np.floating],
+    E_p5_a: NDArray[np.floating],
+    E_p5_b: NDArray[np.floating],
+    *,
+    pattern: str,
+    E_0: float = 0.0,
+) -> NDArray[np.complexfloating]:
+    """Process-5 (onion uncrossed double-ligand): all 4 vertices on "fn_p6".
+
+    Each f-site borrows from AND returns to its OWN ligand (vs Process-4
+    which returns crossed).  V_1 raises r_X via lig_a, V_2 raises r_Y via
+    lig_b; V_3, V_4 lower on the SAME lig each f borrowed from.
+    Pattern A (FIFO): V_3 lowers r_X via lig_a, V_4 lowers r_Y via lig_b.
+    Pattern B (LIFO): V_3 lowers r_Y via lig_b, V_4 lowers r_X via lig_a.
+
+    Central state S_2 = f_X^{n+1} f_Y^{n+1} lig_a^5 lig_b^5 (same 4-D
+    denominator as Process-4); only S_3 differs (Process-4 keeps lig_a
+    excited, Process-5 keeps lig_b excited in pattern A).
+
+    Derivation + numerical verification:
+    standards/fopt/L3_full_cluster_expansion.md §6 (Type 5), §6.8.
+    Denominators: s_1, s_3 subtract 1*E_0; s_2 subtracts 2*E_0 (4-D).
+    """
+    M1 = V_1[:, :, :, 0]   # (A=r_X^{n+1}, G=γ_a, c=r_X_init)
+    M2 = V_2[:, :, :, 0]   # (B=r_Y^{n+1}, H=γ_b, d=r_Y_init)
+    M3 = V_3[:, :, :, 0]
+    M4 = V_4[:, :, :, 0]
+
+    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)                                            # 1 f-site (A,G)
+    G_s2 = -1.0 / (
+        E_np1[:, None, None, None]
+      + E_np1[None, :, None, None]
+      + E_p5_a[None, None, :, None]
+      + E_p5_b[None, None, None, :]
+      - 2.0 * E_0
+    )                                                                                                # 2 f-sites (4-D)
+
+    if pattern == "A":
+        # h3=B11 (returns r_X via lig_a), h4=B22 (returns r_Y via lig_b).
+        G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)  # (B, H)  r_Y still up on lig_b
+        #   H_standard[a,b,c,d] = sum_{A,B,G,H}  M4*[B,H,b] G_s3[B,H] M3*[A,G,a] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
+        #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
+        # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
+        # Return native axes (V_4_fin, V_3_fin, V_1_init, V_2_init), so the
+        # standard formula's first two output axes are intentionally swapped.
+        return np.einsum(
+            "BHb, BH, AGa, ABGH, BHd, AG, AGc -> bacd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
+    if pattern == "B":
+        # h3=B22 (returns r_Y via lig_b), h4=B11 (returns r_X via lig_a).
+        G_s3 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)  # (A, G)  r_X still up on lig_a (== G_s1 form)
+        #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,G,a] G_s3[A,G] M3*[B,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
+        return np.einsum(
+            "AGa, AG, BHb, ABGH, BHd, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
+    raise ValueError(f"Unknown process-5 pattern: {pattern!r}")
+
+
 # ---------------------------------------------------------------------------
-# 24 paths split into 4 process tables.
+# 32 paths split into 5 process tables.
 # Each entry encodes which (f_site, ligand, sector) provides V_1..V_4 plus the
 # cluster-sign integer constant: sign = (-1)^(10*n_ele + sign_const).
 # ---------------------------------------------------------------------------
@@ -494,7 +583,7 @@ _PROCESS2_PATHS: list[tuple[int, int, int, int, int, int]] = [
     (2, 1, 2, 1, 2, 27),
 ]
 
-# (f_first, lig_first, lig_other, sign_const)
+# (f_first, lig_a, lig_b, sign_const)
 _PROCESS3_PATHS: list[tuple[int, int, int, int]] = [
     (1, 1, 2, 14),
     (1, 2, 1, 14),
@@ -515,6 +604,21 @@ _PROCESS4_PATHS: list[tuple[int, int, int, int, int, int, int, int, int]] = [
     (2, 1, 1, 2, 2, 2, 1, 1, 13),
 ]
 
+# (r_a, lig_a, r_b, lig_b, r_c, lig_c, r_d, lig_d, sign_const)
+# Process-5 = uncrossed double-ligand (each f borrows & returns its OWN lig).
+# pattern is "A" iff r_c == r_a (V_3 lowers V_1's site).
+# sign_const from standards/fopt/fopt_path_type5.md (paths 1..8).
+_PROCESS5_PATHS: list[tuple[int, int, int, int, int, int, int, int, int]] = [
+    (1, 1, 2, 2, 1, 1, 2, 2, 14),
+    (1, 1, 2, 2, 2, 2, 1, 1, 14),
+    (2, 2, 1, 1, 1, 1, 2, 2, 14),
+    (2, 2, 1, 1, 2, 2, 1, 1, 14),
+    (1, 2, 2, 1, 1, 2, 2, 1, 14),
+    (1, 2, 2, 1, 2, 1, 1, 2, 16),
+    (2, 1, 1, 2, 1, 2, 2, 1, 12),
+    (2, 1, 1, 2, 2, 1, 1, 2, 14),
+]
+
 
 def _cluster_sign(n_ele: int, sign_const: int) -> int:
     return -1 if (10 * n_ele + sign_const) % 2 == 1 else 1
@@ -528,14 +632,14 @@ def build_L3(
     *,
     return_per_path: bool = False,
 ) -> NDArray[np.complexfloating] | dict[str, Any]:
-    """H_eff[f1_fin, f2_fin, f1_init, f2_init] (n_k,)*4 from 24 path amplitudes.
+    """H_eff[f1_fin, f2_fin, f1_init, f2_init] (n_k,)*4 from 32 path amplitudes.
 
     l2       : build_L2 output {(f_site, ligand, sector): pair_dict}.
-    energies : {"f_np1", "f_nm1", "p_5", "p_4"} -> 1D ndarray. Optional "E_0"
-               key (default 0) is the single-site f^n GS energy; cluster
-               GS = 2*E_0. Path denominators subtract n_exc * E_0 where
-               n_exc = number of f-sites excited in the intermediate state
-               (s_1 / s_3 -> 1*E_0,  s_2 -> 2*E_0).
+    energies : {"f_np1", "f_nm1", "p_5_lig1", "p_5_lig2", "p_4_lig1",
+               "p_4_lig2"} -> 1D ndarray. Optional "E_0" key (default 0) is
+               the single-site f^n GS energy; cluster GS = 2*E_0. Path
+               denominators subtract n_exc * E_0 where n_exc is the number of
+               f-sites excited in the intermediate state.
     W        : (2J+1, n_k) doublet projector, shared by all f-sites.
     n_ele    : f-shell electron count (used for cluster sign).
     return_per_path : if False (default), return H_total only. If True, return
@@ -555,13 +659,11 @@ def build_L3(
     H = np.zeros((n_k,) * 4, dtype=DTYPE_COMPLEX)
     per_path: dict[tuple[str, int, str | None], NDArray[np.complexfloating]] = {}
     per_process: dict[str, NDArray[np.complexfloating]] = {
-        proc: np.zeros((n_k,) * 4, dtype=DTYPE_COMPLEX) for proc in ("P1", "P2", "P3", "P4")
+        proc: np.zeros((n_k,) * 4, dtype=DTYPE_COMPLEX) for proc in FOPT_PROCESS_LABELS
     }
 
     E_np1 = energies["f_np1"]
     E_nm1 = energies["f_nm1"]
-    E_p5  = energies["p_5"]
-    E_p4  = energies["p_4"]
     E_0   = float(energies.get("E_0", 0.0))
 
     def _accumulate(proc: str, idx: int, pattern: str | None, contribution):
@@ -577,7 +679,9 @@ def build_L3(
         V_2 = l2_proj[(f_other, lig, "fnm1_p6")]["V_plus"]
         V_3 = l2_proj[(f_other, lig, "fnm1_p6")]["V_plus"]
         V_4 = l2_proj[(f_first, lig, "fn_p6")  ]["V_plus"]
-        H_native = _path_amplitude_process1(V_1, V_2, V_3, V_4, E_np1, E_nm1, E_p5, E_0=E_0)
+        H_native = _path_amplitude_process1(
+            V_1, V_2, V_3, V_4, E_np1, E_nm1, energies[f"p_5_lig{lig}"], E_0=E_0
+        )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=f_first, r2=f_other, r3=f_other, r4=f_first,
         )
@@ -591,7 +695,15 @@ def build_L3(
         V_4 = l2_proj[(r4, lig, "fn_p6")]["V_plus"]
         pattern = "A" if r3 == r1 else "B"
         H_native = _path_amplitude_process2(
-            V_1, V_2, V_3, V_4, E_np1, E_p5, E_p4, pattern=pattern, E_0=E_0,
+            V_1,
+            V_2,
+            V_3,
+            V_4,
+            E_np1,
+            energies[f"p_5_lig{lig}"],
+            energies[f"p_4_lig{lig}"],
+            pattern=pattern,
+            E_0=E_0,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=r1, r2=r2, r3=r3, r4=r4,
@@ -599,13 +711,23 @@ def build_L3(
         _accumulate("P2", idx, pattern, contribution)
 
     # Process 3: alternating cross-ligand (4 paths).
-    for idx, (f_first, lig_first, lig_other, sign_const) in enumerate(_PROCESS3_PATHS):
+    for idx, (f_first, lig_a, lig_b, sign_const) in enumerate(_PROCESS3_PATHS):
         f_other = 3 - f_first
-        V_1 = l2_proj[(f_first, lig_first, "fn_p6")  ]["V_plus"]
-        V_2 = l2_proj[(f_other, lig_first, "fnm1_p6")]["V_plus"]
-        V_3 = l2_proj[(f_other, lig_other, "fnm1_p6")]["V_plus"]
-        V_4 = l2_proj[(f_first, lig_other, "fn_p6")  ]["V_plus"]
-        H_native = _path_amplitude_process3(V_1, V_2, V_3, V_4, E_np1, E_nm1, E_p5, E_0=E_0)
+        V_1 = l2_proj[(f_first, lig_a, "fn_p6")  ]["V_plus"]
+        V_2 = l2_proj[(f_other, lig_a, "fnm1_p6")]["V_plus"]
+        V_3 = l2_proj[(f_other, lig_b, "fnm1_p6")]["V_plus"]
+        V_4 = l2_proj[(f_first, lig_b, "fn_p6")  ]["V_plus"]
+        H_native = _path_amplitude_process3(
+            V_1,
+            V_2,
+            V_3,
+            V_4,
+            E_np1,
+            E_nm1,
+            energies[f"p_5_lig{lig_a}"],
+            energies[f"p_5_lig{lig_b}"],
+            E_0=E_0,
+        )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=f_first, r2=f_other, r3=f_other, r4=f_first,
         )
@@ -619,12 +741,43 @@ def build_L3(
         V_4 = l2_proj[(r_d, lig_d, "fn_p6")]["V_plus"]
         pattern = "A" if r_c == r_a else "B"
         H_native = _path_amplitude_process4(
-            V_1, V_2, V_3, V_4, E_np1, E_p5, pattern=pattern, E_0=E_0,
+            V_1,
+            V_2,
+            V_3,
+            V_4,
+            E_np1,
+            energies[f"p_5_lig{lig_a}"],
+            energies[f"p_5_lig{lig_b}"],
+            pattern=pattern,
+            E_0=E_0,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=r_a, r2=r_b, r3=r_c, r4=r_d,
         )
         _accumulate("P4", idx, pattern, contribution)
+
+    # Process 5: onion uncrossed double-ligand (8 paths).
+    for idx, (r_a, lig_a, r_b, lig_b, r_c, lig_c, r_d, lig_d, sign_const) in enumerate(_PROCESS5_PATHS):
+        V_1 = l2_proj[(r_a, lig_a, "fn_p6")]["V_plus"]
+        V_2 = l2_proj[(r_b, lig_b, "fn_p6")]["V_plus"]
+        V_3 = l2_proj[(r_c, lig_c, "fn_p6")]["V_plus"]
+        V_4 = l2_proj[(r_d, lig_d, "fn_p6")]["V_plus"]
+        pattern = "A" if r_c == r_a else "B"
+        H_native = _path_amplitude_process5(
+            V_1,
+            V_2,
+            V_3,
+            V_4,
+            E_np1,
+            energies[f"p_5_lig{lig_a}"],
+            energies[f"p_5_lig{lig_b}"],
+            pattern=pattern,
+            E_0=E_0,
+        )
+        contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
+            H_native, r1=r_a, r2=r_b, r3=r_c, r4=r_d,
+        )
+        _accumulate("P5", idx, pattern, contribution)
 
     if return_per_path:
         return {

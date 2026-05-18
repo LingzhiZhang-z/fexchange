@@ -20,11 +20,12 @@ formulae:
     - hopping_pf(...)
     - hopping_fpf(...)
 
-The PRB A₂PrO₃ transfer matrices are included only as a literature preset built
-on top of those conventions.
+The PRB A₂PrO₃ transfer matrices are included as a literature preset built on
+top of those conventions. Command-line outputs use the fexchange text-block
+format, i.e. ``[t_mu]`` / ``[t_*]`` headers followed by ``real imag`` rows.
 
 Usage:
-    python slater_koster_pf.py --pf_sigma 1.0 --pf_pi -0.3 --delta_pf 2.0
+    python slater_koster_pf.py --pf_sigma 1.0 --ratio 0.3 --delta_pf 2.0 --output t_mu.txt
     python slater_koster_pf.py literature
 """
 
@@ -159,7 +160,6 @@ def fpf_cubic_7x7(
     )
 
 
-
 # ---------------------------------------------------------------------------
 # Basis transforms and spinor lifting
 # ---------------------------------------------------------------------------
@@ -205,6 +205,74 @@ def to_complex_basis_spinor(h_cubic_spinor: np.ndarray) -> np.ndarray:
     return u @ h_cubic_spinor @ u.conj().T
 
 
+def fpf_complex_spinor_14x14(
+    pf_sigma: float,
+    pf_pi: float,
+    delta_pf: float,
+) -> np.ndarray:
+    """Effective 14x14 f-f hopping in the fexchange complex spinor basis."""
+    cubic_7x7 = fpf_cubic_7x7(pf_sigma, pf_pi, delta_pf)
+    return to_complex_basis_spinor(_expand_to_spinor_interleaved(cubic_7x7))
+
+
+def expand_pf_to_spinor_interleaved(h_pf: np.ndarray) -> np.ndarray:
+    """Expand a 3x7 p-f hopping block to 6x14 interleaved spinor layout."""
+    out = np.zeros((6, 14), dtype=complex)
+    for p in range(3):
+        for f in range(7):
+            out[2 * p, 2 * f] = h_pf[p, f]
+            out[2 * p + 1, 2 * f + 1] = h_pf[p, f]
+    return out
+
+
+def fp_complex_spinor_block(
+    l: float,
+    m: float,
+    n: float,
+    pf_sigma: float,
+    pf_pi: float,
+) -> np.ndarray:
+    """Return a 14x6 ``t_f_lig`` block for the downfold input contract.
+
+    The ligand side remains in the raw p spinor order used by
+    ``hopping_pf``: px, py, pz with interleaved spins. The f side is converted
+    to the fexchange complex spinor basis.
+    """
+    h_pf = hopping_pf(l, m, n, pf_sigma, pf_pi)
+    t_f_lig_cubic = expand_pf_to_spinor_interleaved(h_pf).conj().T
+    return _build_U_c2y(spinor=True) @ t_f_lig_cubic
+
+
+def slater_koster_hopping_fp_blocks(
+    pf_sigma: float,
+    pf_pi: float,
+) -> list[tuple[str, np.ndarray]]:
+    """Build f-p hopping blocks for the A2PrO3 z-bond downfold input."""
+    hopping_fp = [
+        ("t_f1_lig1", fp_complex_spinor_block(1, 0, 0, pf_sigma, pf_pi)),
+        ("t_f1_lig2", fp_complex_spinor_block(0, -1, 0, pf_sigma, pf_pi)),
+        ("t_f2_lig1", fp_complex_spinor_block(0, 1, 0, pf_sigma, pf_pi)),
+        ("t_f2_lig2", fp_complex_spinor_block(-1, 0, 0, pf_sigma, pf_pi)),
+    ]
+    return hopping_fp
+
+
+def write_blocks_txt(path: str | Path, blocks: list[tuple[str, np.ndarray]]) -> Path:
+    """Write fexchange multi-block text: ``[key]`` followed by ``real imag`` rows."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for key, mat in blocks:
+        lines.append(f"[{key}]")
+        flat = np.asarray(mat, dtype=complex).reshape(-1)
+        lines.extend(f"{val.real:.12e} {val.imag:.12e}" for val in flat)
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
+def write_fexchange_t_mu(path: str | Path, t_mu: np.ndarray) -> Path:
+    """Write a SOPT-compatible ``[t_mu]`` text block."""
+    return write_blocks_txt(path, [("t_mu", np.asarray(t_mu, dtype=complex))])
 
 
 _A2PRO3_TRANSFER_LOWER_TRIANGLES = {
@@ -255,7 +323,7 @@ def _write_literature(output: str | None) -> None:
     for key, label in labels.items():
         cubic_7x7 = _hermitian_from_lower_triangle(_A2PRO3_TRANSFER_LOWER_TRIANGLES[key])
         complex_14x14 = to_complex_basis_spinor(_expand_to_spinor_interleaved(cubic_7x7))
-        np.savetxt(base.parent / f"{stem}_{label}.dat", complex_14x14, fmt="%.12f")
+        write_fexchange_t_mu(base.parent / f"{stem}_{label}.txt", complex_14x14)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,7 +332,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", help="Output path")
     parser.add_argument("--pf_sigma", type=float)
     parser.add_argument("--pf_pi", type=float)
+    parser.add_argument(
+        "--ratio",
+        type=float,
+        help="Set pf_pi = -ratio * pf_sigma when --pf_pi is omitted.",
+    )
     parser.add_argument("--delta_pf", type=float)
+    parser.add_argument("--downfold-hopping-fp", help="Write NSOC downfold f-p hopping blocks to this path.")
 
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -272,14 +346,21 @@ def main(argv: list[str] | None = None) -> int:
         _write_literature(args.output)
         return 0
 
-    if None in (args.pf_sigma, args.pf_pi, args.delta_pf):
-        parser.error("parameter mode requires --pf_sigma, --pf_pi, and --delta_pf")
+    if args.pf_sigma is None or args.delta_pf is None:
+        parser.error("parameter mode requires --pf_sigma and --delta_pf")
+    if args.pf_pi is None:
+        if args.ratio is None:
+            parser.error("parameter mode requires --pf_pi or --ratio")
+        args.pf_pi = -float(args.ratio) * float(args.pf_sigma)
+
+    if args.downfold_hopping_fp:
+        hopping_fp = slater_koster_hopping_fp_blocks(args.pf_sigma, args.pf_pi)
+        write_blocks_txt(args.downfold_hopping_fp, hopping_fp)
 
     output = Path(args.output) if args.output else Path("./t_mu")
-    cubic_7x7 = fpf_cubic_7x7(args.pf_sigma, args.pf_pi, args.delta_pf)
-    complex_14x14 = to_complex_basis_spinor(_expand_to_spinor_interleaved(cubic_7x7))
-    np.savetxt(f"{output}_cubic_7x7.dat", cubic_7x7, fmt="%.12f")
-    np.savetxt(f"{output}.dat", complex_14x14, fmt="%.12f")
+    complex_14x14 = fpf_complex_spinor_14x14(args.pf_sigma, args.pf_pi, args.delta_pf)
+    target = output if output.suffix else output.with_suffix(".txt")
+    write_fexchange_t_mu(target, complex_14x14)
     return 0
 
 

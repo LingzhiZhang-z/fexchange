@@ -10,22 +10,24 @@ and `./standards/en/01-core/01-02-OPERATOR_IMPLEMENTATION.md`.
 MUST:
 - This standard covers reusable FOPT building blocks for the two-f-site /
   two-ligand cluster.
-- This standard defines only Levels `L0`, `L1`, and `L2`.
-- Do not implement FOPT `L3` in this contract.
-- Do not enumerate fourth-order hopping paths in this contract.
-- Do not implement the full projected contraction
-  `P V R V R V R V P` in this contract.
-- Do not introduce W-projection, Kramers projection, or final exchange fitting
-  in this contract.
+- This standard defines Levels `L0`, `L1`, `L2`, and `L3`.
+- `L3` enumerates the 32 fourth-order hopping paths for the two-f-site /
+  two-ligand cluster and contracts the three resolvents.
+- `L3` consumes the low-energy projector `W` and emits raw total `h_eff_4`
+  plus the five process-resolved raw contributions.
+- Runtime FOPT `L3` requires a two-dimensional projected local space and must
+  apply the shared spin-1/2 mapping to total `h_eff_4` and to each of the five
+  process-resolved contributions.
 
 Code form:
 ```text
-fopt_scope = {L0, L1, L2}; reserved_future = {L3, path_enumeration, resolvents, W_projection}
+fopt_scope = {L0, L1, L2, L3}; L3_outputs = {total_heff, process_heff, total_spin12, process_spin12}
 ```
 
 Validation:
-- Any function in `fopt` that enumerates four-hop paths or consumes resolvents
-  is outside this standard.
+- Every `L3` path must map its ligand denominators to the 32-row path table.
+- `E_0` must be passed into every process helper when denominator references
+  are nonzero.
 - Any stored reverse hopping primitive is a contract violation.
 
 ## 1) Physical Cluster and Charge Sector (MUST)
@@ -66,17 +68,21 @@ MUST:
   bases and physical one-particle frames.
 - `L2` builds active-pair p-to-f hopping blocks `V_plus`.
 - `L2` must consume hopping matrices but must not consume resolvents or path lists.
-- `L3` and later levels are reserved for future standards.
+- `L3` consumes `V_plus`, per-ligand p-sector energies, f-sector
+  intermediate energies, and `W`; it emits raw total `h_eff_4`, raw
+  process-resolved `h_eff_4`, and spin-1/2 mapped exchange outputs. Runtime
+  FOPT exchange output requires `W.shape[1] == 2`.
 
 Code form:
 ```text
-FOPT order: L0 -> L1 -> L2 -> future L3
+FOPT order: L0 -> L1 -> L2 -> L3
 ```
 
 Validation:
 - `L0` outputs are site-agnostic.
 - Site labels `r` and ligand labels `lambda` may first appear in `L1`.
 - Hopping matrices may first appear in `L2`.
+- Resolvents and path enumeration may first appear in `L3`.
 
 ## 3) Active Hopping Direction (MUST)
 MUST:

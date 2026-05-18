@@ -170,7 +170,7 @@ Per-level definition:
 It is constructed at $L3$ entry from LSJM energy coefficient arrays (`E_terms.npz`)
 of the adjacent sectors ($f^{n-1}$, $f^{n+1}$) using branch-resolved
 `F^0/F^2/F^4/F^6/\zeta/offset` parameters.
-The denominator reference is controlled by `[sopt].energy_reference`.
+The denominator reference is controlled by `[fsite].energy_reference`.
 
 Math:
 $$
@@ -209,8 +209,8 @@ E_u_nm1 = E_lsjm_nm1 - E_ref
 
 Source artifacts:
 - `E_terms.npz` from LSJM outputs in sectors $n-1$, $n+1$ (disk path per `./standards/en/05-io/05-00-IO.md`).
-- Branch defaults come from main `[physics]` / `[sopt]`; branch overrides come
-  from `[physics_nm1]/[physics_np1]` and `[sopt_nm1]/[sopt_np1]`.
+- Branch defaults come from main `[fsite]`; branch overrides come from
+  `[fsite_nm1]/[fsite_np1]`.
 - `offset` is branch-local and defaults to `0`.
 - `E_ref` uses the main-sector (`f^n`) LSJM output when `energy_reference = "lsjm_ground"`.
 - `E_u` is NOT persisted as a separate disk artifact; it is computed on-the-fly at $L3$ entry.
