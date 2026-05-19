@@ -93,17 +93,25 @@ def analyze_multipole_carrying(
     Psi: NDArray[np.complexfloating],
     J: float,
     *,
+    point_group: str | None = None,
     tol: float = 1e-10,
 ) -> dict[str, Any]:
     """Analyze carried multipoles in a projected subspace.
 
-    Assumes Psi columns are already gauge-fixed.
+    If a point group is supplied, the subspace is first put in the canonical
+    gauge for that group. Otherwise Kramers and triplet subspaces are still
+    fixed by the generic gauge policy.
     """
     J = normalize_J(J, module="multipole")
     subspace_dim = int(Psi.shape[1])
+    if subspace_dim == 2 or point_group is not None:
+        Psi, used_gauge = gauge_fix_subspace(Psi, J, point_group=point_group, tol=tol)
+    else:
+        used_gauge = "none"
 
     result: dict[str, Any] = {
         "subspace_dim": subspace_dim,
+        "used_gauge": used_gauge,
         "multipoles": {},
     }
 

@@ -1,76 +1,110 @@
-"""
-Independent Wannier90 extraction tool.
+"""Wannier90 hr.dat -> fexchange basis two-bond extractor.
 
-Extract hopping matrix (t_mu) and onsite Hamiltonian (h_local)
-from Wannier90 hr.dat output.
+Reads one Wannier90 ``hr.dat`` for a 4-site cluster (2 f-sites + 2 ligand p-sites,
+each with its own R-vector), and emits three multi-block text files compatible
+with :func:`fexchange.io.matrix.load_txt_blocks`:
 
-Usage:
-    # Programmatic
-    from w90_extract import w90_extract
-    result = w90_extract(
-        hr_path="wannier90_hr.dat",
-        n_orb_per_atom=[7, 7, 3, 3],
-        f_sites=[(0, [0,0,0]), (1, [1,0,0])],
-        ligands=[(2, [0,0,0]), (3, [0,0,0])],
-    )
+* ``onsite_out``      — blocks ``[h_f1] [h_f2] [h_lig1] [h_lig2]``.
+* ``hopping_fp_out``  — blocks ``[t_f1_lig1] [t_f1_lig2] [t_f2_lig1] [t_f2_lig2]``
+  (the FOPT contract from ``standards/05-04-RUN_INPUT.md §5``).
+* ``hopping_ff_out``  — single block ``[t_mu]`` of the direct f1↔f2 hopping
+  (the SOPT contract).
 
-    # From config file
-    from w90_extract import w90_extract_from_toml
-    result = w90_extract_from_toml("config.toml")
+All matrices are in the fexchange complex spherical-harmonic basis with spin
+(σ=−1/2, σ=+1/2) interleaved per m, matching
+``fexchange/core/space_ls.py::orbital_map``.
 
-    # Command line
-    python w90_extract.py config.toml
+Wannier90 default real-harmonic order (User Guide §3.1):
+
+* ``l=1`` (p):  ``pz, px, py``                                ⇒ m_l = ``[0, +1, −1]``
+* ``l=3`` (f):  ``fz3, fxz², fyz², fz(x²−y²), fxyz,
+                 fx(x²−3y²), fy(3x²−y²)``                     ⇒ m_l = ``[0, +1, −1, +2, −2, +3, −3]``
+
+If the ``.win`` file uses a different projection order, override
+``real_order_f`` / ``real_order_p`` accordingly.
+
+This function does **raw bilinear extraction only** — no trace removal, no
+Hermitization, no f–p–f downfolding. Those concerns belong to downstream
+CEF/FOPT prep tools.
 """
 
 from __future__ import annotations
 
-import sys
+import logging
 import tomllib
-import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
-# ---------------------------------------------------------------------------
-# Energy unit conversion
-# ---------------------------------------------------------------------------
+from fexchange.utils.errors import InputError, IOError_, PhysError, W90Error
 
-_ENERGY_SCALE = {
+logger = logging.getLogger("fexchange")
+
+ELL_F: int = 3
+ELL_P: int = 1
+DIM_F_REAL: int = 2 * ELL_F + 1
+DIM_P_REAL: int = 2 * ELL_P + 1
+
+W90_F_REAL_ORDER: tuple[int, ...] = (0, +1, -1, +2, -2, +3, -3)
+W90_P_REAL_ORDER: tuple[int, ...] = (0, +1, -1)
+
+_ENERGY_SCALE: dict[str, float] = {
     "eV": 1.0,
     "meV": 1e-3,
     "Ha": 27.211386245988,
     "Ry": 13.605693122994,
 }
 
+_SPIN_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
+
+
 # ---------------------------------------------------------------------------
 # hr.dat parser
 # ---------------------------------------------------------------------------
 
-def read_hr(path):
-    """
-    Parse wannier90_hr.dat -> dict keyed by R-vector tuples.
+def read_w90_hr(
+    path: str | Path,
+) -> tuple[dict[tuple[int, int, int], NDArray[np.complexfloating]], int]:
+    """Parse ``wannier90_hr.dat`` -> ``({R: H(R)}, num_wann)``.
 
-    Returns (H_R, num_wann) where H_R[(r1,r2,r3)] is a (num_wann, num_wann)
-    complex matrix, already divided by degeneracy weight.
+    Each H(R) block is divided by its degeneracy weight so the returned
+    matrices are the bare real-space Hamiltonian.
     """
-    path = str(path)
-    num_wann = int(np.loadtxt(path, skiprows=1, max_rows=1))
-    nrpts = int(np.loadtxt(path, skiprows=2, max_rows=1))
+    p = Path(path)
+    if not p.exists():
+        raise IOError_("FXE-IO-001", f"hr file missing: {p}", paths={"path": str(p)})
 
-    n_wt_lines = nrpts // 15
-    weights = np.loadtxt(path, skiprows=3, max_rows=n_wt_lines).flatten() if n_wt_lines > 0 else np.array([])
-    if nrpts % 15 != 0:
-        extra = np.atleast_1d(np.loadtxt(path, skiprows=3 + n_wt_lines, max_rows=1))
-        weights = np.concatenate((weights, extra))
+    num_wann = int(np.loadtxt(str(p), skiprows=1, max_rows=1))
+    nrpts = int(np.loadtxt(str(p), skiprows=2, max_rows=1))
+
+    n_wt_lines, rem = divmod(nrpts, 15)
+    weights = (
+        np.loadtxt(str(p), skiprows=3, max_rows=n_wt_lines).flatten()
+        if n_wt_lines > 0
+        else np.array([], dtype=float)
+    )
+    if rem != 0:
+        extra = np.atleast_1d(np.loadtxt(str(p), skiprows=3 + n_wt_lines, max_rows=1))
+        weights = np.concatenate([weights, extra])
         n_wt_lines += 1
+    if weights.size != nrpts:
+        raise W90Error(
+            "FXE-W90-001",
+            "weight count does not match nrpts",
+            expected={"nrpts": nrpts},
+            actual={"weights": int(weights.size)},
+            paths={"path": str(p)},
+        )
 
-    raw = np.loadtxt(path, skiprows=3 + n_wt_lines)
+    body = np.loadtxt(str(p), skiprows=3 + n_wt_lines)
     block = num_wann * num_wann
 
-    H_R = {}
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]] = {}
     for i in range(nrpts):
-        rows = raw[block * i : block * (i + 1)]
-        R = tuple(rows[0, 0:3].astype(int))
+        rows = body[block * i : block * (i + 1)]
+        R = tuple(int(x) for x in rows[0, 0:3])
         m_idx = rows[:, 3].astype(int) - 1
         n_idx = rows[:, 4].astype(int) - 1
         mat = np.zeros((num_wann, num_wann), dtype=complex)
@@ -81,291 +115,472 @@ def read_hr(path):
 
 
 # ---------------------------------------------------------------------------
-# Math utilities
+# Basis transforms
 # ---------------------------------------------------------------------------
 
-def _extract_block(H_R, rows, cols, R):
-    """Extract sub-block H_R[R][rows, cols] with Hermitian fallback."""
+def _real_to_complex_unitary(ell: int, real_order: tuple[int, ...]) -> NDArray[np.complexfloating]:
+    """Build the (2ℓ+1)×(2ℓ+1) unitary ``U`` for one orbital shell.
+
+    Convention: column ``r`` holds the expansion of the r-th Wannier90 real
+    spherical harmonic in the complex spherical-harmonic basis ordered
+    ``m = −ℓ..+ℓ``. The W90 real harmonic at position r has m_l = ``real_order[r]``.
+
+    Real-harmonic ↔ complex-harmonic definitions (Condon-Shortley phase):
+
+      m_l = 0    →   Y_l^0
+      m_l = +|m| →  (Y_l^{−|m|} + (−1)^m Y_l^{+|m|}) / √2
+      m_l = −|m| →  i (Y_l^{−|m|} − (−1)^m Y_l^{+|m|}) / √2
+
+    A Hamiltonian transforms as ``h_complex = U @ h_real @ U.conj().T``.
+    """
+    dim = 2 * ell + 1
+    if sorted(real_order) != list(range(-ell, ell + 1)):
+        raise InputError(
+            "FXE-INPUT-003",
+            f"real_order must be a permutation of [-{ell}..+{ell}]",
+            actual={"real_order": list(real_order)},
+        )
+    sq2 = np.sqrt(2.0)
+    U = np.zeros((dim, dim), dtype=complex)
+    for r_idx, m_real in enumerate(real_order):
+        if m_real == 0:
+            U[ell, r_idx] = 1.0
+        elif m_real > 0:
+            phase = (-1) ** m_real
+            U[ell - m_real, r_idx] = 1.0 / sq2
+            U[ell + m_real, r_idx] = phase / sq2
+        else:
+            absm = -m_real
+            phase = (-1) ** absm
+            U[ell - absm, r_idx] = 1j / sq2
+            U[ell + absm, r_idx] = -1j * phase / sq2
+    return U
+
+
+def _shell_transform(shell: str, real_order: tuple[int, ...], *, spinor_input: bool) -> NDArray[np.complexfloating]:
+    """Full spin–orbital transform U_full for one site.
+
+    Applied as ``h_fxe = U_full @ h_W90 @ U_full.conj().T`` when the input is
+    already a spinor block. For NSOC input the caller first Kronecker-embeds
+    the orbital matrix into the spinor layout (see :func:`_to_fxe`).
+
+    Spin convention:
+      * W90 (spinor=True, default ``proj=X: l``): per orbital ``(↑, ↓)`` pair.
+      * fxe (``space_ls.orbital_map``): per m, ``(σ=−½, σ=+½)`` pair (i.e. ``(↓, ↑)``).
+    We compose orbital real→complex with a spin swap ``[[0,1],[1,0]]`` so a
+    single ``U_full`` does everything.
+    """
+    if shell == "f":
+        ell = ELL_F
+    elif shell == "p":
+        ell = ELL_P
+    else:
+        raise InputError(
+            "FXE-INPUT-003",
+            f"Unsupported shell: {shell!r} (only 'f' and 'p' implemented)",
+            actual={"shell": shell},
+        )
+    U_orb = _real_to_complex_unitary(ell, real_order)
+    spin_block = _SPIN_SWAP if spinor_input else np.eye(2, dtype=complex)
+    return np.kron(U_orb, spin_block)
+
+
+# ---------------------------------------------------------------------------
+# Site index resolution
+# ---------------------------------------------------------------------------
+
+def _orbital_offsets(n_orb_per_atom: list[int], *, num_wann: int, spinor: bool) -> list[int]:
+    """Compute cumulative Wannier-index offsets per atom.
+
+    Accepts narrow counts (``[7, 7, 3, 3]`` for SOC) or already-wide counts
+    (``[14, 14, 6, 6]``); both reconcile against ``num_wann``.
+    """
+    narrow = [int(x) for x in n_orb_per_atom]
+    if sum(narrow) == num_wann:
+        return [sum(narrow[:i]) for i in range(len(narrow) + 1)]
+    if spinor and 2 * sum(narrow) == num_wann:
+        wide = [2 * c for c in narrow]
+        return [sum(wide[:i]) for i in range(len(wide) + 1)]
+    raise InputError(
+        "FXE-INPUT-003",
+        "Cannot reconcile n_orb_per_atom with num_wann",
+        expected={"sum_or_2x_sum": num_wann},
+        actual={"sum": sum(narrow), "spinor": spinor, "num_wann": num_wann},
+    )
+
+
+def _site_indices(offsets: list[int], atom: int, *, expected: int) -> list[int]:
+    if not 0 <= atom < len(offsets) - 1:
+        raise InputError(
+            "FXE-INPUT-003",
+            f"atom index out of range: {atom} (have {len(offsets) - 1} atoms)",
+            actual={"atom": atom},
+        )
+    got = offsets[atom + 1] - offsets[atom]
+    if got != expected:
+        raise W90Error(
+            "FXE-W90-001",
+            f"atom {atom} has {got} W90 orbitals; expected {expected}",
+            expected={"orbitals": expected},
+            actual={"orbitals": got},
+        )
+    return list(range(offsets[atom], offsets[atom + 1]))
+
+
+def _resolve_site(
+    site: dict[str, Any],
+    *,
+    label: str,
+    shell: str,
+    offsets: list[int],
+    spinor: bool,
+) -> dict[str, Any]:
+    if "atom" not in site or "cell" not in site:
+        raise InputError(
+            "FXE-INPUT-003",
+            f"{label}: missing required field atom/cell",
+            actual={"site": site},
+        )
+    cell = tuple(int(x) for x in site["cell"])
+    if len(cell) != 3:
+        raise InputError(
+            "FXE-INPUT-003",
+            f"{label}: cell must contain exactly 3 integers",
+            actual={"cell": list(cell)},
+        )
+    per_orb = DIM_F_REAL if shell == "f" else DIM_P_REAL
+    expected_wann = 2 * per_orb if spinor else per_orb
+    indices = _site_indices(offsets, int(site["atom"]), expected=expected_wann)
+    return {
+        "label": label,
+        "shell": shell,
+        "atom": int(site["atom"]),
+        "cell": cell,
+        "indices": indices,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Block extraction with Hermitian fallback
+# ---------------------------------------------------------------------------
+
+def _extract_block(
+    H_R: dict[tuple[int, int, int], NDArray[np.complexfloating]],
+    rows: list[int],
+    cols: list[int],
+    R: tuple[int, int, int],
+) -> NDArray[np.complexfloating]:
+    """Extract ``H_R[R][rows, cols]``; fall back to ``H_R[-R].conj().T`` if R absent."""
     R = tuple(int(x) for x in R)
     if R in H_R:
         return H_R[R][np.ix_(rows, cols)].copy()
     R_neg = tuple(-x for x in R)
     if R_neg in H_R:
         return H_R[R_neg][np.ix_(cols, rows)].conj().T.copy()
-    raise KeyError(f"R-vector {R} not found in H_R (no Hermitian pair either)")
+    raise W90Error(
+        "FXE-W90-001",
+        f"R-vector {R} not present in hr.dat (neither R nor -R)",
+        actual={"R": list(R)},
+    )
 
 
-def _expand_to_spinor(mat):
-    """
-    Expand orbital-only matrix (n x n) to spinor (2n x 2n).
-    Interleaved order: (m0_dn, m0_up, m1_dn, m1_up, ...).
-    spin-up = mat, spin-down = conj(mat), spin-flip = 0.
+# ---------------------------------------------------------------------------
+# Multi-block text writer
+# ---------------------------------------------------------------------------
 
-    Note: the conjugation for spin-down is harmless for nsoc (real-harmonic
-    matrices are real), but is kept for consistency with reference literature
-    results that depend on this convention.
-    """
-    n = mat.shape[0]
-    out = np.zeros((2 * n, 2 * n), dtype=complex)
-    for i in range(n):
-        for j in range(n):
-            out[2 * i, 2 * j] = mat[i, j].conj()        # spin down
-            out[2 * i + 1, 2 * j + 1] = mat[i, j]       # spin up
-    return out
+def _write_blocks_txt(path: Path, blocks: list[tuple[str, NDArray[np.complexfloating]]]) -> None:
+    """Write blocks in the ``[key] / real imag`` format read by ``io.matrix.load_txt_blocks``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out: list[str] = []
+    for key, mat in blocks:
+        flat = np.asarray(mat, dtype=complex).reshape(-1)
+        out.append(f"[{key}]")
+        out.extend(f"{val.real:.12e} {val.imag:.12e}" for val in flat)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
-def _build_U_r2c(spinor=False):
-    """
-    Real-harmonic -> complex-harmonic unitary for f orbitals.
-    Real order: m = 0, 1, -1, 2, -2, 3, -3.
-    Complex order: m = -3, -2, -1, 0, 1, 2, 3.
-    """
-    sq2 = np.sqrt(2.0)
-    tmp = np.array([
-        [0,       0,       0,       1, 0,        0,       0      ],
-        [0,       0,       1/sq2,   0, -1/sq2,   0,       0      ],
-        [0,       0,       1j/sq2,  0, 1j/sq2,   0,       0      ],
-        [0,       1/sq2,   0,       0, 0,         1/sq2,  0      ],
-        [0,       1j/sq2,  0,       0, 0,        -1j/sq2, 0      ],
-        [1/sq2,   0,       0,       0, 0,         0,      -1/sq2 ],
-        [1j/sq2,  0,       0,       0, 0,         0,      1j/sq2 ],
-    ], dtype=complex)
-    return np.kron(tmp.T, np.eye(2)) if spinor else tmp.T
+# ---------------------------------------------------------------------------
+# Public extraction entry point
+# ---------------------------------------------------------------------------
 
-def _build_U_c2y(spinor=False):
-    """
-    Cubic-harmonic -> complex-harmonic unitary for f orbitals.
-    Cubic order (rows): ξ, η, ζ, A, α, β, γ.
-    Complex order (cols): m = -3, -2, -1, 0, 1, 2, 3.
-
-    Each row is a cubic orbital expressed in Y_lm (Takegahara 1980 Table 1).
-    """
-    sq2 = np.sqrt(2.0)
-    sq3 = np.sqrt(3.0)
-    sq5 = np.sqrt(5.0)
-    tmp = np.array([
-        #  m=-3        m=-2    m=-1        m=0   m=+1        m=+2    m=+3
-        [-sq3/4,    0,     -sq5/4,    0,    sq5/4,    0,      sq3/4  ],  # ξ = (√3 Y₃₃+√5 Y₃₁−√5 Y₃₋₁−√3 Y₃₋₃)/4
-        [-1j*sq3/4, 0,   1j*sq5/4,   0,   1j*sq5/4,  0,  -1j*sq3/4 ],  # η = i(−√3 Y₃₃+√5 Y₃₁+√5 Y₃₋₁−√3 Y₃₋₃)/4
-        [ 0,      1/sq2,   0,        0,    0,       1/sq2,   0       ],  # ζ = (Y₃₋₂+Y₃₂)/√2
-        [ 0,    1j/sq2,    0,        0,    0,      -1j/sq2,  0       ],  # A = i(Y₃₋₂−Y₃₂)/√2
-        [ sq5/4,    0,    -sq3/4,    0,    sq3/4,    0,     -sq5/4   ],  # α = (−√5 Y₃₃+√3 Y₃₁−√3 Y₃₋₁+√5 Y₃₋₃)/4
-        [-1j*sq5/4, 0,  -1j*sq3/4,  0,  -1j*sq3/4,  0,  -1j*sq5/4  ],  # β = i(−√5 Y₃₃−√3 Y₃₁−√3 Y₃₋₁−√5 Y₃₋₃)/4
-        [ 0,        0,    0,         1,   0,          0,    0         ],  # γ = Y₃₀
-    ], dtype=complex)
-    return np.kron(tmp.T, np.eye(2)) if spinor else tmp.T
-
-def _ud_to_du_perm(dim):
-    if dim % 2 != 0:
-        raise ValueError("ud->du permutation requires even dimension")
-    n = dim // 2
-    return [idx for m in range(n) for idx in (2 * m + 1, 2 * m)]
-
-
-def _permute_ud_to_du(mat):
-    """Reorder Wannier90 spinor from (up,down) per m to internal (down,up) per m."""
-    if mat.ndim != 2 or mat.shape[0] != mat.shape[1] or mat.shape[0] % 2 != 0:
-        raise ValueError("ud->du permutation requires an even square matrix")
-    perm = _ud_to_du_perm(mat.shape[0])
-    return mat[np.ix_(perm, perm)].copy()
-
-
-def _extract_w90_blocks(H_R, n_orb_per_atom, f_sites, ligands):
-    """
-    Extract raw blocks from Wannier90 H_R data.
-
-    Returns (h_local_raw, t_ff, ligand_hops, eps_i, eps_j) where:
-    - h_local_raw: (f_dim, f_dim) averaged onsite block
-    - t_ff: (f_dim, f_dim) direct f-f hopping
-    - ligand_hops: list of (t_i, t_j, eps_l) tuples per ligand
-    - eps_i, eps_j: (f_dim,) onsite diagonal energies
-    All in original Wannier90 ordering (no spin permutation).
-    """
-    offsets = [0]
-    for n in n_orb_per_atom:
-        offsets.append(offsets[-1] + n)
-
-    def orb(atom):
-        return list(range(offsets[atom], offsets[atom + 1]))
-
-    (ai, ci), (aj, cj) = f_sites
-    fi, fj = orb(ai), orb(aj)
-    if len(fi) not in (7, 14):
-        raise ValueError(
-            f"f-site {ai} has {len(fi)} orbitals; expected 7 (nsoc) or 14 (soc)")
-    if len(fj) not in (7, 14):
-        raise ValueError(
-            f"f-site {aj} has {len(fj)} orbitals; expected 7 (nsoc) or 14 (soc)")
-    R_ij = tuple(int(cj[k]) - int(ci[k]) for k in range(3))
-
-    H0 = H_R[(0, 0, 0)]
-    eps = np.real(np.diag(H0))
-
-    h_local_raw = 0.5 * (H0[np.ix_(fi, fi)] + H0[np.ix_(fj, fj)])
-    t_ff = _extract_block(H_R, fi, fj, R_ij)
-
-    eps_i = eps[fi]
-    eps_j = eps[fj]
-
-    ligand_hops = []
-    for lig_atom, lig_cell in (ligands or []):
-        li = orb(lig_atom)
-        R_io = tuple(int(lig_cell[k]) - int(ci[k]) for k in range(3))
-        R_jo = tuple(int(lig_cell[k]) - int(cj[k]) for k in range(3))
-        t_i = _extract_block(H_R, fi, li, R_io)
-        t_j = _extract_block(H_R, fj, li, R_jo)
-        ligand_hops.append((t_i, t_j, eps[li]))
-
-    return h_local_raw, t_ff, ligand_hops, eps_i, eps_j
-
-
-def _compute_fpf(t_ff, ligand_hops, eps_i, eps_j):
-    """
-    Combine direct f-f hopping with f-p-f second-order corrections.
+def extract_w90_two_bond(
+    *,
+    hr_path: str | Path,
+    n_orb_per_atom: list[int],
+    f1_site: dict[str, Any],
+    f2_site: dict[str, Any],
+    lig1_site: dict[str, Any],
+    lig2_site: dict[str, Any],
+    spinor: bool,
+    onsite_out: str | Path,
+    hopping_fp_out: str | Path,
+    hopping_ff_out: str | Path,
+    energy_unit: str = "eV",
+    fermi_level: float = 0.0,
+    f_trace_tol: float = 1e-6,
+    real_order_f: tuple[int, ...] = W90_F_REAL_ORDER,
+    real_order_p: tuple[int, ...] = W90_P_REAL_ORDER,
+) -> dict[str, Any]:
+    """Extract a 4-site (2 f + 2 p) cluster from Wannier90 ``hr.dat``.
 
     Parameters
     ----------
-    t_ff : (f_dim, f_dim) direct hopping matrix
-    ligand_hops : list of (t_i, t_j, eps_l) from extraction phase
-    eps_i, eps_j : (f_dim,) onsite diagonal energies for f-sites i, j
+    hr_path: path to ``wannier90_hr.dat``.
+    n_orb_per_atom: orbital counts per atom in the W90 projection. Either
+        narrow (e.g. ``[7, 7, 3, 3]``) or already spin-doubled (``[14, 14, 6, 6]``);
+        both reconcile against ``num_wann``.
+    f1_site, f2_site, lig1_site, lig2_site: each is ``{"atom": int, "cell": [i,j,k]}``.
+    spinor: whether ``hr.dat`` was produced with ``spinors = .true.``.
+    onsite_out, hopping_fp_out, hopping_ff_out: paths for the three output text files.
+    energy_unit: input energy unit; output is in eV unless specified.
+    fermi_level: subtracted from the onsite diagonal in the *output* unit
+        (``onsite_out_diag - fermi_level``). Hopping blocks are unaffected.
+        Default 0.0 (no shift). Set to the DFT Fermi energy (after the unit
+        conversion above) when ``hr.dat`` does not pre-align E_F to zero.
+        Note: the reported ligand Delta = ⟨h_f⟩ − ⟨h_lig⟩ is invariant under
+        this shift (both ends shift by the same constant).
+    f_trace_tol: max allowed |⟨h_f1⟩ − ⟨h_f2⟩| (in the output unit). Two f
+        sites should be physically equivalent, hence have equal trace
+        averages. Default 1e-6.
+    real_order_f, real_order_p: Wannier90 m_l ordering for each shell (default
+        is the W90 hybrid order; override when ``.win`` uses non-default
+        projections).
 
     Returns
     -------
-    t_mu_raw : (f_dim, f_dim) total hopping = t_ff + sum(t_lig)
-    """
-    f_dim = t_ff.shape[0]
-    t_lig = np.zeros((f_dim, f_dim), dtype=complex)
-
-    for t_i, t_j, eps_l in ligand_hops:
-        du = eps_i[:, None] - eps_l[None, :]
-        dv = eps_j[:, None] - eps_l[None, :]
-
-        denom = du[:, None, :] + dv[None, :, :]
-        safe = np.abs(denom) > 1e-12
-        n_degen = int(np.sum(~safe))
-        if n_degen > 0:
-            warnings.warn(
-                f"_compute_fpf: {n_degen} near-degenerate denominator(s) "
-                f"dropped (|eps_i + eps_j - 2*eps_l| < 1e-12)")
-        delta = np.where(safe,
-                         2.0 * du[:, None, :] * dv[None, :, :] / np.where(safe, denom, 1.0),
-                         np.inf)
-
-        numer = t_i[:, None, :] * np.conj(t_j[None, :, :])
-        t_lig += np.sum(numer / delta, axis=2)
-
-    return t_ff + t_lig
-
-
-def _finalize(t_mu_raw, h_local_raw, is_soc):
-    """
-    Apply spin expansion (without_soc only) and real→complex basis transformation.
-
-    Assumes input is already a full spinor matrix (is_soc=True) or an
-    orbital-only matrix that needs expanding (is_soc=False).
-
-    Returns (t_mu, h_local), both 14×14 complex.
-    """
-    if not is_soc:
-        t_mu_raw = _expand_to_spinor(t_mu_raw)
-        h_local_raw = _expand_to_spinor(h_local_raw)
-
-    U = _build_U_r2c(spinor=True)
-    return U @ t_mu_raw @ U.T.conj(), U @ h_local_raw @ U.T.conj()
-
-
-# ---------------------------------------------------------------------------
-# Main extraction
-# ---------------------------------------------------------------------------
-
-def w90_extract(hr_path, n_orb_per_atom, f_sites, ligands=None,
-                spinor=False, energy_unit="eV"):
-    """
-    Extract hopping matrix and onsite Hamiltonian from Wannier90 hr.dat.
+    A dict ``{"onsite": ..., "hopping": ..., "meta": ...}`` echoing the
+    in-memory matrices and metadata.
     """
     if energy_unit not in _ENERGY_SCALE:
-        raise ValueError(f"Unknown energy_unit: {energy_unit!r}. Choose from {list(_ENERGY_SCALE)}")
+        raise InputError(
+            "FXE-INPUT-003",
+            f"Unknown energy_unit: {energy_unit!r}",
+            expected={"choices": sorted(_ENERGY_SCALE)},
+            actual={"energy_unit": energy_unit},
+        )
 
-    H_R, num_wann = read_hr(hr_path)
+    H_R, num_wann = read_w90_hr(hr_path)
     scale = _ENERGY_SCALE[energy_unit]
     if scale != 1.0:
         H_R = {R: scale * mat for R, mat in H_R.items()}
 
-    spin_mult = 2 if spinor else 1
-    norbs = [ n_orb * spin_mult for n_orb in n_orb_per_atom ]
-    # Phase 1: Extract raw blocks from Wannier90 data
-    h_local_raw, t_ff, ligand_hops, eps_i, eps_j = _extract_w90_blocks(
-        H_R, norbs, f_sites, ligands)
+    offsets = _orbital_offsets(n_orb_per_atom, num_wann=num_wann, spinor=spinor)
 
-    # Phase 2: Combine direct + second-order hopping
-    t_mu_raw = _compute_fpf(t_ff, ligand_hops, eps_i, eps_j)
+    sites = [
+        _resolve_site(f1_site, label="f1", shell="f", offsets=offsets, spinor=spinor),
+        _resolve_site(f2_site, label="f2", shell="f", offsets=offsets, spinor=spinor),
+        _resolve_site(lig1_site, label="lig1", shell="p", offsets=offsets, spinor=spinor),
+        _resolve_site(lig2_site, label="lig2", shell="p", offsets=offsets, spinor=spinor),
+    ]
+    by_label = {s["label"]: s for s in sites}
 
-    # Wannier90 SOC convention: reorder spinor from (up,down) to internal (down,up)
-    if spinor:
-        t_mu_raw = _permute_ud_to_du(t_mu_raw)
-        h_local_raw = _permute_ud_to_du(h_local_raw)
+    U_for = {
+        "f": _shell_transform("f", real_order_f, spinor_input=spinor),
+        "p": _shell_transform("p", real_order_p, spinor_input=spinor),
+    }
 
-    # Remove trace from h_local (pure CEF + SOC, no constant shift)
-    n = h_local_raw.shape[0]
-    h_local_raw -= np.eye(n) * (np.trace(h_local_raw) / n)
+    def _to_fxe(raw: NDArray[np.complexfloating], shell_row: str, shell_col: str) -> NDArray[np.complexfloating]:
+        if not spinor:
+            # Promote NSOC orbital block to fxe (orbital, spin) interleaved layout.
+            raw = np.kron(raw, np.eye(2, dtype=complex))
+        return U_for[shell_row] @ raw @ U_for[shell_col].conj().T
 
-    # Phase 3: Spin expansion (without_soc) + basis transformation
-    t_mu, h_local = _finalize(t_mu_raw, h_local_raw, spinor)
+    H0 = H_R.get((0, 0, 0))
+    if H0 is None:
+        raise W90Error(
+            "FXE-W90-001",
+            "hr.dat is missing the R=(0,0,0) block (required for onsite extraction)",
+        )
 
-    return {"t_mu": t_mu, "h_local": h_local}
+    onsite: dict[str, NDArray[np.complexfloating]] = {}
+    for s in sites:
+        raw = H0[np.ix_(s["indices"], s["indices"])].copy()
+        h_fxe = _to_fxe(raw, s["shell"], s["shell"])
+        if fermi_level != 0.0:
+            h_fxe = h_fxe - fermi_level * np.eye(h_fxe.shape[0], dtype=complex)
+        onsite[s["label"]] = h_fxe
 
+    hopping_fp: dict[tuple[str, str], NDArray[np.complexfloating]] = {}
+    for f_lbl in ("f1", "f2"):
+        for lig_lbl in ("lig1", "lig2"):
+            f = by_label[f_lbl]
+            lig = by_label[lig_lbl]
+            R_fl = tuple(int(lig["cell"][k]) - int(f["cell"][k]) for k in range(3))
+            raw = _extract_block(H_R, f["indices"], lig["indices"], R_fl)
+            hopping_fp[(f_lbl, lig_lbl)] = _to_fxe(raw, "f", "p")
 
-# ---------------------------------------------------------------------------
-# TOML config entry point
-# ---------------------------------------------------------------------------
+    f1, f2 = by_label["f1"], by_label["f2"]
+    R_ff = tuple(int(f2["cell"][k]) - int(f1["cell"][k]) for k in range(3))
+    raw_ff = _extract_block(H_R, f1["indices"], f2["indices"], R_ff)
+    t_ff = _to_fxe(raw_ff, "f", "f")
 
-def w90_extract_from_toml(toml_path):
-    """Load config from TOML file, extract, and save results as txt."""
-    with open(toml_path, "rb") as f:
-        cfg = tomllib.load(f)
+    # Trace averages (unitary-invariant; invariant under fermi shift across sites).
+    def _trace_avg(h: NDArray[np.complexfloating]) -> float:
+        return float(np.trace(h).real / h.shape[0])
 
-    fi = cfg["f_site_i"]
-    fj = cfg["f_site_j"]
-    f_sites = [(fi["atom"], fi["cell"]), (fj["atom"], fj["cell"])]
+    e_avg = {lbl: _trace_avg(onsite[lbl]) for lbl in ("f1", "f2", "lig1", "lig2")}
+    f_trace_diff = abs(e_avg["f1"] - e_avg["f2"])
+    if f_trace_diff > f_trace_tol:
+        raise PhysError(
+            "FXE-PHYS-001",
+            f"f1 and f2 onsite trace averages differ by {f_trace_diff:.6e} ({energy_unit}) > tol {f_trace_tol:.6e}",
+            expected={"f_trace_diff_max": float(f_trace_tol)},
+            actual={"f1_avg": e_avg["f1"], "f2_avg": e_avg["f2"], "diff": f_trace_diff},
+        )
+    e_f = 0.5 * (e_avg["f1"] + e_avg["f2"])
+    # Delta = E_f - E_lig (ligand-to-f charge-transfer cost; positive when
+    # the ligand p-shell sits below f). Matches the convention used by
+    # fexchange/spectrum/ligand.py::build_ligand_spectrum.
+    delta = {"lig1": e_f - e_avg["lig1"], "lig2": e_f - e_avg["lig2"]}
 
-    ligands = None
-    if "ligands" in cfg:
-        ligands = [(lig["atom"], lig["cell"]) for lig in cfg["ligands"]]
-
-    result = w90_extract(
-        hr_path=cfg["hr_path"],
-        n_orb_per_atom=cfg["n_orb_per_atom"],
-        f_sites=f_sites,
-        ligands=ligands,
-        spinor=cfg.get("spinor", False),
-        energy_unit=cfg.get("energy_unit", "eV"),
+    onsite_path = Path(onsite_out)
+    hopping_fp_path = Path(hopping_fp_out)
+    hopping_ff_path = Path(hopping_ff_out)
+    _write_blocks_txt(
+        onsite_path,
+        [(f"h_{lbl}", onsite[lbl]) for lbl in ("f1", "f2", "lig1", "lig2")],
+    )
+    _write_blocks_txt(
+        hopping_fp_path,
+        [
+            (f"t_{f_lbl}_{lig_lbl}", hopping_fp[(f_lbl, lig_lbl)])
+            for f_lbl in ("f1", "f2")
+            for lig_lbl in ("lig1", "lig2")
+        ],
+    )
+    _write_blocks_txt(hopping_ff_path, [("t_mu", t_ff)])
+    logger.info(
+        "extract_w90_two_bond wrote: onsite=%s hopping_fp=%s hopping_ff=%s (num_wann=%d, spinor=%s)",
+        onsite_path,
+        hopping_fp_path,
+        hopping_ff_path,
+        num_wann,
+        spinor,
     )
 
-    prefix = cfg.get("output", "w90_output")
-    is_spinor = cfg.get("spinor", False)
-    U_r2c = _build_U_r2c(spinor=is_spinor)
-    U_c2y = _build_U_c2y(spinor=is_spinor)
-
-    t_meV = result["t_mu"] * 1000
-    h_meV = result["h_local"] * 1000
-
-    np.savetxt(f"{prefix}_t_mu.dat", t_meV, fmt="%.12f")
-    np.savetxt(f"{prefix}_t_mu_real.dat", U_r2c.conj().T @ t_meV @ U_r2c, fmt="%.12f")
-    np.savetxt(f"{prefix}_t_mu_cubic.dat", U_c2y.conj().T @ t_meV @ U_c2y, fmt="%.12f")
-
-    np.savetxt(f"{prefix}_h_local.dat", h_meV, fmt="%.12f")
-    np.savetxt(f"{prefix}_h_local_real.dat", U_r2c.conj().T @ h_meV @ U_r2c, fmt="%.12f")
-    np.savetxt(f"{prefix}_h_local_cubic.dat", U_c2y.conj().T @ h_meV @ U_c2y, fmt="%.12f")
-
-    return result
+    meta = {
+        "hr_path": str(hr_path),
+        "num_wann": int(num_wann),
+        "spinor": bool(spinor),
+        "energy_unit": energy_unit,
+        "fermi_level": float(fermi_level),
+        "n_orb_per_atom": [int(x) for x in n_orb_per_atom],
+        "real_order_f": list(real_order_f),
+        "real_order_p": list(real_order_p),
+        "sites": {
+            s["label"]: {"atom": s["atom"], "cell": list(s["cell"]), "shell": s["shell"]}
+            for s in sites
+        },
+        "onsite_out": str(onsite_path),
+        "hopping_fp_out": str(hopping_fp_path),
+        "hopping_ff_out": str(hopping_ff_path),
+        "trace_avg": e_avg,
+        "e_f_ref": float(e_f),
+        "delta": {lbl: float(delta[lbl]) for lbl in ("lig1", "lig2")},
+        "f_trace_tol": float(f_trace_tol),
+        "f_trace_diff": float(f_trace_diff),
+    }
+    return {
+        "onsite": onsite,
+        "hopping_fp": hopping_fp,
+        "hopping_ff": t_ff,
+        "delta": delta,
+        "trace_avg": e_avg,
+        "meta": meta,
+    }
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# TOML CLI entry point
 # ---------------------------------------------------------------------------
+
+def extract_from_toml(toml_path: str | Path) -> dict[str, Any]:
+    """Load a config file and invoke :func:`extract_w90_two_bond`.
+
+    Config schema::
+
+        hr_path = "wannier90_hr.dat"
+        spinor = true
+        energy_unit = "eV"
+        n_orb_per_atom = [7, 7, 3, 3]
+        onsite_out = "out/onsite.txt"
+        hopping_fp_out = "out/hopping_fp.txt"
+        hopping_ff_out = "out/hopping_ff.txt"
+
+        # Optional: subtract DFT Fermi energy from onsite diagonals (output unit)
+        # fermi_level = 5.123
+
+        # Optional W90 real-harmonic order overrides
+        # real_order_f = [0, 1, -1, 2, -2, 3, -3]
+        # real_order_p = [0, 1, -1]
+
+        [f1_site]
+        atom = 0
+        cell = [0, 0, 0]
+
+        [f2_site]
+        atom = 1
+        cell = [1, 0, 0]
+
+        [lig1_site]
+        atom = 2
+        cell = [0, 0, 0]
+
+        [lig2_site]
+        atom = 3
+        cell = [0, 0, 0]
+    """
+    path = Path(toml_path)
+    if not path.exists():
+        raise IOError_("FXE-IO-001", f"config not found: {path}", paths={"path": str(path)})
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+    required = (
+        "hr_path",
+        "n_orb_per_atom",
+        "spinor",
+        "f1_site",
+        "f2_site",
+        "lig1_site",
+        "lig2_site",
+        "onsite_out",
+        "hopping_fp_out",
+        "hopping_ff_out",
+    )
+    missing = [k for k in required if k not in cfg]
+    if missing:
+        raise InputError(
+            "FXE-INPUT-003",
+            f"config missing fields: {missing}",
+            expected={"required": list(required)},
+            actual={"present": sorted(cfg.keys())},
+        )
+    kwargs: dict[str, Any] = dict(
+        hr_path=cfg["hr_path"],
+        n_orb_per_atom=cfg["n_orb_per_atom"],
+        f1_site=cfg["f1_site"],
+        f2_site=cfg["f2_site"],
+        lig1_site=cfg["lig1_site"],
+        lig2_site=cfg["lig2_site"],
+        spinor=bool(cfg["spinor"]),
+        onsite_out=cfg["onsite_out"],
+        hopping_fp_out=cfg["hopping_fp_out"],
+        hopping_ff_out=cfg["hopping_ff_out"],
+        energy_unit=cfg.get("energy_unit", "eV"),
+        fermi_level=float(cfg.get("fermi_level", 0.0)),
+        f_trace_tol=float(cfg.get("f_trace_tol", 1e-6)),
+    )
+    if "real_order_f" in cfg:
+        kwargs["real_order_f"] = tuple(int(x) for x in cfg["real_order_f"])
+    if "real_order_p" in cfg:
+        kwargs["real_order_p"] = tuple(int(x) for x in cfg["real_order_p"])
+    return extract_w90_two_bond(**kwargs)
+
 
 if __name__ == "__main__":
+    import sys
+
     if len(sys.argv) != 2:
-        print("Usage: python w90_extract.py config.toml")
+        print("Usage: python -m fexchange.tools.w90_extract config.toml", file=sys.stderr)
         sys.exit(1)
-    w90_extract_from_toml(sys.argv[1])
+    extract_from_toml(sys.argv[1])

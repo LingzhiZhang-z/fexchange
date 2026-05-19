@@ -41,6 +41,10 @@
 - `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
 - `./standards/en/04-sopt/04-REF-DERIVATION.md`
 
+### 04-fopt/ — 四阶微扰预处理
+- `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+- `./standards/en/04-fopt/04-01-PREPROCESSING.md`
+
 ### 05-io/ — 磁盘 I/O、布局、Wannier90、运行输入契约
 - `./standards/en/05-io/05-00-IO.md`
 - `./standards/en/05-io/05-01-IO_LAYOUT.md`
@@ -83,11 +87,13 @@
 23. `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`
 24. `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
 25. `./standards/en/04-sopt/04-REF-DERIVATION.md`
-26. `./standards/en/05-io/05-00-IO.md`
-27. `./standards/en/05-io/05-01-IO_LAYOUT.md`
-28. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
-29. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
-30. `./standards/en/05-io/05-04-RUN_INPUT.md`
+26. `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+27. `./standards/en/04-fopt/04-01-PREPROCESSING.md`
+28. `./standards/en/05-io/05-00-IO.md`
+29. `./standards/en/05-io/05-01-IO_LAYOUT.md`
+30. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
+31. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
+32. `./standards/en/05-io/05-04-RUN_INPUT.md`
 
 ## 冲突规则（MUST）
 若规范冲突，必须立即停止，并使用下列模板上报：

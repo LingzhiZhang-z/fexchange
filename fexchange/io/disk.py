@@ -50,6 +50,11 @@ def fmt12(x: float) -> str:
     return f"{x:.12f}"
 
 
+def fmt8(x: float) -> str:
+    """Fixed-point 8-decimal formatting for path tokens only."""
+    return f"{x:.8f}"
+
+
 def fmt6(x: float) -> str:
     """Fixed-point 6-decimal formatting."""
     return f"{x:.6f}"
@@ -57,12 +62,25 @@ def fmt6(x: float) -> str:
 
 def core_dir_token(n: int, r42: float, r62: float, scheme: str = "RS") -> str:
     """Core path token: n-{n}_r42-{r42}_r62-{r62}_scheme-{scheme}."""
-    return f"n-{n}_r42-{fmt12(r42)}_r62-{fmt12(r62)}_scheme-{scheme}"
+    return f"n-{n}_r42-{fmt8(r42)}_r62-{fmt8(r62)}_scheme-{scheme}"
+
+
+def ujh_dir_token(U: float, Jh: float) -> str:
+    """U-Jh path token."""
+    return f"U-{fmt8(U)}_Jh-{fmt8(Jh)}"
 
 
 def ujhz_dir_token(U: float, Jh: float, zeta: float) -> str:
-    """U-Jh-zeta path token."""
-    return f"U-{fmt12(U)}_Jh-{fmt12(Jh)}_z-{fmt12(zeta)}"
+    """Backward-compatible U-Jh-zeta path token."""
+    return f"U-{fmt8(U)}_Jh-{fmt8(Jh)}_z-{fmt8(zeta)}"
+
+
+def fopt_l3_dir_token(U: float, Jh: float, lig1_U_p: float, lig2_U_p: float) -> str:
+    """FOPT L3 parameter-scan path token."""
+    return (
+        f"{ujh_dir_token(U, Jh)}_"
+        f"lig1.U_p-{fmt8(lig1_U_p)}_lig2.U_p-{fmt8(lig2_U_p)}"
+    )
 
 
 def _safe_label_token(value: str) -> str:
@@ -102,65 +120,84 @@ def build_stage_path(
     output_root: str,
     stage: str,
     *,
+    branch: str = "sopt",
     n: int = 0,
     r42: float = 0.0,
     r62: float = 0.0,
     scheme: str = "RS",
     hopping_name: str = "",
+    run_name: str = "",
     U: float = 0.0,
     Jh: float = 0.0,
     zeta: float = 0.0,
+    lig1_U_p: float = 0.0,
+    lig2_U_p: float = 0.0,
     kramer_name: str = "",
     branch_signature: str = "",
     denom_signature: str = "",
+    ligand_soc: str = "",
+    ligand_n: int = 0,
+    p_transition: str = "",
 ) -> Path:
     """Build deterministic artifact path for a given stage (05-00 §2-3)."""
     root = Path(output_root)
     core = core_dir_token(n, r42, r62, scheme)
-    core_root = root / "core" / core
-    if branch_signature:
-        core_root = core_root / _safe_label_token(branch_signature)
-
-    if stage == "fock":
-        return root / "fock"
+    safe_branch = _safe_label_token(branch)
+    if stage == "L0":
+        return root / "core" / "L0"
     elif stage in ("LMSM", "LSJM"):
-        return root / "core" / core / stage
-    elif stage == "L0":
-        return root / "fock"
+        return root / "core" / stage / core
+    elif stage == "ligand":
+        soc_token = _require_stage_token("ligand_soc", ligand_soc, stage)
+        if ligand_n <= 0:
+            raise IOError_(
+                "FXE-IO-001",
+                "Missing required path token ligand_n for stage ligand",
+                actual={"ligand_n": ligand_n},
+            )
+        return root / "core" / "ligand" / soc_token / f"n-{ligand_n}"
+    elif stage == "IONED":
+        return root / _require_stage_token("run_name", run_name, stage) / "IONED" / f"n-{n}"
+    elif stage == "L1_F":
+        if scheme == "ED":
+            return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
+        d = root / "core" / "L1" / "F" / core
+        if branch_signature:
+            d = d / _safe_label_token(branch_signature)
+        return d
+    elif stage == "L1_P":
+        return root / "core" / "L1" / "P" / _require_stage_token("p_transition", p_transition, stage)
     elif stage == "L1":
-        return core_root / "L1"
+        if scheme == "ED":
+            return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
+        d = root / "core" / "L1" / "F" / core
+        if branch_signature:
+            d = d / _safe_label_token(branch_signature)
+        return d
     elif stage == "L2":
-        return core_root / "hopping" / _require_stage_token("hopping_name", hopping_name, stage) / "L2"
+        return root / _require_stage_token("run_name", run_name, stage) / "L2"
     elif stage == "L3":
-        u_root = (
-            core_root
-            / "hopping"
-            / _require_stage_token("hopping_name", hopping_name, stage)
-            / ujhz_dir_token(U, Jh, zeta)
-        )
-        if denom_signature:
-            u_root = u_root / _safe_label_token(denom_signature)
-        return u_root / "L3"
+        run_root = root / _require_stage_token("run_name", run_name, stage) / "L3"
+        if safe_branch == "fopt":
+            return run_root / fopt_l3_dir_token(U, Jh, lig1_U_p, lig2_U_p)
+        return run_root / ujh_dir_token(U, Jh)
     elif stage == "L4":
-        u_root = (
-            core_root
-            / "hopping"
-            / _require_stage_token("hopping_name", hopping_name, stage)
-            / ujhz_dir_token(U, Jh, zeta)
+        return (
+            root
+            / _require_stage_token("run_name", run_name, stage)
+            / "L4"
+            / ujh_dir_token(U, Jh)
+            / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
         )
-        if denom_signature:
-            u_root = u_root / _safe_label_token(denom_signature)
-        return u_root / "kramer" / _require_stage_token("kramer_name", kramer_name, stage) / "L4"
     elif stage == "spin12":
-        u_root = (
-            core_root
-            / "hopping"
-            / _require_stage_token("hopping_name", hopping_name, stage)
-            / ujhz_dir_token(U, Jh, zeta)
+        return (
+            root
+            / _require_stage_token("run_name", run_name, stage)
+            / "L4"
+            / ujh_dir_token(U, Jh)
+            / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
+            / "spin12"
         )
-        if denom_signature:
-            u_root = u_root / _safe_label_token(denom_signature)
-        return u_root / "kramer" / _require_stage_token("kramer_name", kramer_name, stage) / "spin12"
     else:
         raise IOError_(
             "FXE-IO-001",
@@ -483,4 +520,45 @@ def write_point_result_txt(
         f.write(" ".join(f"{value:.12f}" for value in values) + "\n")
     if cfg_meta is not None:
         atomic_write_json(path.with_suffix(".meta.json"), cfg_meta)
+    return path
+
+
+def write_exchange_matrix_txt(
+    path: Path,
+    *,
+    J_mu: NDArray[np.floating] | NDArray[np.complexfloating],
+    mapping_residual: float,
+    process_labels: NDArray | list[str] | tuple[str, ...] | None = None,
+    J_mu_processes: NDArray[np.floating] | NDArray[np.complexfloating] | None = None,
+    mapping_residual_processes: NDArray[np.floating] | None = None,
+) -> Path:
+    """Write human-readable total/process exchange matrices."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[tuple[str, float, NDArray[np.floating]]] = [
+        ("total", float(mapping_residual), np.asarray(J_mu, dtype=float)),
+    ]
+    if process_labels is not None and J_mu_processes is not None and mapping_residual_processes is not None:
+        labels = [str(label) for label in np.asarray(process_labels).tolist()]
+        matrices = np.asarray(J_mu_processes, dtype=float)
+        residuals = np.asarray(mapping_residual_processes, dtype=float)
+        for idx, label in enumerate(labels):
+            rows.append((label, float(residuals[idx]), matrices[idx]))
+
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".txt.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("# label mapping_residual Jxx Jxy Jxz Jyx Jyy Jyz Jzx Jzy Jzz\n")
+            for label, residual, matrix in rows:
+                flat = np.asarray(matrix, dtype=float).reshape(3, 3).ravel()
+                values = " ".join(f"{float(value):.12f}" for value in flat)
+                f.write(f"{label} {residual:.12e} {values}\n")
+        os.replace(tmp, str(path))
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise IOError_(
+            "FXE-IO-003",
+            f"Atomic text write failed: {path}",
+            paths={"target": str(path)},
+        )
     return path

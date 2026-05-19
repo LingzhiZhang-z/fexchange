@@ -13,6 +13,29 @@ from fexchange.spectrum.lsjm import select_soc_lowest_subspace
 from fexchange.utils.errors import InputError
 
 
+def _legacy_shared_branch(cfg: dict[str, Any], *, n_ele: int) -> dict[str, Any]:
+    """Build a single-sector branch from pre-branch cfg payloads."""
+    fsite_cfg = cfg.get("fsite", {})
+    physics_cfg = cfg.get("physics", {})
+    if not isinstance(fsite_cfg, dict):
+        fsite_cfg = {}
+    if not isinstance(physics_cfg, dict):
+        physics_cfg = {}
+
+    fsite = dict(physics_cfg)
+    fsite.update(fsite_cfg)
+    fsite["n_ele"] = int(fsite.get("n_ele", n_ele))
+    fsite["U"] = float(fsite.get("U", 0.0))
+    fsite["Jh"] = float(fsite.get("Jh", 0.0))
+    fsite["F2"] = float(fsite.get("F2", 0.0))
+    fsite["F4"] = float(fsite.get("F4", 0.0))
+    fsite["F6"] = float(fsite.get("F6", 0.0))
+    fsite["zeta"] = float(fsite.get("zeta", 0.0))
+    if "offset" in fsite:
+        fsite["offset"] = float(fsite["offset"])
+    return {"fsite": fsite}
+
+
 def compute_intermediate_energies(
     cfg: dict[str, Any],
     state: dict[str, Any],
@@ -20,13 +43,19 @@ def compute_intermediate_energies(
     n_ele: int,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
     """
-    Construct E_u^{n+1}, E_u^{n-1} from LSJM term coefficients (04-02 §0.0.0).
+    Construct E_u^{n+1}, E_u^{n-1} from the configured intermediate scheme.
 
-    Caller must ensure LSJM payloads for n-1/n/n+1 are present in ``state``.
+    RS uses LSJM term coefficients for n-1/n+1. ED uses IONED energies for
+    n-1/n+1. Both schemes use the same main-sector reference energy rule.
     """
 
     branches = cfg.get("_branches")
-    if isinstance(branches, dict):
+    if not isinstance(branches, dict):
+        legacy_branch = _legacy_shared_branch(cfg, n_ele=n_ele)
+        branch_n = legacy_branch
+        branch_nm1 = {"fsite": {**legacy_branch["fsite"], "offset": 0.0}}
+        branch_np1 = {"fsite": {**legacy_branch["fsite"], "offset": 0.0}}
+    else:
         branch_n = branches.get("n")
         branch_nm1 = branches.get("nm1")
         branch_np1 = branches.get("np1")
@@ -36,68 +65,90 @@ def compute_intermediate_energies(
                 "cfg._branches must contain n, nm1, and np1 branch payloads",
                 actual={"present": sorted(branches)},
             )
-    else:
-        physics = cfg.get("physics")
-        if not isinstance(physics, dict):
-            raise InputError(
-                "FXE-INPUT-003",
-                "physics section is required when L3 denominators must be recomputed",
-                expected={"field_path": "physics"},
-                actual={"present": False},
-            )
-        sopt = cfg.get("sopt")
-        if not isinstance(sopt, dict):
-            raise InputError(
-                "FXE-INPUT-003",
-                "sopt section is required when L3 denominators must be recomputed",
-                expected={"field_path": "sopt"},
-                actual={"present": False},
-            )
-        branch_n = {"physics": physics, "sopt": {**sopt, "offset": float(sopt.get("offset", 0.0))}}
-        branch_nm1 = {"physics": physics, "sopt": {**sopt, "offset": 0.0}}
-        branch_np1 = {"physics": physics, "sopt": {**sopt, "offset": 0.0}}
 
     def _energy(lsjm: dict[str, Any], branch: dict[str, Any]) -> NDArray[np.floating]:
-        physics = branch["physics"]
-        sopt = branch["sopt"]
+        fsite = branch["fsite"]
         return (
-            float(sopt.get("offset", 0.0))
-            + float(sopt["U"]) * np.asarray(lsjm["coef_F0"], dtype=float)
-            + float(physics["F2"]) * np.asarray(lsjm["coef_F2"], dtype=float)
-            + float(physics["F4"]) * np.asarray(lsjm["coef_F4"], dtype=float)
-            + float(physics["F6"]) * np.asarray(lsjm["coef_F6"], dtype=float)
-            + float(sopt["zeta"]) * np.asarray(lsjm["coef_zeta"], dtype=float)
+            float(fsite.get("offset", 0.0))
+            + float(fsite["U"]) * np.asarray(lsjm["coef_F0"], dtype=float)
+            + float(fsite["F2"]) * np.asarray(lsjm["coef_F2"], dtype=float)
+            + float(fsite["F4"]) * np.asarray(lsjm["coef_F4"], dtype=float)
+            + float(fsite["F6"]) * np.asarray(lsjm["coef_F6"], dtype=float)
+            + float(fsite["zeta"]) * np.asarray(lsjm["coef_zeta"], dtype=float)
         )
 
-    ref_mode = str(cfg.get("sopt", {}).get("energy_reference", "lsjm_ground"))
+    ref_mode = str(cfg.get("fsite", {}).get("energy_reference", "lsjm_ground"))
     if ref_mode == "zero":
         E_ref = 0.0
     elif ref_mode == "lsjm_ground":
         lsjm_n = state[f"lsjm_{n_ele}"]
-        physics_n = branch_n["physics"]
-        sopt_n = branch_n["sopt"]
+        fsite_n = branch_n["fsite"]
         soc0 = select_soc_lowest_subspace(
             lsjm_n,
-            F2=float(physics_n["F2"]),
-            F4=float(physics_n["F4"]),
-            F6=float(physics_n["F6"]),
-            zeta=float(sopt_n["zeta"]),
+            F2=float(fsite_n["F2"]),
+            F4=float(fsite_n["F4"]),
+            F6=float(fsite_n["F6"]),
+            zeta=float(fsite_n["zeta"]),
         )
         ref_idx = int(soc0["col_indices"][0])
         E_ref = (
-            float(sopt_n.get("offset", 0.0))
-            + float(sopt_n["U"]) * float(np.asarray(lsjm_n["coef_F0"], dtype=float)[ref_idx])
-            + float(physics_n["F2"]) * float(np.asarray(lsjm_n["coef_F2"], dtype=float)[ref_idx])
-            + float(physics_n["F4"]) * float(np.asarray(lsjm_n["coef_F4"], dtype=float)[ref_idx])
-            + float(physics_n["F6"]) * float(np.asarray(lsjm_n["coef_F6"], dtype=float)[ref_idx])
+            float(fsite_n.get("offset", 0.0))
+            + float(fsite_n["U"]) * float(np.asarray(lsjm_n["coef_F0"], dtype=float)[ref_idx])
+            + float(fsite_n["F2"]) * float(np.asarray(lsjm_n["coef_F2"], dtype=float)[ref_idx])
+            + float(fsite_n["F4"]) * float(np.asarray(lsjm_n["coef_F4"], dtype=float)[ref_idx])
+            + float(fsite_n["F6"]) * float(np.asarray(lsjm_n["coef_F6"], dtype=float)[ref_idx])
         )
     else:
         raise InputError(
             "FXE-INPUT-003",
-            "sopt.energy_reference must be 'lsjm_ground' or 'zero'",
+            "fsite.energy_reference must be 'lsjm_ground' or 'zero'",
             actual={"energy_reference": ref_mode},
         )
 
-    E_np1 = _energy(state[f"lsjm_{n_ele + 1}"], branch_np1) - E_ref
-    E_nm1 = _energy(state[f"lsjm_{n_ele - 1}"], branch_nm1) - E_ref
+    scheme = str(cfg.get("model", {}).get("scheme", "RS")).upper()
+    if scheme == "ED":
+        E_np1 = np.asarray(state[f"ioned_{n_ele + 1}"]["energies"], dtype=float) - E_ref
+        E_nm1 = np.asarray(state[f"ioned_{n_ele - 1}"]["energies"], dtype=float) - E_ref
+    else:
+        E_np1 = _energy(state[f"lsjm_{n_ele + 1}"], branch_np1) - E_ref
+        E_nm1 = _energy(state[f"lsjm_{n_ele - 1}"], branch_nm1) - E_ref
     return E_np1, E_nm1
+
+
+def compute_ligand_energies(
+    spectrum: dict[str, Any],
+    *,
+    Delta: float,
+    U_p: float,
+    lambda_p: float = 0.0,
+) -> NDArray[np.floating]:
+    """Assemble ligand p^N intermediate-state energies from spectrum coefficients.
+
+    Mirrors the LSJM `_energy` helper above (Slater params * coef arrays), but
+    for the ligand p-shell model:
+
+        E_p^N[i] = Delta * coef_Delta[i] + U_p * coef_U_p[i] + lambda_p * coef_lambda_p[i]
+
+    Parameters
+    ----------
+    spectrum : payload from `spectrum.ligand.build_ligand_spectrum`.
+    Delta    : ligand-to-f charge-transfer cost (uniform per state, scaled by n_hole).
+    U_p      : ligand p-shell onsite Hubbard U (uniform per state, scaled by hole-pair count).
+    lambda_p : ligand atomic SOC strength (per-state, traceless contribution).
+
+    Returns
+    -------
+    NDArray[float] of shape (spectrum["dim"],), in the SOC eigenbasis ordering
+    (i.e., aligned with `spectrum["V_fock"]` columns).
+    """
+    if not all(np.isfinite([Delta, U_p, lambda_p])):
+        raise InputError(
+            "FXE-INPUT-003",
+            "Delta / U_p / lambda_p must be finite",
+            actual={"Delta": Delta, "U_p": U_p, "lambda_p": lambda_p},
+        )
+    return (
+        float(Delta)    * np.asarray(spectrum["coef_Delta"],    dtype=float)
+        + float(U_p)    * np.asarray(spectrum["coef_U_p"],      dtype=float)
+        + float(lambda_p) * np.asarray(spectrum["coef_lambda_p"], dtype=float)
+    )

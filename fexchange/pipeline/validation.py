@@ -54,8 +54,9 @@ def validate_upstream_artifacts(
         return
     output_root = cfg["paths"]["output_root"]
     sn = extract_source_names(cfg)
-    hopping_name = sn.hopping_name
     kramer_name = sn.kramer_name
+    run_name = str(cfg.get("runtime", {}).get("run_name", ""))
+    branch = str(cfg.get("runtime", {}).get("branch", "sopt"))
     missing: list[str] = []
     invalid: list[str] = []
 
@@ -89,14 +90,13 @@ def validate_upstream_artifacts(
             d = build_stage_path(output_root, "LSJM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
             _check_spec(d, "LSJM")
     if "L0" in required:
-        d = build_stage_path(output_root, "fock")
-        _check(d / f"n{n_ele}{n_ele + 1}.npz", ["X"])
-        _check(d / f"n{n_ele - 1}{n_ele}.npz", ["Y"])
-        for sec in three_sectors(n_ele):
-            try:
-                validate_meta(load_json_checked(d / f"meta_n{sec}.json"))
-            except Exception:
-                invalid.append(str(d / f"meta_n{sec}.json"))
+        d = build_stage_path(output_root, "L0", branch=branch)
+        _check(d / f"f_create_{n_ele}_to_{n_ele + 1}.npz", ["data"])
+        _check(d / f"f_create_{n_ele - 1}_to_{n_ele}.npz", ["data"])
+        try:
+            validate_meta(load_json_checked(d / "meta.json"))
+        except Exception:
+            invalid.append(str(d / "meta.json"))
     if "L1" in required:
         d = build_stage_path(
             output_root,
@@ -112,47 +112,34 @@ def validate_upstream_artifacts(
         d = build_stage_path(
             output_root,
             "L2",
-            n=n_ele,
-            r42=r42,
-            r62=r62,
-            scheme=scheme,
-            hopping_name=hopping_name,
-            branch_signature=branch_signature(cfg, n_ele=n_ele),
+            branch=branch,
+            run_name=run_name,
         )
         _check_spec(d, "L2")
     if "L3" in required:
-        s = cfg["sopt"]
+        s = cfg["fsite"]
+        ligands = cfg.get("ligand", {})
         d = build_stage_path(
             output_root,
             "L3",
-            n=n_ele,
-            r42=r42,
-            r62=r62,
-            scheme=scheme,
-            hopping_name=hopping_name,
+            branch=branch,
+            run_name=run_name,
             U=float(s["U"]),
             Jh=float(s["Jh"]),
-            zeta=float(s["zeta"]),
-            branch_signature=branch_signature(cfg, n_ele=n_ele),
-            denom_signature=denominator_signature(cfg, n_ele=n_ele),
+            lig1_U_p=float(ligands.get("1", {}).get("U_p", 0.0)) if isinstance(ligands, dict) else 0.0,
+            lig2_U_p=float(ligands.get("2", {}).get("U_p", 0.0)) if isinstance(ligands, dict) else 0.0,
         )
-        _check_spec(d, "L3")
+        _check_spec(d, "L3_FOPT" if branch == "fopt" else "L3")
     if "L4" in required:
-        s = cfg["sopt"]
+        s = cfg["fsite"]
         d = build_stage_path(
             output_root,
             "L4",
-            n=n_ele,
-            r42=r42,
-            r62=r62,
-            scheme=scheme,
-            hopping_name=hopping_name,
+            branch=branch,
+            run_name=run_name,
             U=float(s["U"]),
             Jh=float(s["Jh"]),
-            zeta=float(s["zeta"]),
             kramer_name=kramer_name,
-            branch_signature=branch_signature(cfg, n_ele=n_ele),
-            denom_signature=denominator_signature(cfg, n_ele=n_ele),
         )
         _check_spec(d, "L4")
 

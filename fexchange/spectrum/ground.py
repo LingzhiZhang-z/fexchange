@@ -236,12 +236,12 @@ def _build_cef_inputs(
 ) -> dict[str, Any]:
     """Build CEF diagonalization inputs. Mutates *state* in place (caches soc0)."""
     if "soc0" not in state:
-        physics = cfg.get("physics")
-        if not isinstance(physics, dict):
+        fsite = cfg.get("fsite")
+        if not isinstance(fsite, dict):
             raise InputError(
                 "FXE-INPUT-003",
-                "physics section is required when CEF projector must build SOC-lowest subspace",
-                expected={"field_path": "physics"},
+                "fsite section is required when CEF projector must build SOC-lowest subspace",
+                expected={"field_path": "fsite"},
                 actual={"present": False},
             )
         state["soc0"] = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])

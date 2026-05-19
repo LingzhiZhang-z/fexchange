@@ -89,13 +89,19 @@ Output (MUST):
 - This level must emit $X^{\kappa,n}$ and $Y^{\kappa,n-1}$ (or an equivalent recoverable representation).
 - This output is the direct input of $L1$.
 
-## 2) Level 1: Local Transition Vertices (LSJM)
+## 2) Level 1: Local Transition Vertices (RS/ED)
 MUST:
 - This level defines generic single-site vertices without introducing site labels $i/j$.
-- This level applies basis rotation on intermediate sectors ($f^{n+1}$ and $f^{n-1}$) to LSJM semantics.
+- This level applies basis rotation on intermediate sectors ($f^{n+1}$ and
+  $f^{n-1}$) according to `model.scheme`.
+- In `model.scheme = "RS"`, intermediate-sector transforms are LSJM transforms.
+- In `model.scheme = "ED"`, intermediate-sector transforms are IONED transforms
+  from module `03-05`; the main-sector low-energy leg remains the SOC-lowest
+  LSJM subspace.
 - This level projects the $f^n$ leg from Fock basis to the SOC-lowest LSJM subspace (the $f^n$ LSJM ground multiplet).
 - Do not introduce Kramers labels $a,b,c,d$ at this level.
-- $U^{(m)}$ is the column-wise Fock$\to$LSJM transform matrix in sector $f^m$, specified by `./standards/en/03-spectrum/03-01-LSJM.md`.
+- $U^{(m)}$ is the selected column-wise Fock-to-working-basis transform matrix
+  in sector $f^m$: LSJM for `RS`, IONED for `ED`.
 - $U^{n,\mathrm{soc0}}$ is the column-wise transform from $f^n$ Fock basis to the SOC-lowest LSJM subspace.
 - Intermediate-state indices use only $u,v,r,s$.
 
@@ -145,6 +151,7 @@ Code form:
 ```text
 build generic {A_kappa_n[u,j], B_kappa_nm1[j,v]} without site labels
 rotate (n+1)/(n-1) legs with U_np1, U_nm1
+select U_np1/U_nm1 from LSJM when scheme=RS, from IONED when scheme=ED
 project n-leg to SOC-low subspace with U_n_soc0
 recover reverse direction by complex conjugation
 ```
@@ -153,6 +160,8 @@ Validation:
 - Vertex tensor dimensions must match sector dimensions.
 - Operator direction ($\dagger$ / non-$\dagger$) must match index semantics.
 - This level must use $U^{n,\mathrm{soc0}}$, and its column space must cover only SOC-lowest LSJM subspace.
+- `ED` must not replace the main-sector low-energy LSJM projector; it replaces
+  only the adjacent intermediate-sector transforms and energies.
 - This level must not contain Kramers indices $a,b,c,d$ or projector $W$.
 
 Output (MUST):

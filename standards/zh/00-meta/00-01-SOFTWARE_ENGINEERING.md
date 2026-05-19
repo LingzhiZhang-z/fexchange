@@ -53,6 +53,9 @@ fexchange/
     precompute.py          # 04-01: L0 + L1
     contraction.py         # 04-02: L2 + L3 + L4
     spin12.py              # 04-03: 自旋-1/2 映射
+  fopt/
+    __init__.py
+    preprocessing.py       # 04-fopt: L0 + L1 + L2 active-pair blocks
   io/
     __init__.py
     disk.py                # 05-00: 磁盘 I/O、路径令牌、缓存

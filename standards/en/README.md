@@ -33,6 +33,7 @@ If EN and ZH conflict, EN is authoritative.
 - `./standards/en/03-spectrum/03-02-KRAMERS_DOUBLET.md`
 - `./standards/en/03-spectrum/03-03-NON_KRAMERS_DOUBLET.md`
 - `./standards/en/03-spectrum/03-04-IRREP_CLASSIFICATION.md`
+- `./standards/en/03-spectrum/03-05-ION_ED.md`
 
 ### 04-sopt/ — Second-order perturbation theory
 - `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md`
@@ -40,6 +41,10 @@ If EN and ZH conflict, EN is authoritative.
 - `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`
 - `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
 - `./standards/en/04-sopt/04-REF-DERIVATION.md`
+
+### 04-fopt/ — Fourth-order perturbation preprocessing
+- `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+- `./standards/en/04-fopt/04-01-PREPROCESSING.md`
 
 ### 05-io/ — Disk I/O, layout, Wannier90, run-input contract
 - `./standards/en/05-io/05-00-IO.md`
@@ -79,16 +84,19 @@ directory.
 18. `./standards/en/03-spectrum/03-02-KRAMERS_DOUBLET.md`
 19. `./standards/en/03-spectrum/03-03-NON_KRAMERS_DOUBLET.md`
 20. `./standards/en/03-spectrum/03-04-IRREP_CLASSIFICATION.md`
-21. `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md`
-22. `./standards/en/04-sopt/04-01-PRECOMPUTE.md`
-23. `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`
-24. `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
-25. `./standards/en/04-sopt/04-REF-DERIVATION.md`
-26. `./standards/en/05-io/05-00-IO.md`
-27. `./standards/en/05-io/05-01-IO_LAYOUT.md`
-28. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
-29. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
-30. `./standards/en/05-io/05-04-RUN_INPUT.md`
+21. `./standards/en/03-spectrum/03-05-ION_ED.md`
+22. `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md`
+23. `./standards/en/04-sopt/04-01-PRECOMPUTE.md`
+24. `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`
+25. `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`
+26. `./standards/en/04-sopt/04-REF-DERIVATION.md`
+27. `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`
+28. `./standards/en/04-fopt/04-01-PREPROCESSING.md`
+29. `./standards/en/05-io/05-00-IO.md`
+30. `./standards/en/05-io/05-01-IO_LAYOUT.md`
+31. `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md`
+32. `./standards/en/05-io/05-03-WANNIER90_PARSING.md`
+33. `./standards/en/05-io/05-04-RUN_INPUT.md`
 
 ## Conflict Rule
 If standards conflict, stop immediately and report using:

@@ -170,7 +170,7 @@ Per-level definition:
 It is constructed at $L3$ entry from LSJM energy coefficient arrays (`E_terms.npz`)
 of the adjacent sectors ($f^{n-1}$, $f^{n+1}$) using branch-resolved
 `F^0/F^2/F^4/F^6/\zeta/offset` parameters.
-The denominator reference is controlled by `[sopt].energy_reference`.
+The denominator reference is controlled by `[fsite].energy_reference`.
 
 Math:
 $$
@@ -209,8 +209,8 @@ E_u_nm1 = E_lsjm_nm1 - E_ref
 
 Source artifacts:
 - `E_terms.npz` from LSJM outputs in sectors $n-1$, $n+1$ (disk path per `./standards/en/05-io/05-00-IO.md`).
-- Branch defaults come from main `[physics]` / `[sopt]`; branch overrides come
-  from `[physics_nm1]/[physics_np1]` and `[sopt_nm1]/[sopt_np1]`.
+- Branch defaults come from main `[fsite]`; branch overrides come from
+  `[fsite_nm1]/[fsite_np1]`.
 - `offset` is branch-local and defaults to `0`.
 - `E_ref` uses the main-sector (`f^n`) LSJM output when `energy_reference = "lsjm_ground"`.
 - `E_u` is NOT persisted as a separate disk artifact; it is computed on-the-fly at $L3$ entry.
@@ -520,6 +520,36 @@ h_pre_mu = project_with_W(h_pre_j_mu, W)
 h_mu_abcd = h_pre_mu
 Heff_mu_abcd = h_mu_abcd
 ```
+
+Runtime path (MUST):
+- The canonical runtime $L3 \to L4$ path is the **fused** implementation
+  (`build_L4_fast`): it computes `outputs_L4` directly from `{M_A, M_B, E_u, W}`
+  by projecting each route factor's external LSJM legs with `W` first, then
+  performing the same denominator-weighted Gram contraction in the projected
+  ($n_k$) space. The runtime MUST NOT materialize `h_pre_j_mu` on this path.
+- The code form above (materialized `project_with_W(h_pre_j_mu, W)`, i.e.
+  `build_L4(build_L3(...), W)`) is the **reference implementation**. It is off
+  the runtime path and serves two purposes: (a) the algebraic-equivalence
+  oracle for the fused path, and (b) explicit `L3`-then-`L4` inspection.
+- The fused path MUST be algebraically equal to the reference path, verified
+  numerically within tolerance (pinned at `1e-12` in the test suite). The
+  equality holds because $W$ acts only on the external $j$-legs and the
+  denominator is a pure $(u,v)/(r,s)$ weight, so projection commutes with the
+  intermediate-state sum.
+- Standalone `L3` execution MUST still emit `h_pre_j_mu` as specified in §2;
+  this obligation is why SOPT retains both paths.
+
+Applicability (informative):
+- The fused path is a large memory/compute saving when $n_k \ll n_j$ (the
+  production case: $n_k=2$ lowest Kramers doublet vs $n_j=2J+1$), because the
+  $n_j^4$ `h_pre_j_mu` tensor is never formed. When $n_k \approx n_j$ ($W$
+  near-square) it is roughly neutral or slightly slower, since the projection
+  is then applied per intermediate-state pair rather than once on the
+  aggregate. Correctness is unaffected in either regime.
+- Contrast with FOPT: FOPT consumes $W$ inside $L3$ and has no separate $L4$
+  (single fused path, no materialized reference), because FOPT has no
+  standalone-$L3$ `h_pre_j_mu` obligation. SOPT keeps the reference path
+  precisely to satisfy that obligation and to anchor the equivalence test.
 
 Validation:
 - Hermiticity check: $\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$ within tolerance.

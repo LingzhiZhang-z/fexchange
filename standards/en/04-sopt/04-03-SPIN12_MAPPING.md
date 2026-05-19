@@ -1,13 +1,16 @@
 # 04-03-SPIN12_MAPPING
 
-This file defines post-SOPT mapping from `04-02-RUNTIME_CONTRACTION` outputs to a
-pseudospin-$\tfrac{1}{2}$ model.
-It reads $\mathrm{Heff}_{cd,ab}^{(\mu)}$ and projects it to spin couplings.
+This file defines the shared mapping from projected effective-Hamiltonian
+outputs to a pseudospin-$\tfrac{1}{2}$ model.
+It reads $\mathrm{Heff}_{cd,ab}$ blocks and projects them to spin couplings.
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
 Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
 
 ## 0) Scope (MUST)
-- Input comes from level-$L4$ outputs in `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`.
+- Input comes from level-$L4$ outputs in
+  `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`, or from FOPT `L3`
+  total/process projected `h_eff_4` outputs in
+  `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`.
 - This module is a post-processing map; it does not modify `L0..L4`.
 - Applicable only when each site low-energy space is two-dimensional
   (Kramers pseudospin-$\tfrac{1}{2}$ doublet).
