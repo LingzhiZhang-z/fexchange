@@ -5,9 +5,9 @@ Usage:
     # 标准输出
     python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001
 
-    # NPZ输出（主程序输入格式）
+    # Projection输出（主程序 projector_file 输入格式），并在stdout打印 gx/gy/gz
     python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001 \
-        --format npz -o kramer_input.npz --kramer-name my_cef
+        --format projector -o projector.txt --kramer-name my_cef
 
     # C3v 对称性 (cos模式，默认)
     python cef_states.py --point-group C3v --J 4 --B40 0.01 --B60 0.0001 --B66 0.0005
@@ -22,7 +22,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,7 @@ if __package__ in (None, ""):
 from fexchange.hamiltonian.hcef import build_hcef_matrix_J
 from fexchange.spectrum.classify import build_projectors, allowed_multipoles
 from fexchange.core.space_j import _fix_column_phases
+from fexchange.spectrum.ground import select_kramers_doublet, select_non_kramers_doublet
 from fexchange.spectrum.multipole import analyze_multipole_carrying, gauge_fix_subspace, format_multipole_summary
 
 
@@ -154,7 +154,7 @@ def compute_cef_states(
 
 
 def _extract_ground_doublet(result: dict[str, Any]) -> dict[str, Any]:
-    """提取最低双重态（eigenvectors 已经 gauge-fixed）。"""
+    """提取最低双重态并返回主代码 projector 所需的 W。"""
     eigenvalues = result["eigenvalues"]
     evecs = result["eigenvectors"]
     J = result["J"]
@@ -170,12 +170,38 @@ def _extract_ground_doublet(result: dict[str, Any]) -> dict[str, Any]:
     doublet_type = "kramers" if twoJ % 2 == 1 else "non_kramers"
     ground_irreps = result["level_info"][0]["irreps"]
 
+    if doublet_type == "kramers":
+        ground = select_kramers_doublet(
+            J,
+            eigenvalues,
+            evecs,
+            point_group=result["point_group"],
+        )
+        W = np.asarray(ground["kramer_vectors"], dtype=np.complex128)
+        g_tensor = np.asarray(ground["g_tensor"], dtype=np.complex128)
+        g_components = _axis_g_components(g_tensor)
+        gauge_meta = ground.get("gauge_meta", {})
+    else:
+        ground = select_non_kramers_doublet(
+            J,
+            eigenvalues,
+            evecs,
+            point_group=result["point_group"],
+        )
+        W = np.asarray(ground["doublet_vectors"], dtype=np.complex128)
+        g_tensor = np.zeros((3, 3), dtype=np.complex128)
+        g_components = {"gx": 0.0, "gy": 0.0, "gz": 0.0}
+        gauge_meta = ground.get("gauge_meta", {})
+
     return {
-        "W": evecs[:, :2].copy(),
+        "W": W,
         "ground_irrep": "/".join(ground_irreps),
         "ground_energy": float(eigenvalues[0]),
         "doublet_type": doublet_type,
         "n_j": dim,
+        "g_tensor": g_tensor,
+        "g_components": g_components,
+        "gauge_meta": gauge_meta,
     }
 
 
@@ -186,27 +212,66 @@ def export_for_fexchange(
     basis_id: str = "complex_spherical_j_v1",
     orbital_order_id: str = "f7_m-3..3_v1",
 ) -> None:
-    """导出为主程序可直接使用的NPZ格式。"""
+    """导出为主程序 ``inputs.projector_file`` 可直接读取的 projector 格式。"""
     doublet_info = _extract_ground_doublet(result)
-
-    np.savez(
-        output_path,
-        W=doublet_info["W"],
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_projector_txt(
+        target,
+        doublet_info,
+        result=result,
         kramer_name=kramer_name,
-        kramer_labels=np.array([0, 1]),
-        ground_irrep=doublet_info["ground_irrep"],
-        ground_energy=doublet_info["ground_energy"],
-        doublet_type=doublet_info["doublet_type"],
-        n_j=doublet_info["n_j"],
-        schema_version="fxe.cef_states.v1",
-        standard_version="2026-02",
         basis_id=basis_id,
         orbital_order_id=orbital_order_id,
-        unit="meV",
-        J=result["J"],
-        point_group=result["point_group"],
     )
-    print(f"Saved: {output_path}")
+    print_g_components(doublet_info["g_components"])
+
+
+def _axis_g_components(g_tensor: np.ndarray) -> dict[str, float]:
+    """Return axis components from a canonical-gauge 3x3 g tensor."""
+    g = np.asarray(g_tensor, dtype=np.complex128)
+    return {
+        "gx": float(g[0, 0].real),
+        "gy": float(g[1, 1].real),
+        "gz": float(g[2, 2].real),
+    }
+
+
+def print_g_components(g_components: dict[str, float]) -> None:
+    """Print only the axis g components needed after projector generation."""
+    print(f"gx {g_components['gx']:.12e}")
+    print(f"gy {g_components['gy']:.12e}")
+    print(f"gz {g_components['gz']:.12e}")
+
+
+def _write_projector_txt(
+    path: Path,
+    doublet_info: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    kramer_name: str,
+    basis_id: str,
+    orbital_order_id: str,
+) -> None:
+    """Write multi-block projector text accepted by pipeline._load_projector."""
+    lines = [
+        "# schema_version fxe.cef_projector.v1",
+        "# standard_version 2026-02",
+        f"# kramer_name {kramer_name}",
+        f"# point_group {result['point_group']}",
+        f"# J {float(result['J']):.12e}",
+        f"# basis_id {basis_id}",
+        f"# orbital_order_id {orbital_order_id}",
+        f"# ground_irrep {doublet_info['ground_irrep']}",
+        f"# doublet_type {doublet_info['doublet_type']}",
+        "",
+    ]
+    W = np.asarray(doublet_info["W"], dtype=np.complex128)
+    for idx in range(W.shape[1]):
+        lines.append(f"[W_state_{idx}]")
+        lines.extend(f"{val.real:.12e} {val.imag:.12e}" for val in W[:, idx])
+        lines.append("")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 def print_results_llw_style(result: dict[str, Any]) -> None:
@@ -281,6 +346,17 @@ def print_multipole_analysis(result: dict[str, Any]) -> None:
     print(f"\n{'='*60}\n")
 
 
+def print_ground_projector_summary(result: dict[str, Any]) -> None:
+    """Print only the ground-doublet axis g components."""
+    try:
+        doublet_info = _extract_ground_doublet(result)
+    except Exception as exc:
+        print(f"Ground projector unavailable: {exc}")
+        return
+
+    print_g_components(doublet_info["g_components"])
+
+
 
 def _parse_args() -> argparse.Namespace:
     """解析命令行参数。"""
@@ -292,9 +368,9 @@ Examples:
   # 标准输出
   python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001
 
-  # NPZ格式（主程序输入）
+  # Projector文本格式（主程序 projector_file 输入），stdout打印 gx/gy/gz
   python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001 \\
-      --format npz -o kramer.npz --kramer-name cef_v1
+      --format projector -o projector.txt --kramer-name cef_v1
 
   # C3v 对称性 (cos/sin模式)
   python cef_states.py --point-group C3v --J 4 --B40 0.01 --B60 0.0001 --B66 0.0005
@@ -327,13 +403,13 @@ Examples:
 
     parser.add_argument(
         "--format",
-        choices=["text", "json", "npz"],
+        choices=["text", "projector"],
         default="text",
-        help="输出格式 (默认: text)",
+        help="输出格式: text/projector (默认: text)",
     )
 
     parser.add_argument("--output", "-o", help="主输出文件路径")
-    parser.add_argument("--kramer-name", help="Kramer doublet名称（用于NPZ）")
+    parser.add_argument("--kramer-name", help="Kramer/projector名称")
     parser.add_argument(
         "--silent", action="store_true", help="静默模式（不打印到stdout）"
     )
@@ -370,23 +446,6 @@ def _collect_b_params(args: argparse.Namespace, point_group: str) -> dict[str, f
     return {k: v for k, v in params.items() if v != 0.0}
 
 
-def _to_json_serializable(obj: Any) -> Any:
-    """将numpy数组转换为JSON可序列化的对象。"""
-    if isinstance(obj, np.ndarray):
-        if np.iscomplexobj(obj):
-            return [[float(x.real), float(x.imag)] for x in obj.flatten()]
-        return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
-        return float(obj)
-    if isinstance(obj, np.complexfloating):
-        return [float(obj.real), float(obj.imag)]
-    if isinstance(obj, dict):
-        return {k: _to_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_to_json_serializable(x) for x in obj]
-    return obj
-
-
 def _resolve_config(args: argparse.Namespace) -> tuple[str, float, dict[str, float], str, str]:
     """从命令行参数或TOML文件解析配置，返回 (point_group, J, B_params, mode_q3, kramer_name)。"""
     if args.config:
@@ -415,6 +474,7 @@ def _output_text(result: dict[str, Any], args: argparse.Namespace) -> None:
     if not args.silent:
         print_results_llw_style(result)
         print_multipole_analysis(result)
+        print_ground_projector_summary(result)
     if args.output:
         import io
         from contextlib import redirect_stdout
@@ -423,30 +483,19 @@ def _output_text(result: dict[str, Any], args: argparse.Namespace) -> None:
         with redirect_stdout(buf):
             print_results_llw_style(result)
             print_multipole_analysis(result)
+            print_ground_projector_summary(result)
         with open(args.output, "w") as fout:
             fout.write(buf.getvalue())
         if not args.silent:
             print(f"Saved: {args.output}")
 
 
-def _output_json(result: dict[str, Any], args: argparse.Namespace) -> None:
-    """JSON格式输出。"""
-    json_result = {
-        "point_group": result["point_group"],
-        "J": result["J"],
-        "eigenvalues": _to_json_serializable(result["eigenvalues"]),
-        "eigenvectors": _to_json_serializable(result["eigenvectors"]),
-        "level_info": result["level_info"],
-    }
-    with open(args.output, "w") as f:
-        json.dump(json_result, f, indent=2)
-    if not args.silent:
-        print(f"Saved: {args.output}")
-
-
 def main() -> None:
     """主入口函数。"""
     args = _parse_args()
+    if args.format == "projector" and not args.output:
+        raise SystemExit(f"--output/-o is required when --format {args.format}")
+
     point_group, J, B_params, mode_q3, kramer_name = _resolve_config(args)
 
     result = compute_cef_states(
@@ -456,9 +505,7 @@ def main() -> None:
 
     if args.format == "text":
         _output_text(result, args)
-    elif args.format == "json":
-        _output_json(result, args)
-    elif args.format == "npz":
+    elif args.format == "projector":
         export_for_fexchange(result, args.output, kramer_name)
 
 

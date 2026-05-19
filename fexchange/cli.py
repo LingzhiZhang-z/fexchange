@@ -126,6 +126,9 @@ def _run_pipeline(toml_path: str, *, log_level: str) -> int:
         for level in LEVELS:
             if not window_includes(cfg, level):
                 continue
+            if _skip_materialized_l3_for_fused_sopt_l4(cfg, level):
+                logger.info("=== skipping %s: fused SOPT L4 path ===", level)
+                continue
             t_level = time.time()
             level_key = _level_key(
                 level,
@@ -151,6 +154,15 @@ def _run_pipeline(toml_path: str, *, log_level: str) -> int:
         if file_handler is not None:
             logger.removeHandler(file_handler)
             file_handler.close()
+
+
+def _skip_materialized_l3_for_fused_sopt_l4(cfg: dict[str, Any], level: str) -> bool:
+    runtime = cfg.get("runtime", {})
+    return (
+        str(runtime.get("branch", "sopt")) == "sopt"
+        and str(runtime.get("end_level", "")) == "L4"
+        and level == "L3"
+    )
 
 
 def _execute_level(

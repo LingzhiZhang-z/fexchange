@@ -199,11 +199,13 @@ def try_load_l1(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
         return None
 
 
-def try_load_l2(stage_dir: Path) -> dict[str, Any] | None:
+def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
         d = load_npz_checked(stage_dir / "data.npz", ["M_A", "M_B"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("L2 key mismatch")
         M_A = np.asarray(d["M_A"], dtype=np.complex128)
         M_B = np.asarray(d["M_B"], dtype=np.complex128)
         return {
@@ -218,11 +220,13 @@ def try_load_l2(stage_dir: Path) -> dict[str, Any] | None:
         return None
 
 
-def try_load_l3(stage_dir: Path) -> dict[str, Any] | None:
+def try_load_l3(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
         d = load_npz_checked(stage_dir / "data.npz", ["h_pre_j_mu"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("L3 key mismatch")
         h = np.asarray(d["h_pre_j_mu"], dtype=np.complex128)
         return {"h_pre_j_mu": h, "n_j": int(h.shape[0])}
     except Exception as exc:
@@ -230,11 +234,13 @@ def try_load_l3(stage_dir: Path) -> dict[str, Any] | None:
         return None
 
 
-def try_load_l4(stage_dir: Path) -> dict[str, Any] | None:
+def try_load_l4(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
         d = load_npz_checked(stage_dir / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("L4 key mismatch")
         h = np.asarray(d["h_mu_abcd"], dtype=np.complex128)
         heff = np.asarray(d["Heff_mu_abcd"], dtype=np.complex128)
         result = {"h_mu_abcd": h, "Heff_mu_abcd": heff, "n_k": int(h.shape[0])}
@@ -323,7 +329,7 @@ def try_load_ligand(stage_dir: Path) -> dict[str, Any] | None:
         return None
 
 
-def try_load_l2_fopt(stage_dir: Path) -> dict[tuple[int, int, str], dict[str, Any]] | None:
+def try_load_l2_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dict[tuple[int, int, str], dict[str, Any]] | None:
     try:
         result: dict[tuple[int, int, str], dict[str, Any]] = {}
         for fs in (1, 2):
@@ -341,7 +347,10 @@ def try_load_l2_fopt(stage_dir: Path) -> dict[tuple[int, int, str], dict[str, An
                         "dim_low_f": int(arr.shape[2]),
                         "dim_low_p": int(arr.shape[3]),
                     }
-        validate_meta(load_json_checked(stage_dir / "meta.json"))
+        meta = load_json_checked(stage_dir / "meta.json")
+        validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("FOPT L2 key mismatch")
         return result
     except Exception as exc:
         logger.warning("Invalid cached FOPT L2 at %s (%s), recomputing", stage_dir, exc)

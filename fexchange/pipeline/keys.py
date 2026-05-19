@@ -58,6 +58,28 @@ def projector_content_signature(cfg: dict[str, Any]) -> str:
         return ""
 
 
+def hopping_content_signature(cfg: dict[str, Any]) -> str:
+    """Return a short stable digest for the runtime hopping file, if present."""
+    inputs = cfg.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return ""
+    hopping_file = inputs.get("hopping_file")
+    if not hopping_file:
+        return ""
+    try:
+        return hashlib.sha1(Path(str(hopping_file)).read_bytes()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def energy_unit_signature(cfg: dict[str, Any]) -> str:
+    """Normalized energy unit used for scalar parameters and hopping inputs."""
+    units = cfg.get("units", {})
+    if not isinstance(units, dict):
+        return "meV"
+    return str(units.get("energy", "meV"))
+
+
 def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, Any]) -> str:
     sver = cfg.get("standard_version", STANDARD_VERSION)
     branch = str(cfg.get("runtime", {}).get("branch", "sopt"))
@@ -65,6 +87,8 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     sn = extract_source_names(cfg)
     hopping_name = sn.hopping_name
     kramer_name = sn.kramer_name
+    hopping_sig = hopping_content_signature(cfg)
+    energy_unit = energy_unit_signature(cfg)
     projector_sig = projector_content_signature(cfg)
     branch_sig = branch_signature(cfg, n_ele=n_ele)
     denom_sig = denominator_signature(cfg, n_ele=n_ele)
@@ -106,11 +130,14 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
                 key += f"|branchsig={branch_sig}"
         return key
     if level == "L2":
-        return (
+        key = (
             f"L2|branch={branch}|keyL1={level_key('L1', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
             f"|hopping_name={hopping_name}"
-            f"|sv={sver}"
+            f"|energy_unit={energy_unit}"
         )
+        if hopping_sig:
+            key += f"|hopping_sha1={hopping_sig}"
+        return f"{key}|sv={sver}"
     if level == "L3":
         s = cfg["fsite"]
         key = f"L3|branch={branch}|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"

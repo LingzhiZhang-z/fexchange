@@ -521,6 +521,36 @@ h_mu_abcd = h_pre_mu
 Heff_mu_abcd = h_mu_abcd
 ```
 
+Runtime path (MUST):
+- The canonical runtime $L3 \to L4$ path is the **fused** implementation
+  (`build_L4_fast`): it computes `outputs_L4` directly from `{M_A, M_B, E_u, W}`
+  by projecting each route factor's external LSJM legs with `W` first, then
+  performing the same denominator-weighted Gram contraction in the projected
+  ($n_k$) space. The runtime MUST NOT materialize `h_pre_j_mu` on this path.
+- The code form above (materialized `project_with_W(h_pre_j_mu, W)`, i.e.
+  `build_L4(build_L3(...), W)`) is the **reference implementation**. It is off
+  the runtime path and serves two purposes: (a) the algebraic-equivalence
+  oracle for the fused path, and (b) explicit `L3`-then-`L4` inspection.
+- The fused path MUST be algebraically equal to the reference path, verified
+  numerically within tolerance (pinned at `1e-12` in the test suite). The
+  equality holds because $W$ acts only on the external $j$-legs and the
+  denominator is a pure $(u,v)/(r,s)$ weight, so projection commutes with the
+  intermediate-state sum.
+- Standalone `L3` execution MUST still emit `h_pre_j_mu` as specified in §2;
+  this obligation is why SOPT retains both paths.
+
+Applicability (informative):
+- The fused path is a large memory/compute saving when $n_k \ll n_j$ (the
+  production case: $n_k=2$ lowest Kramers doublet vs $n_j=2J+1$), because the
+  $n_j^4$ `h_pre_j_mu` tensor is never formed. When $n_k \approx n_j$ ($W$
+  near-square) it is roughly neutral or slightly slower, since the projection
+  is then applied per intermediate-state pair rather than once on the
+  aggregate. Correctness is unaffected in either regime.
+- Contrast with FOPT: FOPT consumes $W$ inside $L3$ and has no separate $L4$
+  (single fused path, no materialized reference), because FOPT has no
+  standalone-$L3$ `h_pre_j_mu` obligation. SOPT keeps the reference path
+  precisely to satisfy that obligation and to anchor the equivalence test.
+
 Validation:
 - Hermiticity check: $\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$ within tolerance.
 - $W$ projection dimensions must match $h_{\mathrm{pre},j}^{(\mu)}$.

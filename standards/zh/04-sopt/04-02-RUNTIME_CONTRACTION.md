@@ -495,6 +495,31 @@ h_mu_abcd = h_pre_mu
 Heff_mu_abcd = h_mu_abcd
 ```
 
+运行时路径（MUST）：
+- 规范的运行时 $L3 \to L4$ 路径是**融合**实现（`build_L4_fast`）：直接从
+  `{M_A, M_B, E_u, W}` 计算 `outputs_L4`——先用 `W` 投影每个 route factor 的
+  外部 LSJM legs，再在投影后的（$n_k$）空间执行相同的带分母 Gram 收缩。
+  该路径上运行时 MUST NOT 物化 `h_pre_j_mu`。
+- 上方 Code form（物化的 `project_with_W(h_pre_j_mu, W)`，即
+  `build_L4(build_L3(...), W)`）是**参考实现（reference）**。它不在运行时
+  路径上，作用有二：(a) 融合路径的代数等价 oracle；(b) 显式
+  `L3`→`L4` 检视。
+- 融合路径 MUST 与参考路径代数相等，并在容差内数值校验（测试套件以
+  `1e-12` 钉死）。等式成立的原因：$W$ 只作用于外部 $j$-legs，分母仅是
+  $(u,v)/(r,s)$ 的标量权重，故投影与中间态求和可交换。
+- 单独执行 `L3` 时，仍 MUST 按 §2 输出 `h_pre_j_mu`；正是该义务使 SOPT
+  保留两条路径。
+
+适用性（informative）：
+- 当 $n_k \ll n_j$ 时（生产场景：最低 Kramers 双重态 $n_k=2$ vs
+  $n_j=2J+1$），融合路径在内存/计算上大幅节省，因为 $n_j^4$ 的
+  `h_pre_j_mu` 张量根本不被构造。当 $n_k \approx n_j$（$W$ 近方阵）时
+  基本持平或略慢——此时投影被摊到每个中间态对上，而非在聚合张量上做
+  一次。两种情形下正确性均不受影响。
+- 与 FOPT 的对比：FOPT 在 $L3$ 内部消化 $W$、没有独立的 $L4$（单一融合
+  路径、无物化参考实现），因为 FOPT 没有 standalone-$L3$ 的
+  `h_pre_j_mu` 义务。SOPT 保留参考路径，正是为满足该义务并锚定等价测试。
+
 Validation:
 - Hermitian 检查：$\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$（容差内）。
 - $W$ 投影维度必须与 $h_{\mathrm{pre},j}^{(\mu)}$ 匹配。

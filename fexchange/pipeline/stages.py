@@ -55,6 +55,15 @@ from fexchange.utils.checks import check_orthonormal
 from fexchange.utils.errors import BindError, InputError, SchemaError
 
 
+_ENERGY_UNIT_SCALE = {"meV": 1.0, "eV": 1000.0}
+
+
+def _runtime_energy_scale(cfg: dict[str, Any]) -> float:
+    units = cfg.get("units", {})
+    unit = str(units.get("energy", "meV")) if isinstance(units, dict) else "meV"
+    return _ENERGY_UNIT_SCALE.get(unit, 1.0)
+
+
 def _reference_scheme(scheme: str) -> str:
     return "RS" if str(scheme).upper() == "ED" else scheme
 
@@ -286,13 +295,13 @@ def ensure_l2_sopt(
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
     stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", branch="sopt", run_name=cfg["runtime"]["run_name"])
-    loaded = try_load_l2(stage_dir)
+    loaded = try_load_l2(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
 
     ensure_l1_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb)
+    t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb) * _runtime_energy_scale(cfg)
     state["t_mu"] = t_mu
     result = build_L2(state["l1"], t_mu)
     state["l2"] = result
@@ -322,7 +331,7 @@ def ensure_l3_sopt(
         U=float(fsite["U"]),
         Jh=float(fsite["Jh"]),
     )
-    loaded = try_load_l3(stage_dir)
+    loaded = try_load_l3(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l3"] = loaded
         return
@@ -347,7 +356,7 @@ def ensure_l4_sopt(
     r62: float,
     scheme: str,
 ) -> None:
-    from fexchange.sopt.contraction import build_L4
+    from fexchange.sopt.contraction import build_L4_fast
 
     if "l4" in state:
         return
@@ -361,17 +370,21 @@ def ensure_l4_sopt(
         Jh=float(fsite["Jh"]),
         kramer_name=str(cfg["runtime"]["kramer_name"]),
     )
-    loaded = try_load_l4(stage_dir)
+    loaded = try_load_l4(stage_dir, expected_key=level_key("L4", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l4"] = loaded
         return
 
-    ensure_l3_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l3"]["n_j"])
+    ensure_l2_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
+    ensure_lsjm_all_three(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
+    if _uses_ion_ed(scheme):
+        ensure_ion_ed_adjacent(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62)
+    E_u_np1, E_u_nm1 = compute_intermediate_energies(cfg, state, n_ele=n_ele)
+    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l2"]["n_j"])
     check_orthonormal(W, label="W_input", module="projection")
     labels = labels_abcd_lex(W.shape[1])
     validate_labels_abcd(labels, n_k=W.shape[1])
-    result = build_L4(state["l3"], W)
+    result = build_L4_fast(state["l2"], E_u_np1, E_u_nm1, W, n_ele=n_ele)
     if W.shape[1] == 2:
         result.update(spin12_map(result["Heff_mu_abcd"]))
     state["l4"] = result
@@ -508,12 +521,16 @@ def ensure_l2_fopt(
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
     stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", branch="fopt", run_name=cfg["runtime"]["run_name"])
-    loaded = try_load_l2_fopt(stage_dir)
+    loaded = try_load_l2_fopt(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
     ensure_l1_fopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    t = _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6)
+    scale = _runtime_energy_scale(cfg)
+    t = {
+        key: value * scale
+        for key, value in _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6).items()
+    }
     state["t_per_pair"] = t
     result = build_L2(state["l1"], t)
     state["l2"] = result

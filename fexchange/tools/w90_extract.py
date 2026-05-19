@@ -128,8 +128,8 @@ def _real_to_complex_unitary(ell: int, real_order: tuple[int, ...]) -> NDArray[n
     Real-harmonic ↔ complex-harmonic definitions (Condon-Shortley phase):
 
       m_l = 0    →   Y_l^0
-      m_l = +|m| →  (Y_l^{−|m|} − Y_l^{+|m|}) / √2         (cosine type)
-      m_l = −|m| →  i (Y_l^{−|m|} + Y_l^{+|m|}) / √2        (sine   type)
+      m_l = +|m| →  (Y_l^{−|m|} + (−1)^m Y_l^{+|m|}) / √2
+      m_l = −|m| →  i (Y_l^{−|m|} − (−1)^m Y_l^{+|m|}) / √2
 
     A Hamiltonian transforms as ``h_complex = U @ h_real @ U.conj().T``.
     """
@@ -146,12 +146,14 @@ def _real_to_complex_unitary(ell: int, real_order: tuple[int, ...]) -> NDArray[n
         if m_real == 0:
             U[ell, r_idx] = 1.0
         elif m_real > 0:
+            phase = (-1) ** m_real
             U[ell - m_real, r_idx] = 1.0 / sq2
-            U[ell + m_real, r_idx] = -1.0 / sq2
+            U[ell + m_real, r_idx] = phase / sq2
         else:
             absm = -m_real
+            phase = (-1) ** absm
             U[ell - absm, r_idx] = 1j / sq2
-            U[ell + absm, r_idx] = 1j / sq2
+            U[ell + absm, r_idx] = -1j * phase / sq2
     return U
 
 
