@@ -188,6 +188,18 @@ def _build_U_c2y(spinor=False):
     return np.kron(tmp.T, np.eye(2)) if spinor else tmp.T
 
 
+def _build_U_p_c2y(spinor=False):
+    """Cubic p order px,py,pz -> complex p order m=-1,0,+1."""
+    sq2 = np.sqrt(2.0)
+    tmp = np.array([
+        # m=-1       m=0   m=+1
+        [1 / sq2,    0,   -1 / sq2],      # px = (Y_1,-1 - Y_1,+1)/sqrt(2)
+        [1j / sq2,   0,    1j / sq2],     # py = i(Y_1,-1 + Y_1,+1)/sqrt(2)
+        [0,          1,    0],            # pz = Y_1,0
+    ], dtype=complex)
+    return np.kron(tmp.T, np.eye(2)) if spinor else tmp.T
+
+
 def _expand_to_spinor_interleaved(mat: np.ndarray) -> np.ndarray:
     """Expand a 7x7 orbital matrix to 14x14 interleaved (dn,up) spinor form."""
     n = mat.shape[0]
@@ -196,6 +208,23 @@ def _expand_to_spinor_interleaved(mat: np.ndarray) -> np.ndarray:
         for j in range(n):
             out[2 * i, 2 * j] = mat[i, j]
             out[2 * i + 1, 2 * j + 1] = mat[i, j]
+    return out
+
+
+def _expand_to_spinor_interleaved_tr_pair(mat_plus: np.ndarray) -> np.ndarray:
+    """Expand a spin-conserving matrix tabulated for sigma=+.
+
+    PRB A2PrO3 Table II gives the sigma=+ hopping block and states that
+    sigma=- is obtained by complex conjugation. fexchange spin order is
+    (-1/2, +1/2), so the down block is conj(mat_plus) and the up block is
+    mat_plus.
+    """
+    n = mat_plus.shape[0]
+    out = np.zeros((2 * n, 2 * n), dtype=complex)
+    for i in range(n):
+        for j in range(n):
+            out[2 * i, 2 * j] = mat_plus[i, j].conjugate()
+            out[2 * i + 1, 2 * j + 1] = mat_plus[i, j]
     return out
 
 
@@ -234,13 +263,13 @@ def fp_complex_spinor_block(
 ) -> np.ndarray:
     """Return a 14x6 ``t_f_lig`` block for the downfold input contract.
 
-    The ligand side remains in the raw p spinor order used by
-    ``hopping_pf``: px, py, pz with interleaved spins. The f side is converted
-    to the fexchange complex spinor basis.
+    Both sides are in the fexchange complex spinor basis: f uses
+    ``m=-3..+3`` and p uses ``m=-1..+1``, each with interleaved
+    ``(down,up)`` spin.
     """
     h_pf = hopping_pf(l, m, n, pf_sigma, pf_pi)
     t_f_lig_cubic = expand_pf_to_spinor_interleaved(h_pf).conj().T
-    return _build_U_c2y(spinor=True) @ t_f_lig_cubic
+    return _build_U_c2y(spinor=True) @ t_f_lig_cubic @ _build_U_p_c2y(spinor=True).conj().T
 
 
 def slater_koster_hopping_fp_blocks(
@@ -322,7 +351,7 @@ def _write_literature(output: str | None) -> None:
     labels = {"K": "K", "RB": "Rb", "CS": "Cs"}
     for key, label in labels.items():
         cubic_7x7 = _hermitian_from_lower_triangle(_A2PRO3_TRANSFER_LOWER_TRIANGLES[key])
-        complex_14x14 = to_complex_basis_spinor(_expand_to_spinor_interleaved(cubic_7x7))
+        complex_14x14 = to_complex_basis_spinor(_expand_to_spinor_interleaved_tr_pair(cubic_7x7))
         write_fexchange_t_mu(base.parent / f"{stem}_{label}.txt", complex_14x14)
 
 

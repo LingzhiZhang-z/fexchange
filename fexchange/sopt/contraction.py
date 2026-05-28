@@ -1,13 +1,14 @@
 """
-SOPT runtime contraction: Level L2 (route factors), L3 (denominator sum), L4 (W projection).
+SOPT runtime contraction for external levels L2 (route factors) and L3
+(W-projected final output).
 
-Canonical runtime path: L2 -> ``build_L4_fast``, which fuses the L3
-denominator summation with the L4 W projection (04-02 §3).
+Canonical runtime path: L2 -> ``build_L3``, which fuses denominator summation
+with the final L3 W projection (04-02 §3).
 
-``build_L3`` and ``build_L4`` are the reference (materialized) implementations.
-They are not on the runtime path; they exist to (a) emit ``h_pre_j_mu`` for
-standalone-L3 execution, and (b) serve as the equivalence oracle that pins
-``build_L4_fast`` at 1e-12 (see ``tests/test_contraction.py``).
+``build_L3_legacy`` and ``build_L4_legacy`` retain the algebraic split used by
+the reference implementation. They are not on the runtime path; they serve as
+the equivalence oracle that pins ``build_L3`` at 1e-12
+(see ``tests/test_contraction.py``).
 
 Spec reference: 04-02-RUNTIME_CONTRACTION.
 """
@@ -130,12 +131,11 @@ def build_L2(
 # ---------------------------------------------------------------------------
 # Level L3: Denominator summation (04-02 §2)
 #
-# Reference (materialized) implementation. Off the runtime path: used for
-# standalone-L3 `h_pre_j_mu` emission and as the equivalence oracle for
-# `build_L4_fast`. The runtime path uses `build_L4_fast` instead.
+# Reference (materialized) implementation. Off the runtime path: used as the
+# equivalence oracle for `build_L3`. The runtime path uses `build_L3` instead.
 # ---------------------------------------------------------------------------
 
-def build_L3(
+def build_L3_legacy(
     l2_result: dict[str, Any],
     E_u_np1: NDArray[np.floating],
     E_u_nm1: NDArray[np.floating],
@@ -145,8 +145,8 @@ def build_L3(
     Build h_pre_j_mu by denominator-weighted summation (04-02 §2).
 
     Reference (materialized) L3. Materializes the (n_j, n_j, n_j, n_j)
-    `h_pre_j_mu` tensor. Standalone-L3 execution must emit this; the runtime
-    L3->L4 path does not call it (see `build_L4_fast`).
+    `h_pre_j_mu` tensor for oracle/debug use. The runtime fused final-L3 path
+    does not call it (see `build_L3`).
 
     h_pre[j3,j4,j1,j2] = sum_{u,v} conj(M_A[u,v,j3,j4]) * M_A[u,v,j1,j2] / Delta_uv
                         + sum_{r,s} conj(M_B[r,s,j3,j4]) * M_B[r,s,j1,j2] / Delta_rs
@@ -212,7 +212,7 @@ def build_L3(
     }
 
 
-def build_L4_fast(
+def build_L3(
     l2_result: dict[str, Any],
     E_u_np1: NDArray[np.floating],
     E_u_nm1: NDArray[np.floating],
@@ -220,7 +220,7 @@ def build_L4_fast(
     n_ele: int,
 ) -> dict[str, Any]:
     """
-    Canonical runtime L3->L4 path: fused denominator sum + W projection (04-02 §3).
+    Canonical runtime final-L3 path: fused denominator sum + W projection (04-02 §3).
 
     This is the implementation the pipeline runs. It projects the external
     (j1,j2) legs of each route factor to the target Kramers/non-Kramers basis
@@ -228,9 +228,10 @@ def build_L4_fast(
     n_k space -- so the (n_j, n_j, n_j, n_j) `h_pre_j_mu` tensor is never
     materialized. Intermediate-state sums and denominators are unchanged.
 
-    Correctness contract: algebraically equal to `build_L4(build_L3(...), W)`
+    Correctness contract: algebraically equal to
+    `build_L4_legacy(build_L3_legacy(...), W)`
     (the reference oracle), pinned at 1e-12 by
-    `tests/test_contraction.py::test_build_l4_fast_matches_materialized_l4_for_projector`.
+    `tests/test_contraction.py::test_build_l3_matches_legacy_materialized_projector`.
     The equality holds because W acts only on the external j-legs and the
     denominator is a pure (u,v)/(r,s) weight, so projection commutes with the
     intermediate-state sum.
@@ -252,7 +253,7 @@ def build_L4_fast(
         )
 
     n_k = W.shape[1]
-    logger.info("L4 fast: fused denominator summation and W projection, n_j=%d -> n_k=%d", n_j, n_k)
+    logger.info("L3 fused: denominator summation and W projection, n_j=%d -> n_k=%d", n_j, n_k)
 
     n_u = M_A.shape[0]
     n_v = M_A.shape[1]
@@ -294,7 +295,7 @@ def build_L4_fast(
     Heff_flat = Heff.reshape(n_k * n_k, n_k * n_k)
     check_hermitian(Heff_flat, label="Heff", module="contraction")
 
-    logger.info("L4 fast complete: Heff shape=%s", Heff.shape)
+    logger.info("L3 fused complete: Heff shape=%s", Heff.shape)
 
     return {
         "h_mu_abcd": h_mu,
@@ -304,28 +305,28 @@ def build_L4_fast(
 
 
 # ---------------------------------------------------------------------------
-# Level L4: W projection (04-02 §3)
+# Reference W projection (04-02 §3)
 #
 # Reference (materialized) implementation. Off the runtime path: it consumes
-# the materialized `h_pre_j_mu` from `build_L3`. Kept as the equivalence oracle
-# for `build_L4_fast` (the runtime path) and for explicit L3-then-L4 inspection.
+# the materialized `h_pre_j_mu` from `build_L3_legacy`. Kept as the equivalence
+# oracle for `build_L3` (the runtime path).
 # ---------------------------------------------------------------------------
 
-def build_L4(
+def build_L4_legacy(
     l3_result: dict[str, Any],
     W: NDArray[np.complexfloating],
 ) -> dict[str, Any]:
     """
     Apply W projection to get final Heff (04-02 §3).
 
-    Reference (materialized) L4. The runtime L3->L4 path is `build_L4_fast`;
-    this path is the oracle that pins it (see `build_L4_fast`).
+    Reference materialized projection. The runtime final-L3 path is `build_L3`;
+    this path is the oracle that pins it.
 
     h_pre[c,d,a,b] = sum_{j3,j4,j1,j2} conj(W[j3,c]) conj(W[j4,d]) h_pre_j[j3,j4,j1,j2] W[j1,a] W[j2,b]
 
     Parameters
     ----------
-    l3_result : output from build_L3.
+    l3_result : output from build_L3_legacy.
     W : projector from SOC-lowest subspace to target basis. Shape (n_j, n_k).
     """
     h_pre_j = l3_result["h_pre_j_mu"]
@@ -339,7 +340,7 @@ def build_L4(
         )
 
     n_k = W.shape[1]
-    logger.info("L4: W projection, n_j=%d -> n_k=%d", n_j, n_k)
+    logger.info("reference W projection, n_j=%d -> n_k=%d", n_j, n_k)
 
     # Use einsum for the 4-index projection
     # h[c,d,a,b] = conj(W)[j3,c] conj(W)[j4,d] h[j3,j4,j1,j2] W[j1,a] W[j2,b]
@@ -356,7 +357,7 @@ def build_L4(
     Heff_flat = Heff.reshape(n_k * n_k, n_k * n_k)
     check_hermitian(Heff_flat, label="Heff", module="contraction")
 
-    logger.info("L4 complete: Heff shape=%s", Heff.shape)
+    logger.info("reference W projection complete: Heff shape=%s", Heff.shape)
 
     return {
         "h_mu_abcd": h_mu,

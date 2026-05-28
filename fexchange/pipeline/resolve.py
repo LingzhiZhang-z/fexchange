@@ -7,8 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fexchange.io.disk import build_stage_path
-from fexchange.pipeline.keys import CORE_TOKEN_RE, extract_source_names
+from fexchange.pipeline.keys import CORE_TOKEN_RE
 from fexchange.utils.errors import InputError
 
 
@@ -27,9 +26,6 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
 
     output_root = Path(cfg["paths"]["output_root"])
     core_root = output_root / "core"
-    sn = extract_source_names(cfg)
-    hopping_name = sn.hopping_name
-    kramer_name = sn.kramer_name
     if not core_root.exists():
         raise InputError(
             "FXE-INPUT-003",
@@ -38,8 +34,6 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
             paths={"core_root": str(core_root)},
         )
 
-    # Always start from LMSM; no upstream preflight needed
-    required: tuple[str, ...] = ()
     candidates: list[tuple[int, float, float, str]] = []
 
     for d in sorted((core_root / "LMSM").iterdir() if (core_root / "LMSM").exists() else []):
@@ -52,48 +46,7 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
         r42 = float(match.group("r42"))
         r62 = float(match.group("r62"))
         scheme = match.group("scheme")
-        ok = True
-        for level in required:
-            if level == "L0":
-                continue
-            if level == "L2":
-                path = build_stage_path(
-                    str(output_root),
-                    "L2",
-                    n=n_ele,
-                    r42=r42,
-                    r62=r62,
-                    scheme=scheme,
-                    hopping_name=hopping_name,
-                )
-            elif level == "L3":
-                fsite = cfg["fsite"]
-                path = build_stage_path(
-                    str(output_root),
-                    "L3",
-                    branch=str(cfg.get("runtime", {}).get("branch", "sopt")),
-                    run_name=str(cfg.get("runtime", {}).get("run_name", "")),
-                    U=float(fsite["U"]),
-                    Jh=float(fsite["Jh"]),
-                )
-            elif level == "L4":
-                fsite = cfg["fsite"]
-                path = build_stage_path(
-                    str(output_root),
-                    "L4",
-                    branch=str(cfg.get("runtime", {}).get("branch", "sopt")),
-                    run_name=str(cfg.get("runtime", {}).get("run_name", "")),
-                    U=float(fsite["U"]),
-                    Jh=float(fsite["Jh"]),
-                    kramer_name=kramer_name,
-                )
-            else:
-                path = build_stage_path(str(output_root), level, n=n_ele, r42=r42, r62=r62, scheme=scheme)
-            if not path.exists():
-                ok = False
-                break
-        if ok:
-            candidates.append((n_ele, r42, r62, scheme))
+        candidates.append((n_ele, r42, r62, scheme))
 
     if len(candidates) == 1:
         return candidates[0]
@@ -102,7 +55,6 @@ def resolve_core_params(cfg: dict[str, Any]) -> tuple[int, float, float, str]:
             "FXE-INPUT-003",
             "fsite section missing and failed to infer unique core token from upstream artifacts",
             expected={"field_path": "fsite"},
-            actual={"required_upstream": list(required)},
             paths={"core_root": str(core_root)},
         )
     raise InputError(

@@ -17,9 +17,8 @@ from fexchange.pipeline.artifacts import (
     persist_l1_fopt,
     persist_l2,
     persist_l2_fopt,
-    persist_l3,
+    persist_l3_sopt,
     persist_l3_fopt,
-    persist_l4,
     persist_ligand,
     persist_stateset,
     try_load_l0,
@@ -29,9 +28,8 @@ from fexchange.pipeline.artifacts import (
     try_load_l1_fopt,
     try_load_l2,
     try_load_l2_fopt,
-    try_load_l3,
+    try_load_l3_sopt,
     try_load_l3_fopt,
-    try_load_l4,
     try_load_ligand,
     try_load_stateset,
 )
@@ -55,21 +53,18 @@ from fexchange.utils.checks import check_orthonormal
 from fexchange.utils.errors import BindError, InputError, SchemaError
 
 
-_ENERGY_UNIT_SCALE = {"meV": 1.0, "eV": 1000.0}
-
-
-def _runtime_energy_scale(cfg: dict[str, Any]) -> float:
-    units = cfg.get("units", {})
-    unit = str(units.get("energy", "meV")) if isinstance(units, dict) else "meV"
-    return _ENERGY_UNIT_SCALE.get(unit, 1.0)
-
-
 def _reference_scheme(scheme: str) -> str:
     return "RS" if str(scheme).upper() == "ED" else scheme
 
 
 def _uses_ion_ed(scheme: str) -> bool:
     return str(scheme).upper() == "ED"
+
+
+def _ls_reference_sectors(n_ele: int, scheme: str) -> tuple[int, ...]:
+    if _uses_ion_ed(scheme):
+        return (n_ele,)
+    return tuple(three_sectors(n_ele))
 
 
 def _sector_fsite(cfg: dict[str, Any], n_ele: int) -> dict[str, Any]:
@@ -98,7 +93,7 @@ def ensure_lsms_all_three(
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     core_scheme = _reference_scheme(scheme)
-    for sec in three_sectors(n_ele):
+    for sec in _ls_reference_sectors(n_ele, scheme):
         key = f"lsms_{sec}"
         if key in state:
             continue
@@ -140,7 +135,7 @@ def ensure_lsjm_all_three(
     ensure_lsms_all_three(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
     core_scheme = _reference_scheme(scheme)
 
-    for sec in three_sectors(n_ele):
+    for sec in _ls_reference_sectors(n_ele, scheme):
         key = f"lsjm_{sec}"
         if key in state:
             continue
@@ -213,7 +208,7 @@ def ensure_l0_sopt(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_
 
     if "l0" in state:
         return
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L0", branch="sopt")
+    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L0")
     loaded = try_load_l0(stage_dir, n_ele=n_ele)
     if loaded is not None:
         state["l0"] = loaded
@@ -243,7 +238,6 @@ def ensure_l1_sopt(
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L1",
-        branch="sopt",
         n=n_ele,
         r42=r42,
         r62=r62,
@@ -294,14 +288,14 @@ def ensure_l2_sopt(
         return
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", branch="sopt", run_name=cfg["runtime"]["run_name"])
+    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", run_name=cfg["runtime"]["run_name"])
     loaded = try_load_l2(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
 
     ensure_l1_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb) * _runtime_energy_scale(cfg)
+    t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb)
     state["t_mu"] = t_mu
     result = build_L2(state["l1"], t_mu)
     state["l2"] = result
@@ -322,57 +316,15 @@ def ensure_l3_sopt(
 
     if "l3" in state:
         return
-    fsite = cfg["fsite"]
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L3",
-        branch="sopt",
         run_name=cfg["runtime"]["run_name"],
-        U=float(fsite["U"]),
-        Jh=float(fsite["Jh"]),
-    )
-    loaded = try_load_l3(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
-    if loaded is not None:
-        state["l3"] = loaded
-        return
-
-    ensure_l2_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    ensure_lsjm_all_three(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    if _uses_ion_ed(scheme):
-        ensure_ion_ed_adjacent(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62)
-    E_u_np1, E_u_nm1 = compute_intermediate_energies(cfg, state, n_ele=n_ele)
-    result = build_L3(state["l2"], E_u_np1, E_u_nm1, n_ele=n_ele)
-    state["l3"] = result
-    persist_l3(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62)
-
-
-def ensure_l4_sopt(
-    cfg: dict[str, Any],
-    state: dict[str, Any],
-    *,
-    n_ele: int,
-    n_orb: int,
-    r42: float,
-    r62: float,
-    scheme: str,
-) -> None:
-    from fexchange.sopt.contraction import build_L4_fast
-
-    if "l4" in state:
-        return
-    fsite = cfg["fsite"]
-    stage_dir = build_stage_path(
-        cfg["paths"]["output_root"],
-        "L4",
-        branch="sopt",
-        run_name=cfg["runtime"]["run_name"],
-        U=float(fsite["U"]),
-        Jh=float(fsite["Jh"]),
         kramer_name=str(cfg["runtime"]["kramer_name"]),
     )
-    loaded = try_load_l4(stage_dir, expected_key=level_key("L4", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
+    loaded = try_load_l3_sopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
-        state["l4"] = loaded
+        state["l3"] = loaded
         return
 
     ensure_l2_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
@@ -384,13 +336,13 @@ def ensure_l4_sopt(
     check_orthonormal(W, label="W_input", module="projection")
     labels = labels_abcd_lex(W.shape[1])
     validate_labels_abcd(labels, n_k=W.shape[1])
-    result = build_L4_fast(state["l2"], E_u_np1, E_u_nm1, W, n_ele=n_ele)
+    result = build_L3(state["l2"], E_u_np1, E_u_nm1, W, n_ele=n_ele)
     if W.shape[1] == 2:
         result.update(spin12_map(result["Heff_mu_abcd"]))
-    state["l4"] = result
+    state["l3"] = result
     state["labels_abcd"] = labels
     state["W"] = W
-    persist_l4(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, labels=labels, W=W)
+    persist_l3_sopt(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, labels=labels, W=W)
 
 
 def ensure_l0_fopt(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> None:
@@ -398,7 +350,7 @@ def ensure_l0_fopt(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_
 
     if "l0" in state:
         return
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L0", branch="fopt")
+    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L0")
     loaded = try_load_l0_fopt(stage_dir, n_ele=n_ele)
     if loaded is not None:
         state["l0"] = loaded
@@ -423,7 +375,6 @@ def ensure_ligand(cfg: dict[str, Any], state: dict[str, Any]) -> None:
             stage_dir = build_stage_path(
                 cfg["paths"]["output_root"],
                 "ligand",
-                branch="fopt",
                 ligand_soc=soc_token,
                 ligand_n=n_p,
             )
@@ -455,7 +406,6 @@ def ensure_l1_fopt(
     f_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L1_F",
-        branch="fopt",
         n=n_ele,
         r42=r42,
         r62=r62,
@@ -520,17 +470,13 @@ def ensure_l2_fopt(
         return
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", branch="fopt", run_name=cfg["runtime"]["run_name"])
+    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", run_name=cfg["runtime"]["run_name"])
     loaded = try_load_l2_fopt(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
     ensure_l1_fopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    scale = _runtime_energy_scale(cfg)
-    t = {
-        key: value * scale
-        for key, value in _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6).items()
-    }
+    t = _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6)
     state["t_per_pair"] = t
     result = build_L2(state["l1"], t)
     state["l2"] = result
@@ -551,17 +497,12 @@ def ensure_l3_fopt(
 
     if "l3" in state:
         return
-    fsite = cfg["fsite"]
     ligands = cfg["ligand"]
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L3",
-        branch="fopt",
         run_name=cfg["runtime"]["run_name"],
-        U=float(fsite["U"]),
-        Jh=float(fsite["Jh"]),
-        lig1_U_p=float(ligands["1"]["U_p"]),
-        lig2_U_p=float(ligands["2"]["U_p"]),
+        kramer_name=str(cfg["runtime"]["kramer_name"]),
     )
     loaded = try_load_l3_fopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -737,13 +678,11 @@ def _p_l1_dirs(cfg: dict[str, Any]) -> dict[int, dict[str, Path]]:
             "P_5_6": build_stage_path(
                 output_root,
                 "L1_P",
-                branch="fopt",
                 p_transition=f"n-5_to_6_{soc_token}",
             ),
             "P_4_5": build_stage_path(
                 output_root,
                 "L1_P",
-                branch="fopt",
                 p_transition=f"n-4_to_5_{soc_token}",
             ),
         }

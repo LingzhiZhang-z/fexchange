@@ -90,7 +90,7 @@ def validate_upstream_artifacts(
             d = build_stage_path(output_root, "LSJM", n=sec, r42=sec_r42, r62=sec_r62, scheme=scheme)
             _check_spec(d, "LSJM")
     if "L0" in required:
-        d = build_stage_path(output_root, "L0", branch=branch)
+        d = build_stage_path(output_root, "L0")
         _check(d / f"f_create_{n_ele}_to_{n_ele + 1}.npz", ["data"])
         _check(d / f"f_create_{n_ele - 1}_to_{n_ele}.npz", ["data"])
         try:
@@ -112,36 +112,17 @@ def validate_upstream_artifacts(
         d = build_stage_path(
             output_root,
             "L2",
-            branch=branch,
             run_name=run_name,
         )
         _check_spec(d, "L2")
     if "L3" in required:
-        s = cfg["fsite"]
-        ligands = cfg.get("ligand", {})
         d = build_stage_path(
             output_root,
             "L3",
-            branch=branch,
             run_name=run_name,
-            U=float(s["U"]),
-            Jh=float(s["Jh"]),
-            lig1_U_p=float(ligands.get("1", {}).get("U_p", 0.0)) if isinstance(ligands, dict) else 0.0,
-            lig2_U_p=float(ligands.get("2", {}).get("U_p", 0.0)) if isinstance(ligands, dict) else 0.0,
-        )
-        _check_spec(d, "L3_FOPT" if branch == "fopt" else "L3")
-    if "L4" in required:
-        s = cfg["fsite"]
-        d = build_stage_path(
-            output_root,
-            "L4",
-            branch=branch,
-            run_name=run_name,
-            U=float(s["U"]),
-            Jh=float(s["Jh"]),
             kramer_name=kramer_name,
         )
-        _check_spec(d, "L4")
+        _check_spec(d, "L3_FOPT" if branch == "fopt" else "L3")
 
     if missing:
         raise IOError_(

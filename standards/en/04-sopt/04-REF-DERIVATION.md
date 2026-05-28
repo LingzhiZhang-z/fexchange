@@ -9,7 +9,9 @@ restructure.
 This file defines the legacy runtime Levels $L2$, $L3$, and $L4$ for SOPT.
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
 Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
-Global execution order is fixed in `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` as $L0 \to L1 \to L2 \to L3 \to L4$.
+This archived derivation keeps the previous $L3/L4$ split only as a reference;
+the current runtime order is defined in
+`./standards/en/04-sopt/04-00-SOPT_FORMALISM.md`.
 
 ## 0) Variable Classes (Submodule Scope, MUST)
 This file covers $L2/L3/L4$ and uses three variable classes:

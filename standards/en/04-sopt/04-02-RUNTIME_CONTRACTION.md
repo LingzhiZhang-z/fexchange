@@ -1,11 +1,13 @@
 # 04-02-RUNTIME_CONTRACTION
 
-This file defines runtime Levels $L2$, $L3$, and $L4$ for SOPT.
+This file defines runtime Levels $L2$ and $L3$ for SOPT.
 Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
 Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
 This file is serial-first and backend-agnostic: if a future parallel runtime is
 added, it must preserve the tensor contracts defined here.
-Global execution order is fixed in `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` as $L0 \to L1 \to L2 \to L3 \to L4$.
+Global final-output execution order is fixed in
+`./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` as
+$L0 \to L1 \to L2 \to L3$.
 
 ## -1) Formula-Only Equivalence (READ FIRST, Non-Implementation)
 This section is for mathematical understanding only.
@@ -155,18 +157,20 @@ $$
 This transformation is exact (no approximation): it only changes summation order and factorization.
 
 ## 0) Variable Classes (Submodule Scope, MUST)
-This file covers $L2/L3/L4$ and uses three variable classes:
+This file covers $L2/L3$ and uses three variable classes:
 - Input variables: read from external interfaces or upstream level outputs.
 - Intermediate variables: internal working variables only; not exposed as this level's outputs.
 - Output variables: interface variables emitted by this level for downstream levels/callers.
 
 Per-level definition:
 - $L2$: input `{A, B, t_mu}`; intermediate `{workspace}`; output `{M_A, M_B}`.
-- $L3$: input `{M_A, M_B, E_u}`; intermediate `{E_uv, E_rs, workspace}`; output `{h_pre_j_mu}`.
-- $L4$: input `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}` and, when the projected local space is `2 x 2`, optional `{J_mu, mapping_residual}`.
+- $L3$: input `{M_A, M_B, E_u, W, labels_abcd, labels_order_id}` or
+  reference `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate
+  `{E_uv, E_rs, h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}` and, when the projected
+  local space is `2 x 2`, optional `{J_mu, mapping_residual}`.
 
 ## 0.0.0) $E_u$ Intermediate-State Energy Source (MUST)
-`E_u` is a runtime-derived input for $L3$, not an independent persistent artifact.
+`E_u` is a runtime-derived denominator input, not an independent persistent artifact.
 It is constructed at $L3$ entry from LSJM energy coefficient arrays (`E_terms.npz`)
 of the adjacent sectors ($f^{n-1}$, $f^{n+1}$) using branch-resolved
 `F^0/F^2/F^4/F^6/\zeta/offset` parameters.
@@ -207,13 +211,36 @@ E_u_np1 = E_lsjm_np1 - E_ref
 E_u_nm1 = E_lsjm_nm1 - E_ref
 ```
 
+If a side branch uses a target minimum gap instead of an explicit `offset`,
+the branch-local offset is resolved implicitly at denominator construction time:
+
+Math:
+$$
+E_u^{(n+1)}[u] =
+U^+ + E_{\mathrm{raw}}^{(n+1)}[u]
+- \min_v E_{\mathrm{raw}}^{(n+1)}[v],
+$$
+
+Math:
+$$
+E_u^{(n-1)}[u] =
+U^- + E_{\mathrm{raw}}^{(n-1)}[u]
+- \min_v E_{\mathrm{raw}}^{(n-1)}[v].
+$$
+
+Here `Uplus` is only valid in `[fsite_np1]`, `Uminus` is only valid in
+`[fsite_nm1]`, and each is mutually exclusive with the corresponding explicit
+`offset`. `E_raw` is reconstructed from the same branch-local
+`F^0/F^2/F^4/F^6/\zeta` parameters with no branch offset applied.
+
 Source artifacts:
 - `E_terms.npz` from LSJM outputs in sectors $n-1$, $n+1$ (disk path per `./standards/en/05-io/05-00-IO.md`).
 - Branch defaults come from main `[fsite]`; branch overrides come from
   `[fsite_nm1]/[fsite_np1]`.
-- `offset` is branch-local and defaults to `0`.
+- `offset` is branch-local and defaults to `0` when no target minimum gap is set.
 - `E_ref` uses the main-sector (`f^n`) LSJM output when `energy_reference = "lsjm_ground"`.
-- `E_u` is NOT persisted as a separate disk artifact; it is computed on-the-fly at $L3$ entry.
+- `E_u` is NOT persisted as a separate disk artifact; it is computed on-the-fly
+  at $L3$ entry.
 
 Validation:
 - No mandatory sign constraint is imposed on branch energies in `E_u`.
@@ -273,7 +300,7 @@ Validation:
 - `W.shape = (n_j, n_k)` where `n_j` matches L1 output $j$-axis dimension.
 - `kramer_name` must be recorded in metadata.
 
-## 0.1) External Runtime Input Schema for $L2/L3/L4$ (MUST)
+## 0.1) External Runtime Input Schema for $L2/L3$ (MUST)
 MUST:
 - Hopping (`t_mu`) and Kramer projector (`W`, `kramer_labels`) are external runtime inputs.
 - Global header gate from `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` is mandatory:
@@ -308,7 +335,8 @@ require is_lex_sorted(labels_abcd, key=(a,b,c,d))
 Validation:
 - Any schema/binding mismatch is a hard failure before contraction.
 - `W` orthonormality check: `W^dag W = I` within `eps_orth`.
-- At $L4$, enforce `W.shape[0] == h_pre_j_mu.shape[0]` before projection.
+- In the reference projection path, enforce `W.shape[0] == h_pre_j_mu.shape[0]`
+  before projection.
 - `labels_abcd` ordering/bijective checks are hard failures.
 
 ## 1) Level 2: Route Factors $M_A/M_B$ (Phi Form, MUST)
@@ -425,13 +453,13 @@ Validation:
 - Use blockwise streaming over `(u,v)` and `(r,s)`; full dense materialization is optional debug mode only.
 - Persisted metadata must include `axis_order_id` for `M_A/M_B`.
 
-## 2) Level 3: Denominator Summation to $h_{pre,j}^{(\mu)}$ (MUST)
+## 2) Internal Denominator Summation to $h_{pre,j}^{(\mu)}$ (MUST)
 MUST:
-- This level sums intermediate states with denominators and outputs $h_{pre,j}^{(\mu)}$.
-- This level is algebraically equivalent to the old `$K$ then contract with $t$` route.
-- This level constructs $E_{uv}$ and $E_{rs}$ from `E_u`; these are not defined in $L2$.
+- This internal calculation sums intermediate states with denominators and constructs $h_{pre,j}^{(\mu)}$.
+- It is algebraically equivalent to the old `$K$ then contract with $t$` route.
+- It constructs $E_{uv}$ and $E_{rs}$ from `E_u`; these are not defined in $L2$.
 
-Denominator definitions (in $L3$):
+Denominator definitions (inside $L3$):
 
 Math:
 $$
@@ -490,12 +518,12 @@ Validation:
 - Denominator must follow $\Delta=E_0-E_{\mathrm{intermediate}}$.
 - Zero-hop check: if `t=0`, then `h_pre_j_mu=0`.
 
-Output (MUST):
-- This level must emit $h_{\mathrm{pre},j}^{(\mu)}$ (`h_pre_j_mu`) as an independent output.
+Output:
+- `h_pre_j_mu` is an internal/reference tensor, not a standalone runtime artifact.
 
-## 3) Level 4: Fix Kramers Basis and Build Final Outputs (MUST)
+## 3) Level 3: Fix Kramers Basis and Build Final Outputs (MUST)
 MUST:
-- After $L3$, apply outer $W$ projection.
+- Inside final $L3$, apply outer $W$ projection.
 - Final public interface must use $a,b,c,d$ semantics.
 - $W$ must map from the $f^n$ SOC-lowest LSJM subspace to the CEF/Kramers basis.
 
@@ -522,23 +550,19 @@ Heff_mu_abcd = h_mu_abcd
 ```
 
 Runtime path (MUST):
-- The canonical runtime $L3 \to L4$ path is the **fused** implementation
-  (`build_L4_fast`): it computes `outputs_L4` directly from `{M_A, M_B, E_u, W}`
+- The canonical runtime final-$L3$ path is the **fused** implementation
+  (`build_L3` in the current code): it computes `outputs_L3` directly from `{M_A, M_B, E_u, W}`
   by projecting each route factor's external LSJM legs with `W` first, then
   performing the same denominator-weighted Gram contraction in the projected
   ($n_k$) space. The runtime MUST NOT materialize `h_pre_j_mu` on this path.
 - The code form above (materialized `project_with_W(h_pre_j_mu, W)`, i.e.
-  `build_L4(build_L3(...), W)`) is the **reference implementation**. It is off
-  the runtime path and serves two purposes: (a) the algebraic-equivalence
-  oracle for the fused path, and (b) explicit `L3`-then-`L4` inspection.
+  `build_L4_legacy(build_L3_legacy(...), W)`) is the **reference implementation**. It is off
+  the runtime path and serves as the algebraic-equivalence oracle for the fused path.
 - The fused path MUST be algebraically equal to the reference path, verified
   numerically within tolerance (pinned at `1e-12` in the test suite). The
   equality holds because $W$ acts only on the external $j$-legs and the
   denominator is a pure $(u,v)/(r,s)$ weight, so projection commutes with the
   intermediate-state sum.
-- Standalone `L3` execution MUST still emit `h_pre_j_mu` as specified in §2;
-  this obligation is why SOPT retains both paths.
-
 Applicability (informative):
 - The fused path is a large memory/compute saving when $n_k \ll n_j$ (the
   production case: $n_k=2$ lowest Kramers doublet vs $n_j=2J+1$), because the
@@ -546,10 +570,8 @@ Applicability (informative):
   near-square) it is roughly neutral or slightly slower, since the projection
   is then applied per intermediate-state pair rather than once on the
   aggregate. Correctness is unaffected in either regime.
-- Contrast with FOPT: FOPT consumes $W$ inside $L3$ and has no separate $L4$
-  (single fused path, no materialized reference), because FOPT has no
-  standalone-$L3$ `h_pre_j_mu` obligation. SOPT keeps the reference path
-  precisely to satisfy that obligation and to anchor the equivalence test.
+- Contrast with FOPT: both SOPT and FOPT consume $W$ inside $L3$; SOPT keeps a
+  reference materialized path only to anchor the equivalence test.
 
 Validation:
 - Hermiticity check: $\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$ within tolerance.
@@ -558,7 +580,7 @@ Validation:
 ## 4) Parallel Execution and Root-Write Policy (MUST)
 MUST:
 - MPI/parallel layout is runtime environment, not input-file content.
-- Worker ranks may compute disjoint shards of $L2/L3/L4$ tensors.
+- Worker ranks may compute disjoint shards of $L2/L3$ tensors.
 - Before persistence, shards must be gathered/reduced to root rank.
 - Root rank must assemble full tensors then write `data.npz` and `meta.json`.
 - Non-root ranks must never write persistent stage artifacts.
@@ -582,8 +604,7 @@ Validation:
 ## 5) Runtime I/O Summary
 Code form:
 ```text
-inputs_L2_L4   = {A, B, E_u, t_mu, W, labels_abcd, labels_order_id}
+inputs_L2_L3   = {A, B, E_u, t_mu, W, labels_abcd, labels_order_id}
 outputs_L2     = {M_A, M_B}
-outputs_L3     = {h_pre_j_mu}
-outputs_L4     = {h_mu_abcd, Heff_mu_abcd}
+outputs_L3     = {h_mu_abcd, Heff_mu_abcd}
 ```

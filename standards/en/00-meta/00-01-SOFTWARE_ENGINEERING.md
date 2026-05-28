@@ -54,7 +54,7 @@ fexchange/
   sopt/
     __init__.py
     precompute.py           # 04-01: L0 + L1
-    contraction.py          # 04-02: L2 + L3 + L4
+    contraction.py          # 04-02: L2 + L3
     spin12.py               # 04-03: spin-1/2 mapping
   fopt/
     __init__.py

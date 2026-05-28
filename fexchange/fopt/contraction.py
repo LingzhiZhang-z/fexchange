@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.utils.numerics import DTYPE_COMPLEX
-from fexchange.utils.errors import BindError
+from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_ZERO
+from fexchange.utils.errors import BindError, NumError
 
 logger = logging.getLogger("fexchange")
 FOPT_PROCESS_LABELS = ("P1", "P2", "P3", "P4", "P5")
@@ -152,6 +152,23 @@ def _to_standard(
     return H_native.transpose(perm)
 
 
+def _resolvent(denom: NDArray[np.floating], *, label: str) -> NDArray[np.float64]:
+    arr = np.asarray(denom, dtype=float)
+    bad = ~np.isfinite(arr) | (np.abs(arr) < EPS_ZERO)
+    if np.any(bad):
+        flat_idx = int(np.argmax(bad))
+        idx = tuple(int(i) for i in np.unravel_index(flat_idx, arr.shape))
+        value = float(arr.reshape(-1)[flat_idx])
+        raise NumError(
+            "FXE-NUM-002",
+            f"Invalid FOPT denominator {label} at index {idx}",
+            module="fopt.contraction",
+            level="L3",
+            actual={"denominator": value, "threshold": EPS_ZERO},
+        )
+    return -1.0 / arr
+
+
 def _path_amplitude_process1(
     V_1: NDArray[np.complexfloating],
     V_2: NDArray[np.complexfloating],
@@ -178,9 +195,9 @@ def _path_amplitude_process1(
     M3 = V_3[:, :, :, 0]   # (b=r_Y_fin,   H=p^5, B=r_Y^{n-1})
     M4 = V_4[:, :, :, 0]   # (A=r_X^{n+1}, H=p^5, a=r_X_fin)
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5 [None, :] -       E_0)  # 1 f-site
-    G_s2 = -1.0 / (E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0)  # 2 f-sites
-    G_s3 = -1.0 / (E_np1[:, None] + E_p5 [None, :] -       E_0)  # 1 f-site
+    G_s1 = _resolvent(E_np1[:, None] + E_p5 [None, :] -       E_0, label="P1.s1")  # 1 f-site
+    G_s2 = _resolvent(E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0, label="P1.s2")  # 2 f-sites
+    G_s3 = _resolvent(E_np1[:, None] + E_p5 [None, :] -       E_0, label="P1.s3")  # 1 f-site
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §2)
@@ -265,8 +282,8 @@ def _path_amplitude_process2(
     M3 = V_3                # (high_f, H=p^4, low_f, K=p^5)
     M4 = V_4[:, :, :, 0]   # (high_f, K=p^5, low_f)
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5[None, :] -       E_0)                                                  # 1 f-site
-    G_s2 = -1.0 / (E_np1[:, None, None] + E_np1[None, :, None] + E_p4[None, None, :] - 2.0 * E_0)               # 2 f-sites
+    G_s1 = _resolvent(E_np1[:, None] + E_p5[None, :] -       E_0, label="P2.s1")                                # 1 f-site
+    G_s2 = _resolvent(E_np1[:, None, None] + E_np1[None, :, None] + E_p4[None, None, :] - 2.0 * E_0, label="P2.s2")  # 2 f-sites
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §3, Pattern A path)
@@ -286,7 +303,7 @@ def _path_amplitude_process2(
     # Reduced S:  S_1 = (α, d, γ_1, Ω_2)   S_2 = (α, β, γ_2, Ω_2)   S_3 = (a, β, γ_3, Ω_2)
     # so the s_2 denominator is 3-D (α, β, γ_2). Renaming A=α, B=β, G=γ_1, H=γ_2, K=γ_3.
     if pattern == "A":
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5[None, :] - E_0)  # (B, K)  1 f-site (only r_Y still excited in s_3)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5[None, :] - E_0, label="P2.s3A")  # (B, K)  1 f-site (only r_Y still excited in s_3)
         #   H[a,b,c,d] = sum_{A,B,G,H,K}  M4*[B,K,a] G_s3[B,K] M3*[A,H,b,K] G_s2[A,B,H] M2[B,H,d,G] G_s1[A,G] M1[A,G,c]
         #                                 └─ V_4† ─┘ └─/E_s3─┘ └── V_3† ──┘ └─/E_s2──┘ └── V_2 ──┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ_1 (p^5)  H = γ_2 (p^4)  K = γ_3 (p^5)
@@ -303,7 +320,7 @@ def _path_amplitude_process2(
         # LIFO: V_3 lowers r_Y, V_4 lowers r_X.  V_3↔V_2 share B (r_Y^{n+1});  V_4↔V_1 share A (r_X^{n+1}).
         # Same δ-collapse structure as Pattern A but the V_3/V_4 site-pairings swap, so the
         # high_f indices on M_3* and M_4* swap A<->B compared with FIFO.  Same 5 free dummies.
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5[None, :] - E_0)  # (A, K)  1 f-site (only r_X still excited in s_3)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5[None, :] - E_0, label="P2.s3B")  # (A, K)  1 f-site (only r_X still excited in s_3)
         #   H[a,b,c,d] = sum_{A,B,G,H,K}  M4*[A,K,a] G_s3[A,K] M3*[B,H,b,K] G_s2[A,B,H] M2[B,H,d,G] G_s1[A,G] M1[A,G,c]
         # Free outputs (LIFO): a = r_X_fin, b = r_Y_fin, c = r_X_init, d = r_Y_init.
         return np.einsum(
@@ -348,9 +365,9 @@ def _path_amplitude_process3(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)   # 1 f-site (lig_a p^5)
-    G_s2 = -1.0 / (E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0)   # 2 f-sites
-    G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)   # 1 f-site (lig_b p^5)
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P3.s1")   # 1 f-site (lig_a p^5)
+    G_s2 = _resolvent(E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0, label="P3.s2")   # 2 f-sites
+    G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P3.s3")   # 1 f-site (lig_b p^5)
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §4)
@@ -422,13 +439,14 @@ def _path_amplitude_process4(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)                                            # 1 f-site
-    G_s2 = -1.0 / (
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P4.s1")                            # 1 f-site
+    G_s2 = _resolvent(
         E_np1[:, None, None, None]
       + E_np1[None, :, None, None]
       + E_p5_a[None, None, :, None]
       + E_p5_b[None, None, None, :]
-      - 2.0 * E_0
+      - 2.0 * E_0,
+        label="P4.s2",
     )                                                                                                # 2 f-sites (4-D)
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
@@ -451,7 +469,7 @@ def _path_amplitude_process4(
     # Renaming A=α, B=β, G=γ, H=δ.
 
     if pattern == "A":
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)  # (B, G)  1 f-site (r_Y still up on lig_a)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P4.s3A")  # (B, G)  1 f-site (r_Y still up on lig_a)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[B,G,a] G_s3[B,G] M3*[A,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
@@ -468,7 +486,7 @@ def _path_amplitude_process4(
         # LIFO: V_3 lowers r_Y via lig_a, V_4 lowers r_X via lig_b.  Same δ-collapse
         # produces the same 4 free dummies; V_3/V_4 site-pairings swap so M_3*, M_4*
         # high_f labels swap A <-> B compared with FIFO.
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)  # (A, H)  1 f-site (r_X still up on lig_b)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P4.s3B")  # (A, H)  1 f-site (r_X still up on lig_b)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,H,a] G_s3[A,H] M3*[B,G,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         # Free outputs (LIFO): a = r_X_fin, b = r_Y_fin, c = r_X_init, d = r_Y_init.
         return np.einsum(
@@ -515,18 +533,19 @@ def _path_amplitude_process5(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    G_s1 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)                                            # 1 f-site (A,G)
-    G_s2 = -1.0 / (
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P5.s1")                            # 1 f-site (A,G)
+    G_s2 = _resolvent(
         E_np1[:, None, None, None]
       + E_np1[None, :, None, None]
       + E_p5_a[None, None, :, None]
       + E_p5_b[None, None, None, :]
-      - 2.0 * E_0
+      - 2.0 * E_0,
+        label="P5.s2",
     )                                                                                                # 2 f-sites (4-D)
 
     if pattern == "A":
         # h3=B11 (returns r_X via lig_a), h4=B22 (returns r_Y via lig_b).
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5_b[None, :] - E_0)  # (B, H)  r_Y still up on lig_b
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P5.s3A")  # (B, H)  r_Y still up on lig_b
         #   H_standard[a,b,c,d] = sum_{A,B,G,H}  M4*[B,H,b] G_s3[B,H] M3*[A,G,a] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
@@ -542,7 +561,7 @@ def _path_amplitude_process5(
         )
     if pattern == "B":
         # h3=B22 (returns r_Y via lig_b), h4=B11 (returns r_X via lig_a).
-        G_s3 = -1.0 / (E_np1[:, None] + E_p5_a[None, :] - E_0)  # (A, G)  r_X still up on lig_a (== G_s1 form)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P5.s3B")  # (A, G)  r_X still up on lig_a (== G_s1 form)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,G,a] G_s3[A,G] M3*[B,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         return np.einsum(
             "AGa, AG, BHb, ABGH, BHd, AG, AGc -> abcd",

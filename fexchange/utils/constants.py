@@ -46,7 +46,7 @@ RE_TO_N_ELE: dict[str, int] = {
     "Yb": 13,
 }
 
-LEVELS = ("LMSM", "LSJM", "L0", "L1", "L2", "L3", "L4")
+LEVELS = ("LMSM", "LSJM", "L0", "L1", "L2", "L3")
 LEVEL_ORDER = {
     "LMSM": 1,
     "LSJM": 2,
@@ -54,10 +54,9 @@ LEVEL_ORDER = {
     "L1": 4,
     "L2": 5,
     "L3": 6,
-    "L4": 7,
 }
 BRANCHES = ("sopt", "fopt")
-BRANCH_TERMINAL = dict(sopt="L4", fopt="L3")
+BRANCH_TERMINAL = dict(sopt="L3", fopt="L3")
 
 SIGMA_0 = np.eye(2, dtype=DTYPE_COMPLEX)
 SIGMA_X = np.array([[0, 1], [1, 0]], dtype=DTYPE_COMPLEX)

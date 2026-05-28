@@ -55,32 +55,9 @@ def fmt8(x: float) -> str:
     return f"{x:.8f}"
 
 
-def fmt6(x: float) -> str:
-    """Fixed-point 6-decimal formatting."""
-    return f"{x:.6f}"
-
-
 def core_dir_token(n: int, r42: float, r62: float, scheme: str = "RS") -> str:
     """Core path token: n-{n}_r42-{r42}_r62-{r62}_scheme-{scheme}."""
     return f"n-{n}_r42-{fmt8(r42)}_r62-{fmt8(r62)}_scheme-{scheme}"
-
-
-def ujh_dir_token(U: float, Jh: float) -> str:
-    """U-Jh path token."""
-    return f"U-{fmt8(U)}_Jh-{fmt8(Jh)}"
-
-
-def ujhz_dir_token(U: float, Jh: float, zeta: float) -> str:
-    """Backward-compatible U-Jh-zeta path token."""
-    return f"U-{fmt8(U)}_Jh-{fmt8(Jh)}_z-{fmt8(zeta)}"
-
-
-def fopt_l3_dir_token(U: float, Jh: float, lig1_U_p: float, lig2_U_p: float) -> str:
-    """FOPT L3 parameter-scan path token."""
-    return (
-        f"{ujh_dir_token(U, Jh)}_"
-        f"lig1.U_p-{fmt8(lig1_U_p)}_lig2.U_p-{fmt8(lig2_U_p)}"
-    )
 
 
 def _safe_label_token(value: str) -> str:
@@ -90,51 +67,19 @@ def _safe_label_token(value: str) -> str:
     return token or "auto"
 
 
-def point_result_filename(
-    *,
-    RE: str,
-    n_ele: int,
-    hopping_label: str,
-    projection_label: str,
-    U: float,
-    Jh: float,
-    zeta: float,
-    cfg_signature: str = "",
-) -> str:
-    name = (
-        f"{_safe_label_token(RE)}_{n_ele}_"
-        f"{_safe_label_token(hopping_label)}_{_safe_label_token(projection_label)}_"
-        f"{fmt6(U)}_{fmt6(Jh)}_{fmt6(zeta)}"
-    )
-    if cfg_signature:
-        name += f"__{_safe_label_token(cfg_signature)}"
-    return name + ".txt"
-
-
-def point_result_cfg_signature(payload: dict[str, Any]) -> str:
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default).encode("utf-8")
-    return f"cfg-{hashlib.sha1(blob).hexdigest()[:12]}"
-
-
 def build_stage_path(
     output_root: str,
     stage: str,
     *,
-    branch: str = "sopt",
     n: int = 0,
     r42: float = 0.0,
     r62: float = 0.0,
     scheme: str = "RS",
-    hopping_name: str = "",
     run_name: str = "",
     U: float = 0.0,
     Jh: float = 0.0,
-    zeta: float = 0.0,
-    lig1_U_p: float = 0.0,
-    lig2_U_p: float = 0.0,
     kramer_name: str = "",
     branch_signature: str = "",
-    denom_signature: str = "",
     ligand_soc: str = "",
     ligand_n: int = 0,
     p_transition: str = "",
@@ -142,7 +87,6 @@ def build_stage_path(
     """Build deterministic artifact path for a given stage (05-00 §2-3)."""
     root = Path(output_root)
     core = core_dir_token(n, r42, r62, scheme)
-    safe_branch = _safe_label_token(branch)
     if stage == "L0":
         return root / "core" / "L0"
     elif stage in ("LMSM", "LSJM"):
@@ -177,24 +121,17 @@ def build_stage_path(
     elif stage == "L2":
         return root / _require_stage_token("run_name", run_name, stage) / "L2"
     elif stage == "L3":
-        run_root = root / _require_stage_token("run_name", run_name, stage) / "L3"
-        if safe_branch == "fopt":
-            return run_root / fopt_l3_dir_token(U, Jh, lig1_U_p, lig2_U_p)
-        return run_root / ujh_dir_token(U, Jh)
-    elif stage == "L4":
         return (
             root
             / _require_stage_token("run_name", run_name, stage)
-            / "L4"
-            / ujh_dir_token(U, Jh)
+            / "L3"
             / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
         )
     elif stage == "spin12":
         return (
             root
             / _require_stage_token("run_name", run_name, stage)
-            / "L4"
-            / ujh_dir_token(U, Jh)
+            / "L3"
             / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
             / "spin12"
         )
@@ -442,7 +379,7 @@ def build_meta(
     physical_meaning: str,
     basis_id: str,
     index_definition: str,
-    unit: str = "eV",
+    unit: str = "raw",
     storage_layout: str = "dense",
     dtype: str = "complex128",
     logical_shape: list[int],
@@ -470,57 +407,6 @@ def build_meta(
     if extra:
         meta.update(extra)
     return meta
-
-
-def write_point_result_txt(
-    output_root: str,
-    *,
-    RE: str,
-    n_ele: int,
-    hopping_label: str,
-    projection_label: str,
-    U: float,
-    Jh: float,
-    zeta: float,
-    J_mu: NDArray[np.floating] | NDArray[np.complexfloating],
-    mapping_residual: float,
-    cfg_signature: str = "",
-    cfg_meta: dict[str, Any] | None = None,
-) -> Path:
-    path = Path(output_root) / point_result_filename(
-        RE=RE,
-        n_ele=n_ele,
-        hopping_label=hopping_label,
-        projection_label=projection_label,
-        U=U,
-        Jh=Jh,
-        zeta=zeta,
-        cfg_signature=cfg_signature,
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    J = np.asarray(J_mu, dtype=float)
-    jh_over_u = float("nan") if float(U) == 0.0 else float(Jh) / float(U)
-    values = [
-        float(U),
-        float(Jh),
-        jh_over_u,
-        float(zeta),
-        float(J[0, 0]),
-        float(J[0, 1]),
-        float(J[0, 2]),
-        float(J[1, 0]),
-        float(J[1, 1]),
-        float(J[1, 2]),
-        float(J[2, 0]),
-        float(J[2, 1]),
-        float(J[2, 2]),
-        float(mapping_residual),
-    ]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(" ".join(f"{value:.12f}" for value in values) + "\n")
-    if cfg_meta is not None:
-        atomic_write_json(path.with_suffix(".meta.json"), cfg_meta)
-    return path
 
 
 def write_exchange_matrix_txt(

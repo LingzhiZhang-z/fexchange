@@ -14,3 +14,4 @@ data_test/
 tmp/
 tests/
 fexchange/tools/tests
+.venv

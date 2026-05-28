@@ -6,7 +6,7 @@ It is the parsing companion of `./standards/en/05-io/05-02-WANNIER90_CONTRACT.md
 ## 1) Scope (MUST)
 MUST:
 - Apply when `hopping_source = "wannier90"`.
-- Cover file parsing, atom/orbital/spin mapping, unit normalization, and order checks.
+- Cover file parsing, atom/orbital/spin mapping, unit metadata, and order checks.
 - Do not define SOPT contraction formulas.
 
 Code form:
@@ -208,20 +208,22 @@ else:
 Validation:
 - Spin-mode mismatch is `FXE-W90-002`.
 
-## 6) Unit Normalization (MUST)
+## 6) Unit Metadata, No Normalization (MUST)
 MUST:
-- Internal unit is `eV`.
-- Input unit must be declared (`energy_unit`).
-- If input is not `eV`, parser must apply deterministic conversion before any physics step.
+- Input unit metadata must be declared (`energy_unit`).
+- Parsed Hamiltonian values must be consumed and emitted as raw values in the
+  declared unit. The parser must not convert between `eV`, `meV`, `Ha`, `Ry`,
+  or any other energy unit.
+- Users are responsible for keeping Wannier90-derived files and runtime scalar
+  inputs in one consistent unit.
 
 Code form:
 ```text
-energy_scale = unit_to_eV(energy_unit)
-H_eV = energy_scale * H_input
+H_raw = H_input
 ```
 
 Validation:
-- Unknown/missing unit is `FXE-W90-003`.
+- Missing or empty unit metadata is `FXE-W90-003`.
 
 ## 7) Hermiticity and Order Checks (MUST)
 MUST:
@@ -244,7 +246,7 @@ Validation:
 ## 8) Parser Output Contract (MUST)
 MUST:
 - Parser output payload must include:
-  - normalized onsite/hopping blocks (`eV`)
+  - raw onsite/hopping blocks in the declared `energy_unit`
   - explicit mapping tables (`map_f_i`, `map_f_j`, `map_lig`)
   - cell bindings and derived relative vectors (`f_site_i_cell`, `f_site_j_cell`,
     `ligand_cells`, `R_ij`, `R_io`, `R_jo`)

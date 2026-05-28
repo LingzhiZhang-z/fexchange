@@ -1,34 +1,40 @@
 """Second-order p-shell downfold: f-p hopping -> effective f-f hopping.
 
-Formula (single-particle Löwdin / 2nd-order PT, basis-independent):
+This tool follows ``standards/fopt/downfold.md``.  The p shell is closed in the
+initial and final states.  For each ligand, the folded p part is written in the
+hole basis
 
-    T_eff(f_1, f_2)  =  T_direct  +  Σ      T_{lig_k → f_1}  ·  G_k  ·  T_{lig_k → f_2}^†
-                                      k∈{lig1,lig2}
+    |mu> = p_mu |Omega>,       |eta> = sum_mu Q[mu, eta] |mu>
 
-    G_k  =  (0 · I − h_lig_k)^{-1}
-         =  U_k · diag( 1 / (0 − E_a) ) · U_k^†          (h_lig_k = U_k diag(E_a) U_k^†)
+with positive ligand-resolved p5 denominators
 
-    T_{lig_k → f_i}[α, a] = ⟨f_i,α | H | lig_k,a⟩ = t_fp[(f_i,lig_k)]   (14×6)
-    reverse (f → lig) = Hermitian conjugate  →  T_{lig_k → f_j}^†       (6×14)
+    E_p5(lig, eta) = Delta_lig + lambda_lig * c_eta.
 
-SOC ligand h_lig_k = E_p·I + λ_p·L·S: eigvals E_p−λ_p (J=1/2 ×2),
-E_p+λ_p/2 (J=3/2 ×4); the two J channels get 1/(Δ+λ_p), 1/(Δ−λ_p/2)
-automatically.  NSOC = λ_p=0 limit (h_lig_k = E_p·I → G_k = (1/Δ)·I);
-same code path, no mode switch.
+The orbital-index propagator used by the f-only hopping is
 
-Closed-shell p^6 assumed: all eigvals below E_f (Löwdin convergence at
-z = E_f); enforced as a sanity check.
+    G_p[mu, nu] = sum_eta conj(Q[mu, eta]) * Q[nu, eta] / E_p5[eta].
+
+The effective directed hopping is then
+
+    t_eff = t_direct + sum_lig t_f1_lig @ G_p(lig) @ t_f2_lig.conj().T.
+
+For NSOC, ``Q = I`` and ``G_p = I / Delta``.  For SOC, ``Q`` is the fixed
+Clebsch-Gordan gauge in the basis ``m=-1,0,+1`` with interleaved ``down,up``
+spin; equivalently it diagonalizes the hole SOC matrix ``-(L.S).T``.
 
 Current I/O:
-  direct_t_mu_in  optional block [t_mu] 14×14; omitted means zero direct term
+  direct_t_mu_in  optional block [t_mu] 14x14; omitted means zero direct term
   hopping_fp_in   blocks [t_f1_lig1] [t_f1_lig2] [t_f2_lig1] [t_f2_lig2]
-  delta_lig1      manual denominator for ligand 1
-  delta_lig2      manual denominator for ligand 2
-  output          block [t_mu] 14×14 = direct + folded ligand correction
+  delta_lig1      positive p5 denominator center for ligand 1
+  delta_lig2      positive p5 denominator center for ligand 2
+  lambda_lig1     p-hole SOC scale for ligand 1, same unit as Delta
+  lambda_lig2     p-hole SOC scale for ligand 2, same unit as Delta
+  output          block [t_mu] 14x14 = direct + folded ligand correction
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import tomllib
 from pathlib import Path
@@ -73,20 +79,21 @@ def _load_t_mu_block(path: Path) -> NDArray[np.complexfloating]:
 # Fixed p-ligand model
 # ---------------------------------------------------------------------------
 
-def _p_angular_momentum_real_basis() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Angular momentum matrices for p_x, p_y, p_z real harmonics."""
-    lx = np.array(
-        [[0.0, 0.0, 0.0], [0.0, 0.0, -1j], [0.0, 1j, 0.0]],
-        dtype=complex,
-    )
-    ly = np.array(
-        [[0.0, 0.0, 1j], [0.0, 0.0, 0.0], [-1j, 0.0, 0.0]],
-        dtype=complex,
-    )
-    lz = np.array(
-        [[0.0, -1j, 0.0], [1j, 0.0, 0.0], [0.0, 0.0, 0.0]],
-        dtype=complex,
-    )
+def _p_angular_momentum_complex_basis() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Angular momentum matrices for p complex harmonics ordered m=-1,0,+1."""
+    m_vals = np.array([-1.0, 0.0, 1.0], dtype=float)
+    lz = np.diag(m_vals).astype(complex)
+    l_plus = np.zeros((N_P_SPINOR // 2, N_P_SPINOR // 2), dtype=complex)
+    ell = 1.0
+    for col, m in enumerate(m_vals):
+        m_to = m + 1.0
+        if m_to > ell:
+            continue
+        row = int(np.where(np.isclose(m_vals, m_to))[0][0])
+        l_plus[row, col] = np.sqrt(ell * (ell + 1.0) - m * (m + 1.0))
+    l_minus = l_plus.conj().T
+    lx = 0.5 * (l_plus + l_minus)
+    ly = (l_plus - l_minus) / (2.0j)
     return lx, ly, lz
 
 
@@ -98,12 +105,17 @@ def _spin_half_down_up_basis() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return sx, sy, sz
 
 
-def fixed_p_ligand_hamiltonian(delta_lig: float, lambda_p: float = 0.0) -> np.ndarray:
-    """Return the fixed 6x6 p-ligand Hamiltonian in px/py/pz, down/up order.
+def _p_l_dot_s_complex_basis() -> np.ndarray:
+    lx, ly, lz = _p_angular_momentum_complex_basis()
+    sx, sy, sz = _spin_half_down_up_basis()
+    return np.kron(lx, sx) + np.kron(ly, sy) + np.kron(lz, sz)
 
-    The f reference is zero, so the p-shell center is ``-delta_lig``.  The SOC
-    term is ``lambda_p * L.S``.  Its eigenvalues are ``-delta_lig - lambda_p``
-    for the j=1/2 doublet and ``-delta_lig + lambda_p/2`` for the j=3/2 quartet.
+
+def fixed_p_ligand_hamiltonian(delta_lig: float, lambda_p: float = 0.0) -> np.ndarray:
+    """Return the electron p-ligand Hamiltonian in m=-1,0,+1, down/up order.
+
+    This public helper is kept for checking the SOC convention.  The downfold
+    path below uses the equivalent p5 hole propagator directly.
     """
     delta = float(delta_lig)
     lam = float(lambda_p)
@@ -113,76 +125,84 @@ def fixed_p_ligand_hamiltonian(delta_lig: float, lambda_p: float = 0.0) -> np.nd
             "fixed ligand parameters must be finite",
             actual={"delta_lig": delta, "lambda_p": lam},
         )
-    lx, ly, lz = _p_angular_momentum_real_basis()
-    sx, sy, sz = _spin_half_down_up_basis()
-    l_dot_s = np.kron(lx, sx) + np.kron(ly, sy) + np.kron(lz, sz)
+    l_dot_s = _p_l_dot_s_complex_basis()
     return -delta * np.eye(N_P_SPINOR, dtype=complex) + lam * l_dot_s
 
 
 # ---------------------------------------------------------------------------
-# Resolvent G_k
+# p5 hole propagator
 # ---------------------------------------------------------------------------
 
-def _ligand_resolvent(
-    h_lig: NDArray[np.complexfloating],
-    e_f: float,
+def _p5_hole_soc_analytic_q() -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(c_eta, Q)`` for ``-(L.S).T`` in the fixed p-hole basis."""
+    sq13 = np.sqrt(1.0 / 3.0)
+    sq23 = np.sqrt(2.0 / 3.0)
+    c_eta = np.array([-0.5, -0.5, -0.5, -0.5, 1.0, 1.0], dtype=float)
+    q = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, sq13, 0.0, 0.0, sq23, 0.0],
+            [0.0, sq23, 0.0, 0.0, -sq13, 0.0],
+            [0.0, 0.0, sq23, 0.0, 0.0, -sq13],
+            [0.0, 0.0, sq13, 0.0, 0.0, sq23],
+            [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        ],
+        dtype=complex,
+    )
+    return c_eta, q
+
+
+def _p5_hole_propagator(
+    delta_lig: float,
+    lambda_p: float,
     *,
     degenerate_tol: float,
-) -> tuple[NDArray[np.complexfloating], NDArray[np.floating]]:
-    """G_k = (E_f · I − h_lig)^{-1}, computed via eigendecomposition:
+) -> tuple[NDArray[np.complexfloating], NDArray[np.floating], NDArray[np.floating]]:
+    """Build ``G_p[mu,nu] = sum_eta conj(Q[mu,eta]) Q[nu,eta] / E_p5[eta]``."""
+    delta = float(delta_lig)
+    lam = float(lambda_p)
+    if not np.isfinite(delta) or not np.isfinite(lam):
+        raise InputError(
+            "FXE-INPUT-003",
+            "fixed ligand parameters must be finite",
+            actual={"delta_lig": delta, "lambda_p": lam},
+        )
 
-        G_k = Σ_a |a⟩^{sp} (1 / (E_f − E_a^{sp})) ⟨a|^{sp}
+    if abs(lam) == 0.0:
+        c_eta = np.zeros(N_P_SPINOR, dtype=float)
+        q = np.eye(N_P_SPINOR, dtype=complex)
+    else:
+        c_eta, q = _p5_hole_soc_analytic_q()
 
-    where ``|a⟩^{sp}`` and ``E_a^{sp}`` are the single-particle eigenvectors
-    and eigenvalues of ``h_lig`` (the W90 6×6 ligand block).
-
-    * SOC ligand ``h_lig = E_p·I + λ_p·L·S``: eigvals split into
-      ``E_p − λ_p`` (J=1/2 doublet) and ``E_p + λ_p/2`` (J=3/2 quartet);
-      each subspace gets its own ``1/(Δ ± λ_p/2)`` factor automatically.
-    * NSOC ligand is the ``λ_p = 0`` limit: ``h_lig = E_p·I``, 6 degenerate
-      eigvals, ``G_k → (1/Δ_k)·I_6``.  Falls out of the *same* code path
-      exactly (no separate branch).
-
-    Many-body p^5 picture gives the *same* ``G_k`` numerically: U column
-    vectors and denominators ``E_f − E_a^{sp}`` transfer one-to-one, with
-    the multi-body p^6 energy offset cancelling in the PT denominator.
-
-    Returns ``(G_k, eigvals)`` where ``eigvals`` is the single-particle
-    spectrum (real, sorted ascending).  Raises ``FXE-NUM-001`` if any
-    ``|E_f − E_a^{sp}| < degenerate_tol``.  Raises ``FXE-PHYS-001`` if any
-    eigval lies above E_f (Löwdin partitioning convergence condition).
-    """
-    h_sym = 0.5 * (h_lig + h_lig.conj().T)  # symmetrize for eigh stability
-    eigvals, eigvecs = np.linalg.eigh(h_sym)
-    denom = e_f - eigvals
-    above = [int(i) for i, d in enumerate(denom) if d < 0.0]
-    if above:
+    e_p5 = delta + lam * c_eta
+    negative = [int(i) for i, x in enumerate(e_p5) if x < 0.0]
+    if negative:
         raise PhysError(
             "FXE-PHYS-001",
-            "SOC downfold: some ligand eigvals lie above E_f — breaks the "
-            "Löwdin partitioning assumption that all 6 single-particle "
-            "ligand states are below E_f (closed-shell p^6)",
+            "p5 downfold: negative p5 denominator",
             actual={
-                "e_f": float(e_f),
-                "eigvals": [float(x) for x in eigvals],
-                "above_indices": above,
-                "above_eigvals": [float(eigvals[i]) for i in above],
+                "delta_lig": delta,
+                "lambda_p": lam,
+                "p5_energies": [float(x) for x in e_p5],
+                "negative_indices": negative,
             },
         )
-    if np.any(np.abs(denom) < degenerate_tol):
-        bad_idx = [int(i) for i, d in enumerate(denom) if abs(d) < degenerate_tol]
+    if np.any(np.abs(e_p5) < degenerate_tol):
+        bad_idx = [int(i) for i, x in enumerate(e_p5) if abs(x) < degenerate_tol]
         raise NumError(
             "FXE-NUM-001",
-            "SOC downfold: degenerate ligand denominator |E_f − E_a| < tol",
+            "p5 downfold: p5 denominator below tolerance",
             expected={"degenerate_tol": float(degenerate_tol)},
             actual={
-                "e_f": float(e_f),
-                "eigvals": [float(x) for x in eigvals],
+                "delta_lig": delta,
+                "lambda_p": lam,
+                "p5_energies": [float(x) for x in e_p5],
                 "bad_indices": bad_idx,
             },
         )
-    g = (eigvecs * (1.0 / denom)) @ eigvecs.conj().T
-    return g, eigvals
+
+    g_p = (q.conj() * (1.0 / e_p5)) @ q.T
+    return g_p, e_p5, c_eta
 
 
 # ---------------------------------------------------------------------------
@@ -209,15 +229,16 @@ def downfold_to_ff_fixed_ligand(
     output: str | Path,
     delta_lig1: float,
     delta_lig2: float,
+    lambda_lig1: float,
+    lambda_lig2: float,
     direct_t_mu_in: str | Path | None = None,
-    lambda_p: float = 0.0,
     degenerate_tol: float = 1e-6,
 ) -> dict[str, Any]:
-    """Downfold with the analytic fixed p-ligand Hamiltonian.
+    """Downfold with the fixed p5 hole propagator.
 
-    This path does not read onsite input.  It uses
-    ``h_lig_k = -Delta_k * I + lambda_p * L.S`` with independent
-    ``Delta_1``/``Delta_2`` values and the fixed f reference ``E_f = 0``.
+    This path does not read onsite input.  It uses independent positive
+    ``Delta_1``/``Delta_2`` values and independent p-hole SOC splittings
+    ``lambda_lig1 * c_eta`` / ``lambda_lig2 * c_eta``.
     If ``direct_t_mu_in`` is supplied, that direct f-f ``[t_mu]`` is added to
     the folded ligand correction; otherwise the direct term is zero.
     """
@@ -227,10 +248,13 @@ def downfold_to_ff_fixed_ligand(
         raise IOError_("FXE-IO-001", f"hopping_fp_in missing: {fp_path}", paths={"path": str(fp_path)})
 
     t_fp = _load_fp_blocks(fp_path)
-    e_f = 0.0
     delta_by_lig = {
         "lig1": float(delta_lig1),
         "lig2": float(delta_lig2),
+    }
+    lambda_by_lig = {
+        "lig1": float(lambda_lig1),
+        "lig2": float(lambda_lig2),
     }
 
     per_ligand: dict[str, dict[str, Any]] = {}
@@ -249,18 +273,18 @@ def downfold_to_ff_fixed_ligand(
     t_correction = np.zeros((N_F_SPINOR, N_F_SPINOR), dtype=complex)
 
     for lig in ("lig1", "lig2"):
-        h_lig = fixed_p_ligand_hamiltonian(delta_by_lig[lig], lambda_p)
-        g_k, eigvals = _ligand_resolvent(
-            h_lig,
-            e_f,
+        g_p, e_p5, c_eta = _p5_hole_propagator(
+            delta_by_lig[lig],
+            lambda_by_lig[lig],
             degenerate_tol=degenerate_tol,
         )
         per_ligand[lig] = {
-            "eigvals": [float(x) for x in eigvals],
-            "deltas": [float(e_f - x) for x in eigvals],
             "delta_lig": delta_by_lig[lig],
+            "lambda_lig": lambda_by_lig[lig],
+            "p5_energies": [float(x) for x in e_p5],
+            "p5_soc_coefficients": [float(x) for x in c_eta],
         }
-        contrib = t_fp[("f1", lig)] @ g_k @ t_fp[("f2", lig)].conj().T
+        contrib = t_fp[("f1", lig)] @ g_p @ t_fp[("f2", lig)].conj().T
         per_ligand[lig]["contrib_norm"] = float(np.linalg.norm(contrib))
         t_correction += contrib
 
@@ -272,12 +296,12 @@ def downfold_to_ff_fixed_ligand(
         "hopping_fp_in": str(fp_path),
         "direct_t_mu_in": (None if direct_t_mu_path is None else str(direct_t_mu_path)),
         "output": str(out_path),
-        "ligand_model": "fixed_p_soc",
+        "ligand_model": "fixed_p5_hole",
         "delta_mode": "manual",
         "delta_lig1": float(delta_lig1),
         "delta_lig2": float(delta_lig2),
-        "lambda_p": float(lambda_p),
-        "e_f": e_f,
+        "lambda_lig1": float(lambda_lig1),
+        "lambda_lig2": float(lambda_lig2),
         "degenerate_tol": float(degenerate_tol),
         "direct_norm": float(np.linalg.norm(t_direct)),
         "correction_norm": float(np.linalg.norm(t_correction)),
@@ -296,7 +320,7 @@ def downfold_to_ff_fixed_ligand(
 # ---------------------------------------------------------------------------
 
 def downfold_from_toml(toml_path: str | Path) -> dict[str, Any]:
-    """Load config and run the current no-onsite downfold path.
+    """Load config and run the current no-onsite p5-hole downfold path.
 
     Config schema::
 
@@ -306,7 +330,8 @@ def downfold_from_toml(toml_path: str | Path) -> dict[str, Any]:
         output = "out/hopping_ff_downfold.txt"
         delta_lig1 = 1.0
         delta_lig2 = 1.0
-        lambda_p = 0.0         # optional
+        lambda_lig1 = 0.0
+        lambda_lig2 = 0.0
         degenerate_tol = 1e-6  # optional
     """
     path = Path(toml_path)
@@ -319,37 +344,43 @@ def downfold_from_toml(toml_path: str | Path) -> dict[str, Any]:
         "output",
         "delta_lig1",
         "delta_lig2",
+        "lambda_lig1",
+        "lambda_lig2",
     )
     missing = [k for k in required if k not in cfg]
     if missing:
         raise InputError(
-                "FXE-INPUT-003",
-                f"config missing fields: {missing}",
-                expected={"required": list(required)},
-                actual={"present": sorted(cfg.keys())},
+            "FXE-INPUT-003",
+            f"config missing fields: {missing}",
+            expected={"required": list(required)},
+            actual={"present": sorted(cfg.keys())},
         )
     return downfold_to_ff_fixed_ligand(
         hopping_fp_in=cfg["hopping_fp_in"],
         output=cfg["output"],
         delta_lig1=float(cfg["delta_lig1"]),
         delta_lig2=float(cfg["delta_lig2"]),
+        lambda_lig1=float(cfg["lambda_lig1"]),
+        lambda_lig2=float(cfg["lambda_lig2"]),
         direct_t_mu_in=cfg.get("direct_t_mu_in"),
-        lambda_p=float(cfg.get("lambda_p", 0.0)),
         degenerate_tol=float(cfg.get("degenerate_tol", 1e-6)),
     )
 
 
-if __name__ == "__main__":
-    import sys
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Downfold f-p hopping blocks into an effective f-f hopping block.")
+    parser.add_argument("config", help="TOML config path")
+    args = parser.parse_args(argv)
+    downfold_from_toml(args.config)
+    return 0
 
-    if len(sys.argv) != 2:
-        print("Usage: python -m fexchange.tools.w90_downfold config.toml", file=sys.stderr)
-        sys.exit(1)
-    downfold_from_toml(sys.argv[1])
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 # Numerical invariants (verified in tests):
 #  1. f-basis unitary:  T_eff -> U_f · T_eff · U_f^†.
-#  2. p-basis unitary:  cancels between t and G_k (no effect).
-#  3. λ_p = 0 (h_lig = scalar·I):  G_k = (1/Δ)·I_6 exactly (np.array_equal).
+#  2. p-hole basis unitary:  cancels between t and G_p.
+#  3. lambda_lig = 0:  G_p = (1/Delta) · I_6 exactly.
 #  4. T_eff is the off-diagonal block H[f1, f2], not required Hermitian;
-#     full H = T_eff c†_f1 c_f2 + h.c. is Hermitian.
+#     full H = T_eff cdag_f1 c_f2 + h.c. is Hermitian.
