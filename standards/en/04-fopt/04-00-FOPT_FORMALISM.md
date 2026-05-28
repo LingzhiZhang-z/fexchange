@@ -13,9 +13,11 @@ MUST:
 - This standard defines Levels `L0`, `L1`, `L2`, and `L3`.
 - `L3` enumerates the 32 fourth-order hopping paths for the two-f-site /
   two-ligand cluster and contracts the three resolvents.
-- `L3` consumes the low-energy projector `W` and emits raw total `h_eff_4`
+- `L2` consumes the low-energy projector `W` and stores projected active-pair
+  blocks.
+- `L3` consumes projected active-pair blocks and emits raw total `h_eff_4`
   plus the five process-resolved raw contributions.
-- Runtime FOPT `L3` requires a two-dimensional projected local space and must
+- Runtime FOPT exchange output requires a two-dimensional projected local space and must
   apply the shared spin-1/2 mapping to total `h_eff_4` and to each of the five
   process-resolved contributions.
 
@@ -68,12 +70,12 @@ MUST:
   Fock determinant bases.
 - `L1` rotates/binds the `L0` primitives into site/lambda-specific local working
   bases and physical one-particle frames.
-- `L2` builds active-pair p-to-f hopping blocks `V_plus`.
+- `L2` builds projected active-pair p-to-f hopping blocks `V_plus`.
 - `L2` must consume hopping matrices but must not consume resolvents or path lists.
 - `L3` consumes `V_plus`, per-ligand p-sector energies, f-sector
-  intermediate energies, and `W`; it emits raw total `h_eff_4`, raw
-  process-resolved `h_eff_4`, and spin-1/2 mapped exchange outputs. Runtime
-  FOPT exchange output requires `W.shape[1] == 2`.
+  intermediate energies; it emits raw total `h_eff_4`, raw process-resolved
+  `h_eff_4`, and spin-1/2 mapped exchange outputs. Runtime FOPT exchange output
+  requires projected local dimension `n_k == 2`.
 
 Code form:
 ```text
@@ -157,8 +159,9 @@ MUST:
 - `L2` active-pair bases use local order `f < p`.
 - Flattened tensor-product ordering is row-major with the f index outside and
   the ligand p index inside.
-- `L2` active-pair blocks are bare tensor-product blocks and must not include
-  any inter-block fermion embedding sign.
+- `L2` active-pair blocks are tensor-product blocks with only the local $f^n$
+  endpoint projected by `W`; they must not include any inter-block fermion
+  embedding sign.
 - All inter-block fermion signs for the full order `f1 < f2 < pA < pB` are
   reserved for future `L3`.
 

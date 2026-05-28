@@ -121,9 +121,12 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
         key = (
             f"L2|branch={branch}|keyL1={level_key('L1', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
             f"|hopping_name={hopping_name}"
+            f"|kramer_name={kramer_name}"
         )
         if hopping_sig:
             key += f"|hopping_sha1={hopping_sig}"
+        if projector_sig:
+            key += f"|projector_sha1={projector_sig}"
         return f"{key}|sv={sver}"
     if level == "L3":
         if branch == "sopt":
@@ -131,22 +134,18 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
             key = (
                 f"L3|branch=sopt|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
                 f"|U={fmt12(float(s['U']))}|Jh={fmt12(float(s['Jh']))}|z={fmt12(float(s['zeta']))}"
-                f"|kramer_name={kramer_name}"
             )
             if denom_sig:
                 key += f"|denomsig={denom_sig}"
         else:
             key = (
                 f"L3|branch=fopt|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
-                f"|kramer_name={kramer_name}"
             )
             if denom_sig:
                 key += f"|denomsig={denom_sig}"
             ligand_sig = ligand_signature(cfg)
             if ligand_sig:
                 key += f"|ligandsig={ligand_sig}"
-        if projector_sig:
-            key += f"|projector_sha1={projector_sig}"
         return f"{key}|sv={sver}"
     if level == "L4":
         raise InputError("FXE-INPUT-003", "L4 is not a runtime artifact level; use L3")

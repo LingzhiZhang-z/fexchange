@@ -288,16 +288,23 @@ def ensure_l2_sopt(
         return
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", run_name=cfg["runtime"]["run_name"])
+    stage_dir = build_stage_path(
+        cfg["paths"]["output_root"],
+        "L2",
+        run_name=cfg["runtime"]["run_name"],
+    )
     loaded = try_load_l2(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
 
     ensure_l1_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
+    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l1"]["n_j"])
+    check_orthonormal(W, label="W_input", module="projection")
     t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb)
     state["t_mu"] = t_mu
-    result = build_L2(state["l1"], t_mu)
+    state["W"] = W
+    result = build_L2(state["l1"], t_mu, W)
     state["l2"] = result
     persist_l2(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62)
 
@@ -320,7 +327,6 @@ def ensure_l3_sopt(
         cfg["paths"]["output_root"],
         "L3",
         run_name=cfg["runtime"]["run_name"],
-        kramer_name=str(cfg["runtime"]["kramer_name"]),
     )
     loaded = try_load_l3_sopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -332,17 +338,15 @@ def ensure_l3_sopt(
     if _uses_ion_ed(scheme):
         ensure_ion_ed_adjacent(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62)
     E_u_np1, E_u_nm1 = compute_intermediate_energies(cfg, state, n_ele=n_ele)
-    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l2"]["n_j"])
-    check_orthonormal(W, label="W_input", module="projection")
-    labels = labels_abcd_lex(W.shape[1])
-    validate_labels_abcd(labels, n_k=W.shape[1])
-    result = build_L3(state["l2"], E_u_np1, E_u_nm1, W, n_ele=n_ele)
-    if W.shape[1] == 2:
+    n_k = int(state["l2"]["n_k"])
+    labels = labels_abcd_lex(n_k)
+    validate_labels_abcd(labels, n_k=n_k)
+    result = build_L3(state["l2"], E_u_np1, E_u_nm1, n_ele=n_ele)
+    if n_k == 2:
         result.update(spin12_map(result["Heff_mu_abcd"]))
     state["l3"] = result
     state["labels_abcd"] = labels
-    state["W"] = W
-    persist_l3_sopt(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, labels=labels, W=W)
+    persist_l3_sopt(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, labels=labels)
 
 
 def ensure_l0_fopt(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> None:
@@ -470,15 +474,23 @@ def ensure_l2_fopt(
         return
     run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
     write_run_source_txt(run_dir, cfg)
-    stage_dir = build_stage_path(cfg["paths"]["output_root"], "L2", run_name=cfg["runtime"]["run_name"])
+    stage_dir = build_stage_path(
+        cfg["paths"]["output_root"],
+        "L2",
+        run_name=cfg["runtime"]["run_name"],
+    )
     loaded = try_load_l2_fopt(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
         state["l2"] = loaded
         return
     ensure_l1_fopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
+    n_j = state["l1"]["f"][1]["F_n_np1"].shape[2]
+    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=n_j)
+    check_orthonormal(W, label="W_input", module="projection")
     t = _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6)
     state["t_per_pair"] = t
-    result = build_L2(state["l1"], t)
+    state["W"] = W
+    result = build_L2(state["l1"], t, W)
     state["l2"] = result
     persist_l2_fopt(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62)
 
@@ -502,7 +514,6 @@ def ensure_l3_fopt(
         cfg["paths"]["output_root"],
         "L3",
         run_name=cfg["runtime"]["run_name"],
-        kramer_name=str(cfg["runtime"]["kramer_name"]),
     )
     loaded = try_load_l3_fopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -524,9 +535,7 @@ def ensure_l3_fopt(
                 U_p=float(params["U_p"]),
                 lambda_p=float(params.get("lambda_p", 0.0)),
             )
-    n_j = state["l1"]["f"][1]["F_n_np1"].shape[2]
-    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=n_j)
-    l3_raw = build_L3(state["l2"], energies, W, n_ele=n_ele, return_per_path=True)
+    l3_raw = build_L3(state["l2"], energies, n_ele=n_ele, return_per_path=True)
     result_arr = np.asarray(l3_raw["H_total"], dtype=np.complex128)
     process_heff = np.stack(
         [np.asarray(l3_raw["per_process"][proc], dtype=np.complex128) for proc in FOPT_PROCESS_LABELS],
@@ -552,7 +561,6 @@ def ensure_l3_fopt(
         }
     )
     state["l3"] = result
-    state["W"] = W
     persist_l3_fopt(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62)
 
 

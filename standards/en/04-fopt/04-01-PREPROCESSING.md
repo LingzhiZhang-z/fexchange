@@ -15,16 +15,18 @@ Per-level definition:
   `{F_create_raw, P_create_raw}`.
 - `L1`: input `{F_create_raw, P_create_raw, U_f, U_p, R_f, R_p}`;
   output `{F_create_rot, P_create_rot}`.
-- `L2`: input `{F_create_rot, P_create_rot, t_r_lambda, charge_pairs}`;
-  output `{V_plus}`.
+- `L2`: input `{F_create_rot, P_create_rot, t_r_lambda, W, charge_pairs}`;
+  output projected `{V_plus}`.
 
 Constraint:
 - `L0/L1` must not consume hopping matrices.
-- `L2` must not consume resolvents, path lists, or W/Kramers projectors.
+- `L2` must not consume resolvents or path lists.
+- `L2` must consume the low-energy projector `W` and project the $f^n$ end of
+  every active-pair block before persistence.
 
 Code form:
 ```text
-FOPT_L0_L2_inputs_exclude = {resolvents, four_hop_paths, W, kramer_labels}
+FOPT_L0_L2_inputs_exclude = {resolvents, four_hop_paths}
 ```
 
 Validation:
@@ -141,6 +143,7 @@ Validation:
 MUST:
 - Build only `V_plus` blocks for p-to-f hopping.
 - Use the active-pair tensor-product order `f < p`.
+- Project the $f^n$ endpoint of each active-pair block with `W` inside `L2`.
 - Do not include any inter-block fermion embedding sign.
 - Reserve all full-cluster embedding signs for future `L3`.
 - Do not store reverse hopping blocks.
@@ -163,14 +166,22 @@ Code form:
 V_plus[r,lambda,N_f,N_p] = sum_alpha_beta t[alpha,beta] * kron(F_create_rot[r][N_f][alpha], P_create_rot[lambda][N_p-1][beta]^dagger)
 ```
 
+Projection rule:
+- For sectors with input $f^n$ (`fn_p6`, `fn_p5`), project the low-f/input
+  leg with `W`.
+- For sectors with output $f^n$ (`fnm1_p6`), project the high-f/output leg
+  with `W.conj()`.
+
 Index:
 - `alpha` is the physical f orbital index in `t_r_lambda`.
 - `beta` is the physical ligand orbital index in `t_r_lambda`.
-- Rows are ordered as `(f_out,p_out)`.
-- Columns are ordered as `(f_in,p_in)`.
+- Tensor axes are ordered as `(f_out,p_out,f_in,p_in)`.
+- The axis corresponding to the $f^n$ endpoint has dimension `n_k`; adjacent
+  $f^{n+1}/f^{n-1}` endpoints remain in the selected intermediate basis.
 
 Validation:
-- `V_plus.shape == (D_f[N_f+1] * D_p[N_p-1], D_f[N_f] * D_p[N_p])`.
+- `V_plus.shape == (D_f_out_projected * D_p[N_p-1], D_f_in_projected * D_p[N_p])`
+  in flattened form, equivalently `(f_out,p_out,f_in,p_in)` in tensor form.
 - Linearity check:
   `V_plus(t1 + c*t2) == V_plus(t1) + c*V_plus(t2)`.
 - Zero hopping check:

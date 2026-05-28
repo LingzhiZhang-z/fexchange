@@ -163,10 +163,9 @@ This file covers $L2/L3$ and uses three variable classes:
 - Output variables: interface variables emitted by this level for downstream levels/callers.
 
 Per-level definition:
-- $L2$: input `{A, B, t_mu}`; intermediate `{workspace}`; output `{M_A, M_B}`.
-- $L3$: input `{M_A, M_B, E_u, W, labels_abcd, labels_order_id}` or
-  reference `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate
-  `{E_uv, E_rs, h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}` and, when the projected
+- $L2$: input `{A, B, t_mu, W}`; intermediate `{workspace}`; output `{M_A, M_B}` in the projected basis.
+- $L3$: input `{M_A, M_B, E_u, labels_abcd, labels_order_id}`; intermediate
+  `{E_uv, E_rs, h_mu_abcd}`; output `{h_mu_abcd, Heff_mu_abcd}` and, when the projected
   local space is `2 x 2`, optional `{J_mu, mapping_residual}`.
 
 ## 0.0.0) $E_u$ Intermediate-State Energy Source (MUST)
@@ -302,7 +301,7 @@ Validation:
 
 ## 0.1) External Runtime Input Schema for $L2/L3$ (MUST)
 MUST:
-- Hopping (`t_mu`) and Kramer projector (`W`, `kramer_labels`) are external runtime inputs.
+- Hopping (`t_mu`) and Kramer projector (`W`, `kramer_labels`) are external L2 runtime inputs.
 - Global header gate from `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` is mandatory:
   `schema_version`, `standard_version`, `basis_id`, `orbital_order_id`, `unit`.
 - One run computes one bond only; no `mu` axis is allowed in input hopping payload.
@@ -341,7 +340,8 @@ Validation:
 
 ## 1) Level 2: Route Factors $M_A/M_B$ (Phi Form, MUST)
 MUST:
-- This level computes route factors after site-binding and hopping contraction.
+- This level computes projected route factors after site-binding, hopping contraction,
+  and projection of the external $f^n$ LSJM legs by $W$.
 - Use symbols $M_A$ and $M_B$ (instead of $\Phi$).
 - This level does not build/store explicit $K_{j_3 j_4,j_1 j_2}^{pq,p'q'}$.
 
@@ -431,21 +431,25 @@ Persisted L2 outputs are defined as:
 
 Math:
 $$
-M_{A,uv;j_1j_2}^{(\mu)} \equiv M_{A,uv;j_1j_2}^{R,(\mu)},
+M_{A,uv;ab}^{(\mu)}
+\equiv
+\sum_{j_1j_2}M_{A,uv;j_1j_2}^{R,(\mu)}W_{j_1a}W_{j_2b},
 \qquad
-M_{B,rs;j_1j_2}^{(\mu)} \equiv M_{B,rs;j_1j_2}^{R,(\mu)}.
+M_{B,rs;ab}^{(\mu)}
+\equiv
+\sum_{j_1j_2}M_{B,rs;j_1j_2}^{R,(\mu)}W_{j_1a}W_{j_2b}.
 $$
 
 Persisted axis order is fixed:
-- `M_A` axis order: `(u, v, j1, j2)` with `axis_order_id = "uvj1j2_v1"`.
-- `M_B` axis order: `(r, s, j1, j2)` with `axis_order_id = "rsj1j2_v1"`.
+- `M_A` axis order: `(u, v, a, b)` with `axis_order_id = "uvab_v1"`.
+- `M_B` axis order: `(r, s, a, b)` with `axis_order_id = "rsab_v1"`.
 
 Code form:
 ```text
 build M_A over (u,v) blocks for this bond
 build M_B over (r,s) blocks for this bond
-persist M_A as M_A[u,v,j1,j2]  # uvj1j2_v1
-persist M_B as M_B[r,s,j1,j2]  # rsj1j2_v1
+persist M_A as M_A[u,v,a,b]  # uvab_v1
+persist M_B as M_B[r,s,a,b]  # rsab_v1
 ```
 
 Validation:
@@ -453,9 +457,9 @@ Validation:
 - Use blockwise streaming over `(u,v)` and `(r,s)`; full dense materialization is optional debug mode only.
 - Persisted metadata must include `axis_order_id` for `M_A/M_B`.
 
-## 2) Internal Denominator Summation to $h_{pre,j}^{(\mu)}$ (MUST)
+## 2) Denominator Summation to $h_{\mu}^{(\mu)}$ (MUST)
 MUST:
-- This internal calculation sums intermediate states with denominators and constructs $h_{pre,j}^{(\mu)}$.
+- This calculation sums projected L2 route factors with denominators and constructs $h_{\mu}^{(\mu)}$.
 - It is algebraically equivalent to the old `$K$ then contract with $t$` route.
 - It constructs $E_{uv}$ and $E_{rs}$ from `E_u`; these are not defined in $L2$.
 
@@ -479,85 +483,71 @@ $\Delta_{uv}$ and $\Delta_{rs}$ can be represented as denominator vectors
 
 Math:
 $$
-h_{\mathrm{pre},j_3j_4,j_1j_2}^{(\mu)}
+h_{cd,ab}^{(\mu)}
 =
 \sum_{u,v}
 \frac{
-\left(M_{A,uv;j_3j_4}^{(\mu)}\right)^*
-M_{A,uv;j_1j_2}^{(\mu)}
+\left(M_{A,uv;cd}^{(\mu)}\right)^*
+M_{A,uv;ab}^{(\mu)}
 }{\Delta_{uv}}
 +
 \sum_{r,s}
 \frac{
-\left(M_{B,rs;j_3j_4}^{(\mu)}\right)^*
-M_{B,rs;j_1j_2}^{(\mu)}
+\left(M_{B,rs;cd}^{(\mu)}\right)^*
+M_{B,rs;ab}^{(\mu)}
 }{\Delta_{rs}}.
 $$
 
 Code form:
 ```text
-h_pre_j_mu = sum_uv( conj(M_A) * M_A / Delta_uv ) + sum_rs( conj(M_B) * M_B / Delta_rs )
+h_mu_abcd = sum_uv( conj(M_A) * M_A / Delta_uv ) + sum_rs( conj(M_B) * M_B / Delta_rs )
 ```
 
 Equivalent matrix contraction (recommended):
 Code form:
 ```text
-# flatten (j3,j4)->a, (j1,j2)->b
-YA = M_A.reshape(Nuv, J2)
+# flatten (c,d)->row, (a,b)->col
+YA = M_A.reshape(Nuv, K2)
 w_uv = 1.0 / Delta_uv
 hA = YA.conj().T @ (w_uv[:,None] * YA)
 
-YB = M_B.reshape(Nrs, J2)
+YB = M_B.reshape(Nrs, K2)
 w_rs = 1.0 / Delta_rs
 hB = YB.conj().T @ (w_rs[:,None] * YB)
 
-h_pre_j_mu = (hA + hB).reshape(J,J,J,J)
+h_mu_abcd = (hA + hB).reshape(n_k,n_k,n_k,n_k)
 ```
 
 Validation:
 - Denominator must follow $\Delta=E_0-E_{\mathrm{intermediate}}$.
-- Zero-hop check: if `t=0`, then `h_pre_j_mu=0`.
+- Zero-hop check: if `t=0`, then `h_mu_abcd=0`.
 
 Output:
-- `h_pre_j_mu` is an internal/reference tensor, not a standalone runtime artifact.
+- `h_pre_j_mu` is a reference-only tensor, not a standalone runtime artifact.
 
 ## 3) Level 3: Fix Kramers Basis and Build Final Outputs (MUST)
 MUST:
-- Inside final $L3$, apply outer $W$ projection.
 - Final public interface must use $a,b,c,d$ semantics.
-- $W$ must map from the $f^n$ SOC-lowest LSJM subspace to the CEF/Kramers basis.
+- Runtime $L3$ must not consume or reload $W$; the projector has already been
+  applied in $L2$.
 
 Math:
 $$
-h_{\mathrm{pre},cd,ab}^{(\mu)}
-=
-\sum_{j_3,j_4,j_1,j_2}
-(W_{j_3 c})^*(W_{j_4 d})^*
-h_{\mathrm{pre},j_3j_4,j_1j_2}^{(\mu)}
-W_{j_1 a}W_{j_2 b}.
-$$
-
-Math:
-$$
-H_{\mathrm{eff},cd,ab}^{(\mu)} = h_{\mathrm{pre},cd,ab}^{(\mu)}.
+H_{\mathrm{eff},cd,ab}^{(\mu)} = h_{cd,ab}^{(\mu)}.
 $$
 
 Code form:
 ```text
-h_pre_mu = project_with_W(h_pre_j_mu, W)
-h_mu_abcd = h_pre_mu
 Heff_mu_abcd = h_mu_abcd
 ```
 
 Runtime path (MUST):
-- The canonical runtime final-$L3$ path is the **fused** implementation
-  (`build_L3` in the current code): it computes `outputs_L3` directly from `{M_A, M_B, E_u, W}`
-  by projecting each route factor's external LSJM legs with `W` first, then
-  performing the same denominator-weighted Gram contraction in the projected
-  ($n_k$) space. The runtime MUST NOT materialize `h_pre_j_mu` on this path.
-- The code form above (materialized `project_with_W(h_pre_j_mu, W)`, i.e.
-  `build_L4_legacy(build_L3_legacy(...), W)`) is the **reference implementation**. It is off
-  the runtime path and serves as the algebraic-equivalence oracle for the fused path.
+- The canonical runtime path computes projected `M_A/M_B` in L2, then computes
+  `outputs_L3` directly from `{M_A, M_B, E_u}`. The runtime MUST NOT materialize
+  `h_pre_j_mu`.
+- The materialized `build_L4_legacy(build_L3_legacy(...), W)` path is the
+  reference implementation. It is off the runtime path and serves as the
+  algebraic-equivalence oracle.
 - The fused path MUST be algebraically equal to the reference path, verified
   numerically within tolerance (pinned at `1e-12` in the test suite). The
   equality holds because $W$ acts only on the external $j$-legs and the
@@ -570,12 +560,12 @@ Applicability (informative):
   near-square) it is roughly neutral or slightly slower, since the projection
   is then applied per intermediate-state pair rather than once on the
   aggregate. Correctness is unaffected in either regime.
-- Contrast with FOPT: both SOPT and FOPT consume $W$ inside $L3$; SOPT keeps a
-  reference materialized path only to anchor the equivalence test.
+- Contrast with FOPT: both SOPT and FOPT consume $W$ inside $L2$ and keep L3
+  projector-free.
 
 Validation:
 - Hermiticity check: $\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$ within tolerance.
-- $W$ projection dimensions must match $h_{\mathrm{pre},j}^{(\mu)}$.
+- Projected L2 trailing dimensions must match `(n_k, n_k)`.
 
 ## 4) Parallel Execution and Root-Write Policy (MUST)
 MUST:

@@ -210,7 +210,8 @@ def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
             "M_B": M_B,
             "n_u": int(M_A.shape[0]),
             "n_v": int(M_A.shape[1]),
-            "n_j": int(M_A.shape[2]),
+            "n_j": int(meta.get("n_j", M_A.shape[2])),
+            "n_k": int(M_A.shape[2]),
         }
     except Exception as exc:
         logger.warning("Invalid cached L2 at %s (%s), recomputing", stage_dir, exc)
@@ -695,6 +696,8 @@ def persist_l2_fopt(
     r62: float,
 ) -> None:
     hashes: list[str] = []
+    projector_sha1 = projector_content_signature(cfg)
+    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     for fs in (1, 2):
         for lig in (1, 2):
             hashes.append(
@@ -709,14 +712,25 @@ def persist_l2_fopt(
         module="fopt.contraction",
         level="L2",
         key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={"n": n_ele, "branch": "fopt"},
+        inputs_summary=build_resolved_inputs_summary(
+            cfg,
+            n_ele=n_ele,
+            r42=r42,
+            r62=r62,
+            projector_sha1=projector_sha1,
+        ),
         tensor_name="V_plus",
-        physical_meaning="FOPT active-pair p-to-f hopping blocks",
+        physical_meaning="FOPT projected active-pair p-to-f hopping blocks",
         basis_id=f"fock14_n{n_ele}_lex_v1",
-        index_definition="V_plus(high_f,high_p,low_f,low_p)",
+        index_definition="V_plus(f_out,p_out,f_in,p_in), with the f^n leg projected to k",
         logical_shape=[],
         payload_files=[f"V_plus_f{fs}_lig{lig}.npz" for fs in (1, 2) for lig in (1, 2)],
-        extra={"numerics_meta": numerics_meta()},
+        extra={
+            "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
+            "kramer_name": kramer_name,
+            "projector_sha1": projector_sha1,
+            "numerics_meta": numerics_meta(),
+        },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
     append_index_record(
@@ -730,6 +744,8 @@ def persist_l2_fopt(
             "r42": r42,
             "r62": r62,
             "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
+            "kramer_name": kramer_name,
+            "projector_sha1": projector_sha1,
             "content_hash": ":".join(hashes),
         },
     )
@@ -887,21 +903,33 @@ def persist_l2(
     output_root = cfg["paths"]["output_root"]
     source_names = cfg.get("inputs", {})
     hopping_name = str(source_names.get("hopping_name", ""))
+    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
+    projector_sha1 = projector_content_signature(cfg)
     content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
         level="L2",
         key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={"n": n_ele},
+        inputs_summary=build_resolved_inputs_summary(
+            cfg,
+            n_ele=n_ele,
+            r42=r42,
+            r62=r62,
+            projector_sha1=projector_sha1,
+        ),
         tensor_name="M_A/M_B",
-        physical_meaning="Route factors for denominator contraction",
+        physical_meaning="Projected route factors for denominator contraction",
         basis_id=f"fock14_n{n_ele}_lex_v1",
-        index_definition="M_A(u,v,j1,j2), M_B(r,s,j1,j2)",
+        index_definition="M_A(u,v,a,b), M_B(r,s,a,b)",
         logical_shape=[*result["M_A"].shape],
         payload_files=["data.npz"],
         extra={
-            "axis_order_id": {"M_A": "uvj1j2_v1", "M_B": "rsj1j2_v1"},
+            "axis_order_id": {"M_A": "uvab_v1", "M_B": "rsab_v1"},
             "hopping_name": hopping_name,
+            "kramer_name": kramer_name,
+            "projector_sha1": projector_sha1,
+            "n_j": int(result.get("n_j", 0)),
+            "n_k": int(result.get("n_k", np.asarray(result["M_A"]).shape[2])),
             "numerics_meta": numerics_meta(),
         },
     )
@@ -917,6 +945,8 @@ def persist_l2(
             "r42": r42,
             "r62": r62,
             "hopping_name": hopping_name,
+            "kramer_name": kramer_name,
+            "projector_sha1": projector_sha1,
             "content_hash": content_hash,
         },
     )
@@ -931,7 +961,6 @@ def persist_l3_sopt(
     r42: float,
     r62: float,
     labels: np.ndarray,
-    W: np.ndarray,
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     fsite = cfg["fsite"]
@@ -942,7 +971,6 @@ def persist_l3_sopt(
         "h_mu_abcd": result["h_mu_abcd"],
         "Heff_mu_abcd": result["Heff_mu_abcd"],
         "labels_abcd": labels,
-        "W": W,
     }
     if "J_mu" in result:
         payload["J_mu"] = result["J_mu"]
