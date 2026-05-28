@@ -66,16 +66,23 @@ def compute_intermediate_energies(
                 actual={"present": sorted(branches)},
             )
 
-    def _energy(lsjm: dict[str, Any], branch: dict[str, Any]) -> NDArray[np.floating]:
+    def _energy(lsjm: dict[str, Any], branch: dict[str, Any], *, include_offset: bool = True) -> NDArray[np.floating]:
         fsite = branch["fsite"]
         return (
-            float(fsite.get("offset", 0.0))
+            (float(fsite.get("offset", 0.0)) if include_offset else 0.0)
             + float(fsite["U"]) * np.asarray(lsjm["coef_F0"], dtype=float)
             + float(fsite["F2"]) * np.asarray(lsjm["coef_F2"], dtype=float)
             + float(fsite["F4"]) * np.asarray(lsjm["coef_F4"], dtype=float)
             + float(fsite["F6"]) * np.asarray(lsjm["coef_F6"], dtype=float)
             + float(fsite["zeta"]) * np.asarray(lsjm["coef_zeta"], dtype=float)
         )
+
+    def _apply_gap_target(energies: NDArray[np.floating], branch: dict[str, Any], gap_key: str) -> NDArray[np.floating]:
+        fsite = branch["fsite"]
+        if gap_key not in fsite:
+            return energies - E_ref
+        target = float(fsite[gap_key])
+        return target + energies - np.min(energies)
 
     ref_mode = str(cfg.get("fsite", {}).get("energy_reference", "lsjm_ground"))
     if ref_mode == "zero":
@@ -107,11 +114,13 @@ def compute_intermediate_energies(
 
     scheme = str(cfg.get("model", {}).get("scheme", "RS")).upper()
     if scheme == "ED":
-        E_np1 = np.asarray(state[f"ioned_{n_ele + 1}"]["energies"], dtype=float) - E_ref
-        E_nm1 = np.asarray(state[f"ioned_{n_ele - 1}"]["energies"], dtype=float) - E_ref
+        E_np1_raw = np.asarray(state[f"ioned_{n_ele + 1}"]["energies"], dtype=float)
+        E_nm1_raw = np.asarray(state[f"ioned_{n_ele - 1}"]["energies"], dtype=float)
     else:
-        E_np1 = _energy(state[f"lsjm_{n_ele + 1}"], branch_np1) - E_ref
-        E_nm1 = _energy(state[f"lsjm_{n_ele - 1}"], branch_nm1) - E_ref
+        E_np1_raw = _energy(state[f"lsjm_{n_ele + 1}"], branch_np1, include_offset="Uplus" not in branch_np1["fsite"])
+        E_nm1_raw = _energy(state[f"lsjm_{n_ele - 1}"], branch_nm1, include_offset="Uminus" not in branch_nm1["fsite"])
+    E_np1 = _apply_gap_target(E_np1_raw, branch_np1, "Uplus")
+    E_nm1 = _apply_gap_target(E_nm1_raw, branch_nm1, "Uminus")
     return E_np1, E_nm1
 
 

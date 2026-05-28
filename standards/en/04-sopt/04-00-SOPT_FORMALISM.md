@@ -12,15 +12,15 @@ Level semantics:
 - $L0$: Fock-basis primitive-transition level (construct transition elements on canonical Fock basis only; no site labels $i/j$; no external state-file dependency).
 - $L1$: local transition-vertex construction (rotate intermediate $f^{n+1}/f^{n-1}$ legs and project the $f^n$ leg onto the lowest-SOC LSJM subspace).
 - $L2$: route-factor construction level (compute $M_A/M_B$ from $A/B$, site-binding, and hopping contraction).
-- $L3$: denominator-weighted intermediate-state summation (accumulate to $h_{\mathrm{pre},j}^{(\mu)}$).
-- $L4$: fixed-Kramers-basis output (apply $W$ projection and produce single-channel $\mathrm{Heff}^{(\mu)}$).
+- $L3$: denominator-weighted fixed-Kramers-basis output (apply $W$ projection and produce
+  single-channel $\mathrm{Heff}^{(\mu)}$).
 
 Execution order:
-- Default and required order is $L0 \to L1 \to L2 \to L3 \to L4$ (i.e., $L3 > L4$).
+- Default and required order is $L0 \to L1 \to L2 \to L3$ for final output.
 
 Ownership boundary:
 - Formula details for $L0/L1$ are in `./standards/en/04-sopt/04-01-PRECOMPUTE.md`.
-- Formula details for $L2/L3/L4$ are in `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`.
+- Formula details for $L2/L3$ are in `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`.
 - Post-SOPT pseudospin-$\tfrac{1}{2}$ mapping is in `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`.
 - This file keeps only cross-level contracts and shared symbols.
 - Site labels $i/j$ are introduced from $L2$; both $L0/L1$ remain site-agnostic.
@@ -129,7 +129,7 @@ Definitions:
 - Intermediate variables: temporary variables used inside a module only; not external interface artifacts.
 - Output variables: variables exported by a module to downstream modules/callers.
 
-Large module (full SOPT chain, $L0 \to L4$):
+Large module (full SOPT chain, $L0 \to L3$):
 - Input variables: `E_u`, `U_np1`, `U_n_soc0`, `U_nm1`, `t_mu`, `W`, `labels_abcd`, `labels_order_id`.
 - Intermediate variables: `X`, `Y`, `A`, `B`, `E_uv`, `E_rs`, `M_A`, `M_B`, `h_pre_j_mu`.
 - Output variables: `h_mu_abcd`, `Heff_mu_abcd`.
@@ -138,8 +138,9 @@ Small modules (per level):
 - $L0$: input `{}`; intermediate `{sign/workspace}`; output `{X, Y}`.
 - $L1$: input `{X, Y, U_np1, U_n_soc0, U_nm1}`; intermediate `{workspace}`; output `{A, B}`.
 - $L2$: input `{A, B, t_mu}`; intermediate `{workspace}`; output `{M_A, M_B}`.
-- $L3$: input `{M_A, M_B, E_u}`; intermediate `{E_uv, E_rs, workspace}`; output `{h_pre_j_mu}`.
-- $L4$: input `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}`.
+- $L3$: input `{M_A, M_B, E_u, W, labels_abcd, labels_order_id}` or
+  `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate
+  `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}`.
 
 ## 1) Core SOPT Rule
 MUST:
@@ -309,9 +310,9 @@ Validation:
 
 ## 6) Minimal I/O and Runtime Checks
 MUST:
-- The execution order is fixed as $L0 \to L1 \to L2 \to L3 \to L4$ (i.e., $L3 > L4$).
-- This file defines SOPT-local levels only (`L0..L4`).
-- Global runtime window (`LMSM..L4`) is defined in
+- The final execution order is fixed as $L0 \to L1 \to L2 \to L3$.
+- This file defines SOPT-local levels only (`L0..L3`).
+- Global runtime window (`LMSM..L3`) is defined in
   `./standards/en/05-io/05-04-RUN_INPUT.md` and
   `./standards/en/05-io/05-00-IO.md`.
 - $L0$ must be generated in-code at runtime and requires no external input artifact.
@@ -323,7 +324,8 @@ MUST:
   spin-$\tfrac{1}{2}$ mapping.
 - Large-module intermediate variables (`X/Y/A/B/E_uv/E_rs/M_A/M_B/h_pre_j_mu`) must not be treated as final public outputs.
 - In split-level execution, upstream level outputs may be used as downstream inputs; they remain intermediate variables in large-module semantics.
-- $E_{uv}/E_{rs}$ are internal $L3$ composite energies derived from `E_u`, and must not be persisted as external outputs.
+- $E_{uv}/E_{rs}$ are internal denominator composite energies derived from
+  `E_u`, and must not be persisted as external outputs.
 - External-facing outputs must use $a,b,c,d$ index semantics; $u,v,r,s$ remain internal intermediate indices only.
 - `labels_abcd` canonical ordering is fixed as lexicographic `(a,b,c,d)` with
   nested-loop realization:
@@ -334,7 +336,7 @@ MUST:
 
 Math:
 $$
-\text{Order: } L0 \rightarrow L1 \rightarrow L2 \rightarrow L3 \rightarrow L4.
+\text{Final order: } L0 \rightarrow L1 \rightarrow L2 \rightarrow L3.
 $$
 
 Math:
@@ -347,7 +349,7 @@ Code form:
 module_inputs       = {E_u, U_np1, U_n_soc0, U_nm1, t_mu, W, labels_abcd, labels_order_id}
 module_internal     = {X, Y, A, B, E_uv, E_rs, M_A, M_B, h_pre_j_mu}
 module_outputs      = {h_mu_abcd, Heff_mu_abcd}
-submodule_handoff   = {L0: X/Y, L1: A/B, L2: M_A&M_B, L3: h_pre_j_mu}
+submodule_handoff   = {L0: X/Y, L1: A/B, L2: M_A&M_B, L3: h_mu_abcd&Heff_mu_abcd}
 labels_order_id     = "abcd_lex_v1"
 ```
 

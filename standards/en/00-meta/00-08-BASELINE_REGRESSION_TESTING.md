@@ -291,14 +291,13 @@ PRB 绘图缩放规则（必须和参考图一致）：
   - `zeta`
   - `offset = 0`
   - `energy_reference = "lsjm_ground"`
-- `[sources]` 中显式写：
-  - `hopping_label`
-  - `projection_label`
+- `[runtime]` 中显式写：
+  - `kramer_name`
 - `[inputs]` 中显式写：
   - `hopping_file`
   - `projector_file`
 - `[paths] output_root = "./outputs"`
-- `[runtime] start_level = "LMSM", end_level = "L4", on_missing_upstream = "fail", read_first = true`
+- `[runtime] start_level = "LMSM", end_level = "L3", on_missing_upstream = "fail", read_first = true`
 - `[checks] strict_mode = true, eps_profile = "default"`
 
 补充说明：
@@ -310,21 +309,20 @@ PRB 绘图缩放规则（必须和参考图一致）：
 
 ## CLI 输出格式
 
-每次 `fexchange run` 成功后，CLI 会在 `<output_root>/` 下写一个 txt 结果文件，文件名形如：
+每次 `fexchange run` 成功后，最终交换结果写在 run-scoped final artifact 目录：
 
 ```
-auto_<n_ele>_<hopping_label>_<projection_label>_<U>_<Jh>_<zeta>__cfg-<hash>.txt
+<output_root>/<run_name>/L3/kramer-<kramer_name>/exchange.txt
 ```
 
-每个文件**一行**，格式为空格分隔的 14 列：
+`exchange.txt` 是 human-readable sidecar；机器契约仍然是同目录的 `data.npz`。
+SOPT 写 total `J_mu`；FOPT 写 total 加 `P1..P5` process-resolved `J_mu`。
 
 ```
-U_meV  Jh_meV  ratio  zeta  Jxx  Jxy  Jxz  Jyx  Jyy  Jyz  Jzx  Jzy  Jzz  error
+# label mapping_residual Jxx Jxy Jxz Jyx Jyy Jyz Jzx Jzy Jzz
 ```
 
-其中 `Jxx ... Jzz` 就是 3×3 的 `J_mu` 交换张量（单位 meV）。
-
-CLI 运行日志中 `point_result=<相对路径>` 指向这个文件，也可以用 glob 匹配。你只需要用 `awk` 提取第 5-13 列即可拿到 `J_mu`，不需要任何 Python 脚本。
+其中 `Jxx ... Jzz` 就是 3×3 的 `J_mu` 交换张量，单位沿用输入 raw 单位。
 
 注意：
 

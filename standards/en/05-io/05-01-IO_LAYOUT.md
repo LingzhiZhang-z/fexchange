@@ -40,10 +40,7 @@ Code form:
       F/data.npz
     L2/
     L3/
-      U-{U:.8f}_Jh-{Jh:.8f}/
-      U-{U:.8f}_Jh-{Jh:.8f}_lig1.U_p-{U_p1:.8f}_lig2.U_p-{U_p2:.8f}/
-    L4/
-      U-{U:.8f}_Jh-{Jh:.8f}/kramer-{kramer_name}/
+      kramer-{kramer_name}/
 ```
 
 Note:
@@ -62,8 +59,7 @@ Code form:
 ./outputs/demo_run/IONED/n-7/states.npz
 ./outputs/demo_run/L1/F/data.npz
 ./outputs/demo_run/L2/data.npz
-./outputs/demo_run/L3/U-3.00000000_Jh-4.00000000/data.npz
-./outputs/demo_run/L4/U-3.00000000_Jh-4.00000000/kramer-k1/data.npz
+./outputs/demo_run/L3/kramer-k1/data.npz
 ```
 
 ## 4) Optional Snapshot Files (Audit-Only)

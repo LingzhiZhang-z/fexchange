@@ -338,7 +338,8 @@ def write_downfold_toml(
     output: Path,
     delta_lig1: float,
     delta_lig2: float,
-    lambda_p: float,
+    lambda_lig1: float,
+    lambda_lig2: float,
 ) -> None:
     lines = [
         f"hopping_fp_in = {q(hopping_fp_in)}",
@@ -346,7 +347,8 @@ def write_downfold_toml(
         f"output = {q(output)}",
         f"delta_lig1 = {delta_lig1:.12e}",
         f"delta_lig2 = {delta_lig2:.12e}",
-        f"lambda_p = {lambda_p:.12e}",
+        f"lambda_lig1 = {lambda_lig1:.12e}",
+        f"lambda_lig2 = {lambda_lig2:.12e}",
         "degenerate_tol = 1.0e-6",
         "",
     ]
@@ -664,8 +666,8 @@ def compute_rechx_onsite_cef_constants(
         "n_ele": n_ele,
         "kramer_name": kramer_name,
         "projector_file": "projector.txt",
-        "zeta_eV": float(onsite_result["zeta_eV"]),
-        "zeta_meV": float(onsite_result["zeta_meV"]),
+        "zeta_eV": float(onsite_result["zeta"]["f1"]["eV"]),
+        "zeta_meV": float(onsite_result["zeta"]["f1"]["meV"]),
         "cef": onsite_result["cef"],
     }
     return compute_rechx_cef_state_from_parameters(
@@ -687,7 +689,8 @@ def write_parameters_toml(
     zeta_e_v: float,
     delta: dict[str, float],
     up_e_v: float,
-    lambda_p_e_v: float,
+    lambda_lig1_e_v: float,
+    lambda_lig2_e_v: float,
 ) -> None:
     lines = [
         'schema_version = "fxe.data_dft_fexchange.v2"',
@@ -710,12 +713,12 @@ def write_parameters_toml(
         "[ligand.1]",
         f"Delta = {float(delta['lig1']):.12e}",
         f"U_p = {up_e_v:.12e}",
-        f"lambda_p = {lambda_p_e_v:.12e}",
+        f"lambda_p = {lambda_lig1_e_v:.12e}",
         "",
         "[ligand.2]",
         f"Delta = {float(delta['lig2']):.12e}",
         f"U_p = {up_e_v:.12e}",
-        f"lambda_p = {lambda_p_e_v:.12e}",
+        f"lambda_p = {lambda_lig2_e_v:.12e}",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -773,7 +776,8 @@ def extract_bond(
     spec: BondSpec,
     overwrite: bool,
     up_e_v: float,
-    lambda_p_e_v: float,
+    lambda_lig1_e_v: float,
+    lambda_lig2_e_v: float,
     f_trace_tol: float,
 ) -> dict[str, Any]:
     cell, atoms, fermi = parse_win(win_path)
@@ -817,7 +821,8 @@ def extract_bond(
         output=folded_ff,
         delta_lig1=delta_lig1,
         delta_lig2=delta_lig2,
-        lambda_p=lambda_p_e_v,
+        lambda_lig1=lambda_lig1_e_v,
+        lambda_lig2=lambda_lig2_e_v,
     )
 
     bond_vec = displacement(cell, atoms, spec.f1, spec.f2)
@@ -1005,7 +1010,8 @@ def main() -> int:
         help="Update existing REChX projector/g from constants CEF params; fall back to onsite only if params are absent.",
     )
     parser.add_argument("--Up-eV", type=float, default=UP_E_V_DEFAULT)
-    parser.add_argument("--lambda-p-eV", type=float, default=LAMBDA_P_E_V_DEFAULT)
+    parser.add_argument("--lambda-lig1-eV", dest="lambda_lig1_e_v", type=float, default=LAMBDA_P_E_V_DEFAULT)
+    parser.add_argument("--lambda-lig2-eV", dest="lambda_lig2_e_v", type=float, default=LAMBDA_P_E_V_DEFAULT)
     parser.add_argument("--f-trace-tol", type=float, default=1.0e-2)
     args = parser.parse_args()
 
@@ -1075,7 +1081,8 @@ def main() -> int:
                         spec=spec,
                         overwrite=args.overwrite,
                         up_e_v=args.Up_eV,
-                        lambda_p_e_v=args.lambda_p_eV,
+                        lambda_lig1_e_v=args.lambda_lig1_e_v,
+                        lambda_lig2_e_v=args.lambda_lig2_e_v,
                         f_trace_tol=args.f_trace_tol,
                     )
                 )

@@ -31,16 +31,13 @@ def extract_source_names(cfg: dict[str, Any]) -> SourceNames:
     """Extract hopping_name and kramer_name from normalized runtime/input tables."""
     inputs = cfg.get("inputs", {})
     runtime = cfg.get("runtime", {})
-    sources = cfg.get("sources", {})
     if not isinstance(inputs, dict):
         inputs = {}
     if not isinstance(runtime, dict):
         runtime = {}
-    if not isinstance(sources, dict):
-        sources = {}
     return SourceNames(
-        hopping_name=str(inputs.get("hopping_name", sources.get("hopping_name", ""))),
-        kramer_name=str(runtime.get("kramer_name", inputs.get("projector_name", sources.get("kramer_name", "")))),
+        hopping_name=str(inputs.get("hopping_name", "")),
+        kramer_name=str(runtime.get("kramer_name", "")),
     )
 
 
@@ -72,14 +69,6 @@ def hopping_content_signature(cfg: dict[str, Any]) -> str:
         return ""
 
 
-def energy_unit_signature(cfg: dict[str, Any]) -> str:
-    """Normalized energy unit used for scalar parameters and hopping inputs."""
-    units = cfg.get("units", {})
-    if not isinstance(units, dict):
-        return "meV"
-    return str(units.get("energy", "meV"))
-
-
 def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, Any]) -> str:
     sver = cfg.get("standard_version", STANDARD_VERSION)
     branch = str(cfg.get("runtime", {}).get("branch", "sopt"))
@@ -88,7 +77,6 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
     hopping_name = sn.hopping_name
     kramer_name = sn.kramer_name
     hopping_sig = hopping_content_signature(cfg)
-    energy_unit = energy_unit_signature(cfg)
     projector_sig = projector_content_signature(cfg)
     branch_sig = branch_signature(cfg, n_ele=n_ele)
     denom_sig = denominator_signature(cfg, n_ele=n_ele)
@@ -133,42 +121,40 @@ def level_key(level: str, *, n_ele: int, r42: float, r62: float, cfg: dict[str, 
         key = (
             f"L2|branch={branch}|keyL1={level_key('L1', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
             f"|hopping_name={hopping_name}"
-            f"|energy_unit={energy_unit}"
         )
         if hopping_sig:
             key += f"|hopping_sha1={hopping_sig}"
         return f"{key}|sv={sver}"
     if level == "L3":
-        s = cfg["fsite"]
-        key = f"L3|branch={branch}|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
-        if branch == "fopt":
-            ligands = cfg.get("ligand", {})
-            lig1 = ligands.get("1", {}) if isinstance(ligands, dict) else {}
-            lig2 = ligands.get("2", {}) if isinstance(ligands, dict) else {}
-            fopt_key = (
-                f"{key}|U={fmt12(float(s['U']))}|Jh={fmt12(float(s['Jh']))}"
-                f"|lig1.U_p={fmt12(float(lig1.get('U_p', 0.0)))}"
-                f"|lig2.U_p={fmt12(float(lig2.get('U_p', 0.0)))}"
+        if branch == "sopt":
+            s = cfg["fsite"]
+            key = (
+                f"L3|branch=sopt|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
+                f"|U={fmt12(float(s['U']))}|Jh={fmt12(float(s['Jh']))}|z={fmt12(float(s['zeta']))}"
+                f"|kramer_name={kramer_name}"
             )
-            if kramer_name:
-                fopt_key += f"|kramer_name={kramer_name}"
-            if projector_sig:
-                fopt_key += f"|projector_sha1={projector_sig}"
-            return f"{fopt_key}|sv={sver}"
-        key = (
-            f"{key}"
-            f"|U={fmt12(float(s['U']))}|Jh={fmt12(float(s['Jh']))}|z={fmt12(float(s['zeta']))}|sv={sver}"
-        )
-        if denom_sig:
-            key += f"|denomsig={denom_sig}"
-        return key
-    if level == "L4":
-        key = (
-            f"L4|branch={branch}|keyL3={level_key('L3', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
-            f"|kramer_name={kramer_name}"
-        )
+            if denom_sig:
+                key += f"|denomsig={denom_sig}"
+        else:
+            key = (
+                f"L3|branch=fopt|keyL2={level_key('L2', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
+                f"|kramer_name={kramer_name}"
+            )
+            if denom_sig:
+                key += f"|denomsig={denom_sig}"
+            ligand_sig = ligand_signature(cfg)
+            if ligand_sig:
+                key += f"|ligandsig={ligand_sig}"
         if projector_sig:
             key += f"|projector_sha1={projector_sig}"
+        return f"{key}|sv={sver}"
+    if level == "L4":
+        raise InputError("FXE-INPUT-003", "L4 is not a runtime artifact level; use L3")
+    if level == "spin12":
+        key = (
+            f"spin12|branch={branch}|keyL3={level_key('L3', n_ele=n_ele, r42=r42, r62=r62, cfg=cfg)}"
+            f"|kramer_name={kramer_name}"
+        )
         return f"{key}|sv={sver}"
     raise InputError("FXE-INPUT-003", f"Unknown level for key generation: {level}")
 
@@ -278,6 +264,25 @@ def denominator_signature(cfg: dict[str, Any], *, n_ele: int) -> str:
     return f"denomsig-{_stable_hash(actual)}"
 
 
+def ligand_signature(cfg: dict[str, Any]) -> str:
+    ligands = cfg.get("ligand")
+    if not isinstance(ligands, dict):
+        return ""
+    payload: dict[str, dict[str, str]] = {}
+    for idx in ("1", "2"):
+        lig = ligands.get(idx)
+        if not isinstance(lig, dict):
+            continue
+        payload[idx] = {
+            "Delta": fmt12(float(lig.get("Delta", 0.0))),
+            "U_p": fmt12(float(lig.get("U_p", 0.0))),
+            "lambda_p": fmt12(float(lig.get("lambda_p", 0.0))),
+        }
+    if not payload:
+        return ""
+    return f"ligandsig-{_stable_hash(payload)}"
+
+
 def _ratio_payload(branch: dict[str, Any]) -> dict[str, str]:
     derived = branch["derived"]
     return {
@@ -288,7 +293,7 @@ def _ratio_payload(branch: dict[str, Any]) -> dict[str, str]:
 
 def _denominator_payload(branch: dict[str, Any]) -> dict[str, str]:
     fsite = branch["fsite"]
-    return {
+    payload = {
         "F2": fmt12(float(fsite["F2"])),
         "F4": fmt12(float(fsite["F4"])),
         "F6": fmt12(float(fsite["F6"])),
@@ -297,6 +302,11 @@ def _denominator_payload(branch: dict[str, Any]) -> dict[str, str]:
         "zeta": fmt12(float(fsite["zeta"])),
         "offset": fmt12(float(fsite.get("offset", 0.0))),
     }
+    if "Uplus" in fsite:
+        payload["Uplus"] = fmt12(float(fsite["Uplus"]))
+    if "Uminus" in fsite:
+        payload["Uminus"] = fmt12(float(fsite["Uminus"]))
+    return payload
 
 
 def _stable_hash(payload: dict[str, Any]) -> str:

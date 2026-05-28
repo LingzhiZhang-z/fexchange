@@ -21,6 +21,7 @@ from fexchange.io.disk import (
     write_exchange_matrix_txt,
 )
 from fexchange.pipeline.keys import level_key, projector_content_signature, sector_branch
+from fexchange.pipeline.source_writer import build_resolved_inputs_summary
 from fexchange.utils.numerics import numerics_meta
 
 logger = logging.getLogger("fexchange")
@@ -62,7 +63,7 @@ ARTIFACT_FILE_SPEC: dict[str, list[tuple[str, list[str] | None]]] = {
         ("meta.json", None),
     ],
     "L3": [
-        ("data.npz", ["h_pre_j_mu"]),
+        ("data.npz", ["h_mu_abcd", "Heff_mu_abcd"]),
         ("meta.json", None),
     ],
     "L3_FOPT": [
@@ -79,10 +80,6 @@ ARTIFACT_FILE_SPEC: dict[str, list[tuple[str, list[str] | None]]] = {
                 "n_k",
             ],
         ),
-        ("meta.json", None),
-    ],
-    "L4": [
-        ("data.npz", ["h_mu_abcd", "Heff_mu_abcd"]),
         ("meta.json", None),
     ],
 }
@@ -220,27 +217,13 @@ def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
         return None
 
 
-def try_load_l3(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
-    try:
-        d = load_npz_checked(stage_dir / "data.npz", ["h_pre_j_mu"])
-        meta = load_json_checked(stage_dir / "meta.json")
-        validate_meta(meta)
-        if expected_key is not None and meta.get("key") != expected_key:
-            raise ValueError("L3 key mismatch")
-        h = np.asarray(d["h_pre_j_mu"], dtype=np.complex128)
-        return {"h_pre_j_mu": h, "n_j": int(h.shape[0])}
-    except Exception as exc:
-        logger.warning("Invalid cached L3 at %s (%s), recomputing", stage_dir, exc)
-        return None
-
-
-def try_load_l4(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
+def try_load_l3_sopt(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
         d = load_npz_checked(stage_dir / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
-            raise ValueError("L4 key mismatch")
+            raise ValueError("SOPT L3 key mismatch")
         h = np.asarray(d["h_mu_abcd"], dtype=np.complex128)
         heff = np.asarray(d["Heff_mu_abcd"], dtype=np.complex128)
         result = {"h_mu_abcd": h, "Heff_mu_abcd": heff, "n_k": int(h.shape[0])}
@@ -250,7 +233,7 @@ def try_load_l4(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
             result["mapping_residual"] = float(np.asarray(d["mapping_residual"]).item())
         return result
     except Exception as exc:
-        logger.warning("Invalid cached L4 at %s (%s), recomputing", stage_dir, exc)
+        logger.warning("Invalid cached SOPT L3 at %s (%s), recomputing", stage_dir, exc)
         return None
 
 
@@ -768,7 +751,7 @@ def persist_l3_fopt(
     j_mu_processes = np.asarray(result["J_mu_processes"], dtype=float)
     residual = np.asarray(result["mapping_residual"], dtype=float)
     residual_processes = np.asarray(result["mapping_residual_processes"], dtype=float)
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", cfg.get("inputs", {}).get("projector_name", "")))
+    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     projector_sha1 = projector_content_signature(cfg)
     content_hash = atomic_write_npz(
         stage_dir / "data.npz",
@@ -789,20 +772,17 @@ def persist_l3_fopt(
         J_mu_processes=j_mu_processes,
         mapping_residual_processes=residual_processes,
     )
-    ligands = cfg.get("ligand", {})
     meta = build_meta(
         module="fopt.contraction",
         level="L3",
         key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={
-            "n": n_ele,
-            "U": float(cfg["fsite"]["U"]),
-            "Jh": float(cfg["fsite"]["Jh"]),
-            "lig1.U_p": float(ligands["1"]["U_p"]),
-            "lig2.U_p": float(ligands["2"]["U_p"]),
-            "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
-        },
+        inputs_summary=build_resolved_inputs_summary(
+            cfg,
+            n_ele=n_ele,
+            r42=r42,
+            r62=r62,
+            projector_sha1=projector_sha1,
+        ),
         tensor_name="h_eff_4, h_eff_4_processes, J_mu, J_mu_processes",
         physical_meaning="FOPT fourth-order effective Hamiltonian and spin-1/2 exchange, total and process-resolved",
         basis_id=f"fock14_n{n_ele}_lex_v1",
@@ -942,59 +922,7 @@ def persist_l2(
     )
 
 
-def persist_l3(
-    stage_dir: Path,
-    cfg: dict[str, Any],
-    result: dict[str, Any],
-    *,
-    n_ele: int,
-    r42: float,
-    r62: float,
-) -> None:
-    output_root = cfg["paths"]["output_root"]
-    fsite = cfg["fsite"]
-    hopping_name = str(cfg.get("inputs", {}).get("hopping_name", ""))
-    content_hash = atomic_write_npz(stage_dir / "data.npz", h_pre_j_mu=result["h_pre_j_mu"])
-    meta = build_meta(
-        module="sopt.contraction",
-        level="L3",
-        key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={
-            "n": n_ele,
-            "U": float(fsite["U"]),
-            "Jh": float(fsite["Jh"]),
-            "zeta": float(fsite["zeta"]),
-            "hopping_name": hopping_name,
-        },
-        tensor_name="h_pre_j_mu",
-        physical_meaning="Intermediate projected kernel before W projection",
-        basis_id=f"fock14_n{n_ele}_lex_v1",
-        index_definition="(j3,j4,j1,j2)",
-        logical_shape=[*result["h_pre_j_mu"].shape],
-        payload_files=["data.npz"],
-        extra={"numerics_meta": numerics_meta()},
-    )
-    atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": "sopt.contraction",
-            "level": "L3",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "U": float(fsite["U"]),
-            "Jh": float(fsite["Jh"]),
-            "zeta": float(fsite["zeta"]),
-            "hopping_name": hopping_name,
-            "content_hash": content_hash,
-        },
-    )
-
-
-def persist_l4(
+def persist_l3_sopt(
     stage_dir: Path,
     cfg: dict[str, Any],
     result: dict[str, Any],
@@ -1008,7 +936,7 @@ def persist_l4(
     output_root = cfg["paths"]["output_root"]
     fsite = cfg["fsite"]
     hopping_name = str(cfg.get("inputs", {}).get("hopping_name", ""))
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", cfg.get("inputs", {}).get("projector_name", "")))
+    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     projector_sha1 = projector_content_signature(cfg)
     payload = {
         "h_mu_abcd": result["h_mu_abcd"],
@@ -1030,17 +958,15 @@ def persist_l4(
         human_readable_files.append("exchange.txt")
     meta = build_meta(
         module="sopt.contraction",
-        level="L4",
-        key=level_key("L4", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={
-            "n": n_ele,
-            "U": float(fsite["U"]),
-            "Jh": float(fsite["Jh"]),
-            "zeta": float(fsite["zeta"]),
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
-        },
+        level="L3",
+        key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
+        inputs_summary=build_resolved_inputs_summary(
+            cfg,
+            n_ele=n_ele,
+            r42=r42,
+            r62=r62,
+            projector_sha1=projector_sha1,
+        ),
         tensor_name="h_mu_abcd, Heff_mu_abcd",
         physical_meaning="Final projected effective exchange tensor",
         basis_id=f"fock14_n{n_ele}_lex_v1",
@@ -1062,9 +988,9 @@ def persist_l4(
     append_index_record(
         output_root,
         {
-            "key": level_key("L4", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
+            "key": level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
             "module": "sopt.contraction",
-            "level": "L4",
+            "level": "L3",
             "path": str(stage_dir),
             "n": n_ele,
             "r42": r42,

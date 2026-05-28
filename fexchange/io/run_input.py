@@ -20,10 +20,8 @@ from fexchange.utils.errors import InputError, SchemaError
 
 logger = logging.getLogger("fexchange")
 
-_UNIT_SCALE = {"meV": 1.0, "eV": 1000.0}
-_RE_ENERGY_SCALE = 1000.0
 _F_KEYS = ("F2_ratio", "F4_ratio", "F6_ratio")
-_ENERGY_FIELDS = ("U", "Jh", "zeta", "offset")
+_ENERGY_FIELDS = ("U", "Jh", "zeta", "offset", "Uplus", "Uminus")
 _LIGAND_FIELDS = ("Delta", "U_p", "lambda_p")
 _ALLOWED = frozenset({
     "schema_version",
@@ -155,12 +153,13 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
         _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for L2+")
         _chk("inputs" in cfg, "002", f"[inputs] required for window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("hopping_file")), "003", "inputs.hopping_file required")
-    if branch == "sopt" and win("L4"):
-        _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for sopt L4")
+    if branch == "sopt" and win("L3"):
+        _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for sopt L3")
         _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
     if branch == "fopt":
         _validate_ligands(cfg)
         if win("L3"):
+            _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for fopt L3")
             _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
 
 
@@ -186,6 +185,22 @@ def _validate_fsite(section: dict[str, Any], name: str, *, require_core: bool) -
     for k in _ENERGY_FIELDS:
         if k in section:
             _chk(_num(section[k]), "003", f"{name}.{k} must be numeric")
+    if name == "fsite":
+        _chk("Uplus" not in section and "Uminus" not in section, "003", "Uplus/Uminus are only valid in side fsite branches")
+    elif name == "fsite_np1":
+        _chk("Uminus" not in section, "003", "fsite_np1 accepts Uplus, not Uminus")
+        _chk(
+            not ("Uplus" in section and "offset" in section),
+            "003",
+            "fsite_np1.Uplus conflicts with fsite_np1.offset",
+        )
+    elif name == "fsite_nm1":
+        _chk("Uplus" not in section, "003", "fsite_nm1 accepts Uminus, not Uplus")
+        _chk(
+            not ("Uminus" in section and "offset" in section),
+            "003",
+            "fsite_nm1.Uminus conflicts with fsite_nm1.offset",
+        )
     if require_core:
         for k in ("U", "Jh"):
             _chk(k in section and _num(section[k]), "003", f"{name}.{k}: required, numeric")
@@ -210,12 +225,14 @@ def _validate_ligands(cfg: dict[str, Any]) -> None:
 
 
 def _normalize(cfg: dict[str, Any]) -> None:
-    if "units" not in cfg:
-        cfg["units"] = {"energy": "meV"}
-    unit = cfg["units"].get("energy", "meV")
-    _chk(unit in _UNIT_SCALE, "003", f"units.energy must be meV|eV, got {unit!r}")
-    cfg["units"]["energy"] = unit
-    scale = _UNIT_SCALE[unit]
+    units = cfg.get("units")
+    if units is None:
+        cfg["units"] = {"energy": "raw"}
+    else:
+        _chk(isinstance(units, dict), "003", "[units] must be a table")
+        unit = units.get("energy", "raw")
+        _chk(isinstance(unit, str) and bool(unit.strip()), "003", "units.energy must be a non-empty string")
+        units["energy"] = unit
 
     for sec in ("fsite", "fsite_nm1", "fsite_np1"):
         s = cfg.get(sec)
@@ -223,7 +240,7 @@ def _normalize(cfg: dict[str, Any]) -> None:
             continue
         for f in _ENERGY_FIELDS:
             if f in s and _num(s[f]):
-                s[f] = float(s[f]) * scale
+                s[f] = float(s[f])
     ligands = cfg.get("ligand")
     if isinstance(ligands, dict):
         for lig in ligands.values():
@@ -231,7 +248,7 @@ def _normalize(cfg: dict[str, Any]) -> None:
                 continue
             for f in _LIGAND_FIELDS:
                 if f in lig and _num(lig[f]):
-                    lig[f] = float(lig[f]) * scale
+                    lig[f] = float(lig[f])
             lig.setdefault("lambda_p", 0.0)
 
     fsite = cfg.get("fsite")
@@ -249,7 +266,7 @@ def _normalize_fsite_defaults(section: dict[str, Any]) -> None:
         section.setdefault("F2_ratio", d["F2_per_Jh"])
         section.setdefault("F4_ratio", d["F4_per_Jh"])
         section.setdefault("F6_ratio", d["F6_per_Jh"])
-        section.setdefault("zeta", d["zeta"] * _RE_ENERGY_SCALE)
+        section.setdefault("zeta", d["zeta"])
 
 
 def _build_branches(cfg: dict[str, Any]) -> None:

@@ -30,6 +30,7 @@ CEF/FOPT prep tools.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import tomllib
 from pathlib import Path
@@ -49,13 +50,6 @@ DIM_P_REAL: int = 2 * ELL_P + 1
 
 W90_F_REAL_ORDER: tuple[int, ...] = (0, +1, -1, +2, -2, +3, -3)
 W90_P_REAL_ORDER: tuple[int, ...] = (0, +1, -1)
-
-_ENERGY_SCALE: dict[str, float] = {
-    "eV": 1.0,
-    "meV": 1e-3,
-    "Ha": 27.211386245988,
-    "Ry": 13.605693122994,
-}
 
 _SPIN_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
 
@@ -332,14 +326,14 @@ def extract_w90_two_bond(
     f1_site, f2_site, lig1_site, lig2_site: each is ``{"atom": int, "cell": [i,j,k]}``.
     spinor: whether ``hr.dat`` was produced with ``spinors = .true.``.
     onsite_out, hopping_fp_out, hopping_ff_out: paths for the three output text files.
-    energy_unit: input energy unit; output is in eV unless specified.
-    fermi_level: subtracted from the onsite diagonal in the *output* unit
+    energy_unit: metadata label for the raw input/output energy unit.
+    fermi_level: subtracted from the onsite diagonal in the same raw unit
         (``onsite_out_diag - fermi_level``). Hopping blocks are unaffected.
-        Default 0.0 (no shift). Set to the DFT Fermi energy (after the unit
-        conversion above) when ``hr.dat`` does not pre-align E_F to zero.
+        Default 0.0 (no shift). Set to the DFT Fermi energy in the same unit as
+        ``hr.dat`` when ``hr.dat`` does not pre-align E_F to zero.
         Note: the reported ligand Delta = ⟨h_f⟩ − ⟨h_lig⟩ is invariant under
         this shift (both ends shift by the same constant).
-    f_trace_tol: max allowed |⟨h_f1⟩ − ⟨h_f2⟩| (in the output unit). Two f
+    f_trace_tol: max allowed |⟨h_f1⟩ − ⟨h_f2⟩| (in the raw unit). Two f
         sites should be physically equivalent, hence have equal trace
         averages. Default 1e-6.
     real_order_f, real_order_p: Wannier90 m_l ordering for each shell (default
@@ -351,18 +345,15 @@ def extract_w90_two_bond(
     A dict ``{"onsite": ..., "hopping": ..., "meta": ...}`` echoing the
     in-memory matrices and metadata.
     """
-    if energy_unit not in _ENERGY_SCALE:
+    if not isinstance(energy_unit, str) or not energy_unit.strip():
         raise InputError(
             "FXE-INPUT-003",
-            f"Unknown energy_unit: {energy_unit!r}",
-            expected={"choices": sorted(_ENERGY_SCALE)},
+            "energy_unit must be a non-empty string",
             actual={"energy_unit": energy_unit},
         )
+    energy_unit = energy_unit.strip()
 
     H_R, num_wann = read_w90_hr(hr_path)
-    scale = _ENERGY_SCALE[energy_unit]
-    if scale != 1.0:
-        H_R = {R: scale * mat for R, mat in H_R.items()}
 
     offsets = _orbital_offsets(n_orb_per_atom, num_wann=num_wann, spinor=spinor)
 
@@ -507,7 +498,7 @@ def extract_from_toml(toml_path: str | Path) -> dict[str, Any]:
         hopping_fp_out = "out/hopping_fp.txt"
         hopping_ff_out = "out/hopping_ff.txt"
 
-        # Optional: subtract DFT Fermi energy from onsite diagonals (output unit)
+        # Optional: subtract DFT Fermi energy from onsite diagonals (raw unit)
         # fermi_level = 5.123
 
         # Optional W90 real-harmonic order overrides
@@ -577,10 +568,13 @@ def extract_from_toml(toml_path: str | Path) -> dict[str, Any]:
     return extract_w90_two_bond(**kwargs)
 
 
-if __name__ == "__main__":
-    import sys
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Extract fexchange onsite, f-p, and f-f blocks from Wannier90 hr.dat.")
+    parser.add_argument("config", help="TOML config path")
+    args = parser.parse_args(argv)
+    extract_from_toml(args.config)
+    return 0
 
-    if len(sys.argv) != 2:
-        print("Usage: python -m fexchange.tools.w90_extract config.toml", file=sys.stderr)
-        sys.exit(1)
-    extract_from_toml(sys.argv[1])
+
+if __name__ == "__main__":
+    raise SystemExit(main())

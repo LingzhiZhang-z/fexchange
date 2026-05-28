@@ -28,6 +28,8 @@ Validation:
 - Every `L3` path must map its ligand denominators to the 32-row path table.
 - `E_0` must be passed into every process helper when denominator references
   are nonzero.
+- Every `L3` resolvent denominator must be finite and satisfy
+  `abs(denominator) >= eps_zero` before inversion.
 - Any stored reverse hopping primitive is a contract violation.
 
 ## 1) Physical Cluster and Charge Sector (MUST)

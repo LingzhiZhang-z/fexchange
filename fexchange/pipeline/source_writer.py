@@ -6,44 +6,23 @@ import datetime
 from pathlib import Path
 from typing import Any
 
-from fexchange.io.disk import fmt8
-
 
 def write_run_source_txt(run_dir: Path, cfg: dict[str, Any]) -> None:
-    """Write ``<run_name>/source.txt`` once; do not enforce cache consistency."""
+    """Write ``<run_name>/source.txt`` from the current resolved run inputs."""
     path = run_dir / "source.txt"
-    if path.exists():
-        return
-    runtime = cfg.get("runtime", {})
+    derived = cfg.get("_derived", {})
     fsite = cfg.get("fsite", {})
-    inputs = cfg.get("inputs", {})
-    ligands = cfg.get("ligand", {})
-    lines = [
-        f"run_name: {runtime.get('run_name', '')}",
-        f"branch:   {runtime.get('branch', '')}",
-        f"created:  {_now()}",
-        "",
-        f"r42:            {fmt8(float(cfg.get('_derived', {}).get('r42', 0.0)))}",
-        f"r62:            {fmt8(float(cfg.get('_derived', {}).get('r62', 0.0)))}",
-        f"RE:             {fsite.get('RE', 'auto')}",
-        f"scheme:         {cfg.get('model', {}).get('scheme', 'RS')}",
-        f"zeta:           {fmt8(float(fsite.get('zeta', 0.0)))}",
-    ]
-    if isinstance(ligands, dict):
-        for idx in ("1", "2"):
-            lig = ligands.get(idx, {})
-            if isinstance(lig, dict):
-                lines.extend([
-                    f"lig{idx}.Delta:     {fmt8(float(lig.get('Delta', 0.0)))}",
-                    f"lig{idx}.lambda_p:  {fmt8(float(lig.get('lambda_p', 0.0)))}",
-                ])
-    lines.extend([
-        "",
-        f"hopping_file:   {inputs.get('hopping_file', '')}",
-        f"projector_file: {inputs.get('projector_file', '')}",
-        f"kramer_name:    {runtime.get('kramer_name', '')}",
-        "",
-    ])
+    n_ele = int(fsite.get("n_ele", 0)) if isinstance(fsite, dict) else 0
+    summary = build_resolved_inputs_summary(
+        cfg,
+        n_ele=n_ele,
+        r42=float(derived.get("r42", 0.0)) if isinstance(derived, dict) else 0.0,
+        r62=float(derived.get("r62", 0.0)) if isinstance(derived, dict) else 0.0,
+    )
+    lines = [f"created: {_now()}"]
+    for key in sorted(summary):
+        lines.append(f"{key}: {summary[key]}")
+    lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -63,3 +42,64 @@ def write_core_source_txt(stage_dir: Path, inputs_summary: dict[str, Any]) -> No
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def build_resolved_inputs_summary(
+    cfg: dict[str, Any],
+    *,
+    n_ele: int,
+    r42: float,
+    r62: float,
+    projector_sha1: str = "",
+) -> dict[str, Any]:
+    """Flatten the current run's resolved scalar inputs for artifact provenance."""
+    runtime = _as_dict(cfg.get("runtime"))
+    model = _as_dict(cfg.get("model"))
+    inputs = _as_dict(cfg.get("inputs"))
+    fsite = _as_dict(cfg.get("fsite"))
+    summary: dict[str, Any] = {
+        "standard_version": cfg.get("standard_version", ""),
+        "scheme": model.get("scheme", "RS"),
+        "branch": runtime.get("branch", ""),
+        "run_name": runtime.get("run_name", ""),
+        "n": int(n_ele),
+        "r42": float(r42),
+        "r62": float(r62),
+        "energy_reference": fsite.get("energy_reference", "lsjm_ground"),
+        "hopping_name": inputs.get("hopping_name", ""),
+        "hopping_file": inputs.get("hopping_file", ""),
+        "kramer_name": runtime.get("kramer_name", ""),
+        "projector_file": inputs.get("projector_file", ""),
+    }
+    if projector_sha1:
+        summary["projector_sha1"] = projector_sha1
+
+    branches = _as_dict(cfg.get("_branches"))
+    if branches:
+        for branch_name, prefix in (("n", "fsite"), ("nm1", "fsite_nm1"), ("np1", "fsite_np1")):
+            branch = _as_dict(branches.get(branch_name))
+            _add_prefixed_scalars(summary, prefix, _as_dict(branch.get("fsite")))
+            derived = _as_dict(branch.get("derived"))
+            _add_prefixed_scalars(summary, f"{prefix}.derived", derived)
+    else:
+        _add_prefixed_scalars(summary, "fsite", fsite)
+
+    ligands = _as_dict(cfg.get("ligand"))
+    for idx in sorted(ligands):
+        ligand = _as_dict(ligands.get(idx))
+        if ligand:
+            _add_prefixed_scalars(summary, f"ligand.{idx}", ligand)
+    return summary
+
+
+def _add_prefixed_scalars(dst: dict[str, Any], prefix: str, values: dict[str, Any]) -> None:
+    for key in sorted(values):
+        value = values[key]
+        if isinstance(value, bool):
+            dst[f"{prefix}.{key}"] = value
+        elif isinstance(value, (int, float, str)) or value is None:
+            dst[f"{prefix}.{key}"] = value
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}

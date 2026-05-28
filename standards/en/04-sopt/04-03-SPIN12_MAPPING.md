@@ -7,11 +7,11 @@ Disk I/O layout/format is defined by `./standards/en/05-io/05-00-IO.md`.
 Writing style follows `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`.
 
 ## 0) Scope (MUST)
-- Input comes from level-$L4$ outputs in
+- Input comes from SOPT final-$L3$ outputs in
   `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`, or from FOPT `L3`
   total/process projected `h_eff_4` outputs in
   `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md`.
-- This module is a post-processing map; it does not modify `L0..L4`.
+- This module is a post-processing map; it does not modify `L0..L3`.
 - Applicable only when each site low-energy space is two-dimensional
   (Kramers pseudospin-$\tfrac{1}{2}$ doublet).
 
@@ -116,7 +116,7 @@ Per $\mu$:
 - Hermiticity of input $\mathrm{Heff}^{(\mu)}$.
 - Reconstruct
   $\widetilde H^{(\mu)}$ from exported
-  output $J$ and check
+  output $J$ and record
 
 Math:
 $$
@@ -126,10 +126,17 @@ r_\mu
 \left\|\widetilde H^{(\mu)}-\mathrm{Heff}^{(\mu)}\right\|_F
 }{
 \left\|\mathrm{Heff}^{(\mu)}\right\|_F
-}
-\le \varepsilon_{\mathrm{map}}.
+}.
 $$
 
+- The scalar constant $C_{00}^{(\mu)} I\otimes I$ is not exported and may be
+  retained only for this residual check.
+- Local-field terms $C_{0\alpha}^{(\mu)}$, $C_{\alpha0}^{(\mu)}$ and any other
+  non-exchange leakage are not exported as exchange. They must remain visible
+  through a failed `mapping_residual` check; implementations must not fold them
+  into $J_{\alpha\beta}^{(\mu)}$.
+- `mapping_residual <= eps_map` is required. It means the projected Hamiltonian
+  is exchange-only up to scalar shift.
 - Imaginary part leakage of exported real couplings must be below tolerance.
 
 ## 6) Runtime I/O (Summary)

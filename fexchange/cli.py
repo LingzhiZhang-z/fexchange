@@ -44,7 +44,6 @@ _STAGE_DISPATCH: dict[tuple[str, str], tuple[Callable[..., Any], tuple[str, ...]
     ("sopt", "L1"): (_stages.ensure_l1_sopt, _FULL_KW),
     ("sopt", "L2"): (_stages.ensure_l2_sopt, _FULL_KW),
     ("sopt", "L3"): (_stages.ensure_l3_sopt, _FULL_KW),
-    ("sopt", "L4"): (_stages.ensure_l4_sopt, _FULL_KW),
     ("fopt", "LMSM"): (_stages.ensure_lsms_all_three, _FULL_KW),
     ("fopt", "LSJM"): (_stages.ensure_lsjm_all_three, _FULL_KW),
     ("fopt", "L0"): (_stages.ensure_l0_fopt, ("n_ele", "n_orb")),
@@ -126,9 +125,6 @@ def _run_pipeline(toml_path: str, *, log_level: str) -> int:
         for level in LEVELS:
             if not window_includes(cfg, level):
                 continue
-            if _skip_materialized_l3_for_fused_sopt_l4(cfg, level):
-                logger.info("=== skipping %s: fused SOPT L4 path ===", level)
-                continue
             t_level = time.time()
             level_key = _level_key(
                 level,
@@ -154,16 +150,6 @@ def _run_pipeline(toml_path: str, *, log_level: str) -> int:
         if file_handler is not None:
             logger.removeHandler(file_handler)
             file_handler.close()
-
-
-def _skip_materialized_l3_for_fused_sopt_l4(cfg: dict[str, Any], level: str) -> bool:
-    runtime = cfg.get("runtime", {})
-    return (
-        str(runtime.get("branch", "sopt")) == "sopt"
-        and str(runtime.get("end_level", "")) == "L4"
-        and level == "L3"
-    )
-
 
 def _execute_level(
     level: str,

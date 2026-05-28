@@ -1,19 +1,23 @@
-"""Analyze ``w90_extract`` onsite output for RE local SOC and CEF parameters.
+"""Analyze ``w90_extract`` onsite output for per-site SOC, ligand Delta, and f1 CEF.
 
 The input is the multi-block ``onsite.txt`` written by
-``fexchange.tools.w90_extract.extract_w90_two_bond``.  The two f-site onsite
-blocks are averaged into
+``fexchange.tools.w90_extract.extract_w90_two_bond``.  This module performs
+exactly three analyses, per the project spec:
 
-    H_f_local = 0.5 * (h_f1 + h_f2)
+1. **Per-site SOC strength.** For each f site (14x14, l=3) and each ligand
+   p site (6x6, l=1), decompose the onsite block into ``E*I + zeta*L.S +
+   h_orbital`` via the spin-channel L.S projection.  Output: ``zeta_f1,
+   zeta_f2, lambda_p_lig1, lambda_p_lig2``.
+2. **Per-(f, ligand) charge-transfer Delta.**  For every pair
+   ``(fi, lig_k)``, ``Delta = trace(h_fi)/14 - trace(h_lig_k)/6``.  Four
+   values total.
+3. **CEF Stevens fit on f1 only.**  Project ``h_f1`` into the LSJM SOC-lowest
+   ``J`` manifold (using ``zeta_f1`` and the project's default Slater ratios),
+   remove the scalar trace, and least-squares fit real Stevens templates.
+   Default symmetry is ``C3v`` with the ``q=3`` ``sin`` convention.
 
-and then decomposed in the fexchange canonical f basis
-``m=-3..3`` with interleaved ``(down, up)`` spin order.
-
-For REChX use, the CEF fit defaults to C3v with the q=3 ``sin`` convention.
-The Stevens fit follows the direct-local route: project the full 14x14
-``H_f_local`` into the LSJM SOC-lowest J manifold, remove the scalar trace, and
-fit real Stevens coefficients there.  The public output is intentionally small:
-``zeta`` plus the CEF Stevens parameters needed by ``cef_states.py``.
+The public output (``analyze_onsite``) is structured per-site/per-pair; see
+``schema_version = "fxe.w90_onsite.v2"``.
 """
 
 from __future__ import annotations
@@ -29,7 +33,6 @@ from typing import Any, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.core.space_ls import build_space_ls_operator
 from fexchange.core.stevens import build_cef_stevens_operators
 from fexchange.io.matrix import load_txt_blocks
 from fexchange.utils.constants import N_ORB, RE_DEFAULTS_BY_N_ELE, RE_TO_N_ELE
@@ -38,54 +41,81 @@ from fexchange.utils.errors import FexchangeError, InputError, NumError
 Symmetry = Literal["Oh", "C3v"]
 ModeQ3 = Literal["cos", "sin"]
 
+_ELL_BY_SHELL: dict[str, int] = {"f": 3, "p": 1}
+_F_SITES: tuple[str, ...] = ("f1", "f2")
+_LIG_SITES: tuple[str, ...] = ("lig1", "lig2")
 
-def load_hlocal_from_onsite(path: str | Path) -> dict[str, NDArray[np.complexfloating] | complex]:
-    """Load ``onsite.txt`` and return averaged f-site local Hamiltonians."""
-    onsite = Path(path)
-    blocks = load_txt_blocks(onsite, {"h_f1": 196, "h_f2": 196, "h_lig1": 36, "h_lig2": 36})
-    h_f1 = blocks["h_f1"].reshape(14, 14)
-    h_f2 = blocks["h_f2"].reshape(14, 14)
-    h_local = 0.5 * (h_f1 + h_f2)
-    trace_avg = np.trace(h_local) / 14.0
-    h_local_traceless = h_local - trace_avg * np.eye(14, dtype=complex)
+
+# ---------------------------------------------------------------------------
+# Block I/O
+# ---------------------------------------------------------------------------
+
+def load_onsite_blocks(path: str | Path) -> dict[str, NDArray[np.complexfloating]]:
+    """Load ``onsite.txt`` and return the four raw site blocks.
+
+    Returned keys: ``h_f1``, ``h_f2`` (14x14 each), ``h_lig1``, ``h_lig2``
+    (6x6 each).  No aggregation or trace removal is performed here.
+    """
+    blocks = load_txt_blocks(Path(path), {"h_f1": 196, "h_f2": 196, "h_lig1": 36, "h_lig2": 36})
     return {
-        "h_f1": h_f1,
-        "h_f2": h_f2,
-        "h_local": h_local,
-        "h_local_traceless": h_local_traceless,
-        "trace_avg": trace_avg,
+        "h_f1": blocks["h_f1"].reshape(14, 14),
+        "h_f2": blocks["h_f2"].reshape(14, 14),
+        "h_lig1": blocks["h_lig1"].reshape(6, 6),
+        "h_lig2": blocks["h_lig2"].reshape(6, 6),
     }
 
 
-def decompose_hlocal_soc_cef(
-    h_local: NDArray[np.complexfloating],
+# ---------------------------------------------------------------------------
+# Single-site L.S decomposition (works for any l)
+# ---------------------------------------------------------------------------
+
+def decompose_site_soc(
+    h_site: NDArray[np.complexfloating],
     *,
+    ell: int,
     hermitian_atol: float = 1.0e-8,
 ) -> dict[str, Any]:
-    """Extract zeta/lambda_RE and an orbital CEF matrix from a 14x14 Hlocal."""
-    h = np.asarray(h_local, dtype=np.complex128)
-    if h.shape != (14, 14):
-        raise InputError("FXE-INPUT-003", "h_local must be 14x14", actual={"shape": list(h.shape)})
+    """Decompose a single ``(2l+1)*2``-dim onsite block into ``zeta + orbital``.
+
+    Convention: spin index is fast (interleaved ``(down, up)`` per ``m``),
+    matching ``fexchange.core.space_ls.orbital_map``.  The decomposition reads
+    ``zeta`` from three independent spin-channel projections; the
+    spin-diagonal channel is the primary estimate.  The orbital-only residual
+    ``h_orbital_traceless`` and its bandwidth are returned as diagnostics
+    (expected to be ~0 for a clean ligand p shell).
+    """
+    h = np.asarray(h_site, dtype=np.complex128)
+    dim_orb = 2 * int(ell) + 1
+    dim = dim_orb * 2
+    if h.shape != (dim, dim):
+        raise InputError(
+            "FXE-INPUT-003",
+            f"h_site must be {dim}x{dim} for ell={ell}",
+            actual={"shape": list(h.shape), "ell": int(ell)},
+        )
     hermitian_residual = _relative_norm(h - h.conj().T, h)
     if not np.allclose(h, h.conj().T, atol=hermitian_atol):
         raise NumError(
             "FXE-NUM-001",
-            "h_local is not Hermitian within tolerance",
+            "h_site is not Hermitian within tolerance",
             module="w90_onsite",
-            actual={"hermitian_residual": hermitian_residual, "atol": hermitian_atol},
+            actual={
+                "hermitian_residual": hermitian_residual,
+                "atol": hermitian_atol,
+                "ell": int(ell),
+            },
         )
 
-    trace_avg = np.trace(h) / 14.0
-    h0 = h - trace_avg * np.eye(14, dtype=complex)
+    trace_avg = np.trace(h) / dim
+    h0 = h - trace_avg * np.eye(dim, dtype=complex)
 
-    dn = np.arange(0, 14, 2)
-    up = np.arange(1, 14, 2)
+    dn = np.arange(0, dim, 2)
+    up = np.arange(1, dim, 2)
     h_uu = h0[np.ix_(up, up)]
     h_dd = h0[np.ix_(dn, dn)]
     h_du = h0[np.ix_(dn, up)]
     h_ud = h0[np.ix_(up, dn)]
 
-    ell = 3
     m_vals = np.arange(-ell, ell + 1, dtype=float)
     mask = m_vals != 0
     zeta_diag_channels = np.diag(h_uu - h_dd)[mask].real / m_vals[mask]
@@ -94,58 +124,68 @@ def decompose_hlocal_soc_cef(
     zeta_du_channels = 2.0 * np.array([h_du[c + 1, c] for c in range(2 * ell)]).real / coeffs
     zeta_ud_channels = 2.0 * np.array([h_ud[c, c + 1] for c in range(2 * ell)]).real / coeffs
 
-    zeta_diag = float(np.mean(zeta_diag_channels))
-    zeta_offdiag = float(0.5 * (np.mean(zeta_du_channels) + np.mean(zeta_ud_channels)))
+    zeta = float(np.mean(zeta_diag_channels))
+    h_orb = 0.5 * (h_uu + h_dd)
+    h_orb_trace = np.trace(h_orb) / dim_orb
+    h_orb_traceless = h_orb - h_orb_trace * np.eye(dim_orb, dtype=complex)
 
-    # The project convention takes the spin-diagonal channel as the primary
-    # zeta estimate, matching the main-branch diagnostic tool.
-    zeta = zeta_diag
-    h_cef = 0.5 * (h_uu + h_dd)
-    h_cef_trace = np.trace(h_cef) / 7.0
-    h_cef_traceless = h_cef - h_cef_trace * np.eye(7, dtype=complex)
-
-    h_model = np.kron(h_cef, np.eye(2, dtype=complex)) + zeta * _build_hsoc_unit_operator_1b()
+    h_model = np.kron(h_orb, np.eye(2, dtype=complex)) + zeta * _build_ls_operator(int(ell))
     residual = _relative_norm(h0 - h_model, h0)
+
     all_channels = np.concatenate([zeta_diag_channels, zeta_du_channels, zeta_ud_channels])
-    mean_channels = np.mean(all_channels)
+    mean_channels = float(np.mean(all_channels))
     spread = (
         float((np.max(all_channels) - np.min(all_channels)) / abs(mean_channels))
         if abs(mean_channels) > 0.0
         else float("inf")
     )
-    bandwidth = float(np.ptp(np.linalg.eigvalsh(h_cef_traceless)).real)
+    bandwidth = float(np.ptp(np.linalg.eigvalsh(h_orb_traceless)).real)
 
     return {
-        "trace_avg": trace_avg,
-        "h_local_traceless": h0,
+        "ell": int(ell),
+        "trace_avg": complex(trace_avg),
         "zeta": zeta,
-        "lambda_RE": zeta,
-        "zeta_diag": zeta_diag,
-        "zeta_offdiag": zeta_offdiag,
-        "zeta_diag_channels": zeta_diag_channels,
-        "zeta_du_channels": zeta_du_channels,
-        "zeta_ud_channels": zeta_ud_channels,
         "zeta_channel_spread_rel": spread,
         "soc_decomposition_residual": residual,
         "hermitian_residual": hermitian_residual,
-        "h_cef_orbital": h_cef,
-        "h_cef_orbital_traceless": h_cef_traceless,
-        "h_cef_orbital_bandwidth": bandwidth,
+        "h_orbital_traceless": h_orb_traceless,
+        "h_orbital_bandwidth": bandwidth,
     }
 
 
+# ---------------------------------------------------------------------------
+# Per-(f, ligand) Delta
+# ---------------------------------------------------------------------------
+
+def compute_delta_pairs(blocks: dict[str, NDArray[np.complexfloating]]) -> dict[str, float]:
+    """Return ``Delta[fi_lig_k] = trace(h_fi)/14 - trace(h_lig_k)/6`` for the 4 pairs."""
+
+    def center(h: NDArray[np.complexfloating]) -> float:
+        return float(np.trace(h).real / h.shape[0])
+
+    return {
+        f"{f}_{lig}": center(blocks[f"h_{f}"]) - center(blocks[f"h_{lig}"])
+        for f in _F_SITES
+        for lig in _LIG_SITES
+    }
+
+
+# ---------------------------------------------------------------------------
+# f1 Stevens CEF fit
+# ---------------------------------------------------------------------------
+
 def fit_stevens_direct_local(
-    h_local: NDArray[np.complexfloating],
+    h_f1: NDArray[np.complexfloating],
     *,
     n_ele: int,
     zeta: float,
     symmetry: Symmetry = "C3v",
     mode_q3: ModeQ3 = "sin",
 ) -> dict[str, Any]:
-    """Project full Hlocal to the LSJM ground J manifold and fit Stevens B's."""
-    h = np.asarray(h_local, dtype=np.complex128)
+    """Project ``h_f1`` to the LSJM lowest-J manifold and fit Stevens B's."""
+    h = np.asarray(h_f1, dtype=np.complex128)
     if h.shape != (14, 14):
-        raise InputError("FXE-INPUT-003", "h_local must be 14x14", actual={"shape": list(h.shape)})
+        raise InputError("FXE-INPUT-003", "h_f1 must be 14x14", actual={"shape": list(h.shape)})
     if not 1 <= int(n_ele) <= 13:
         raise InputError("FXE-INPUT-003", "n_ele must be in [1, 13]", actual={"n_ele": int(n_ele)})
 
@@ -194,6 +234,10 @@ def fit_stevens_direct_local(
     }
 
 
+# ---------------------------------------------------------------------------
+# Top-level analysis (schema v2)
+# ---------------------------------------------------------------------------
+
 def analyze_onsite(
     onsite: str | Path,
     *,
@@ -201,40 +245,75 @@ def analyze_onsite(
     symmetry: Symmetry = "C3v",
     mode_q3: ModeQ3 = "sin",
 ) -> dict[str, Any]:
-    """Full onsite analysis returning only zeta and CEF parameters."""
-    loaded = load_hlocal_from_onsite(onsite)
-    h_local = np.asarray(loaded["h_local"], dtype=np.complex128)
-    decomp = decompose_hlocal_soc_cef(h_local)
+    """Run the three onsite analyses and return a structured per-site result."""
+    blocks = load_onsite_blocks(onsite)
+
+    soc_f = {
+        label: decompose_site_soc(blocks[f"h_{label}"], ell=_ELL_BY_SHELL["f"])
+        for label in _F_SITES
+    }
+    soc_p = {
+        label: decompose_site_soc(blocks[f"h_{label}"], ell=_ELL_BY_SHELL["p"])
+        for label in _LIG_SITES
+    }
+    delta = compute_delta_pairs(blocks)
+
     stevens = fit_stevens_direct_local(
-        h_local,
+        blocks["h_f1"],
         n_ele=int(n_ele),
-        zeta=float(decomp["zeta"]),
+        zeta=float(soc_f["f1"]["zeta"]),
         symmetry=symmetry,
         mode_q3=mode_q3,
     )
+
     return {
-        "schema_version": "fxe.w90_onsite.v1",
+        "schema_version": "fxe.w90_onsite.v2",
         "onsite": str(onsite),
         "n_ele": int(n_ele),
-        "zeta_eV": float(decomp["zeta"]),
-        "zeta_meV": 1000.0 * float(decomp["zeta"]),
+        "zeta": {
+            label: {
+                "eV": float(soc_f[label]["zeta"]),
+                "meV": 1000.0 * float(soc_f[label]["zeta"]),
+                "channel_spread_rel": float(soc_f[label]["zeta_channel_spread_rel"]),
+                "residual": float(soc_f[label]["soc_decomposition_residual"]),
+            }
+            for label in _F_SITES
+        },
+        "lambda_p": {
+            label: {
+                "eV": float(soc_p[label]["zeta"]),
+                "meV": 1000.0 * float(soc_p[label]["zeta"]),
+                "channel_spread_rel": float(soc_p[label]["zeta_channel_spread_rel"]),
+                "residual": float(soc_p[label]["soc_decomposition_residual"]),
+                "orbital_bandwidth": float(soc_p[label]["h_orbital_bandwidth"]),
+            }
+            for label in _LIG_SITES
+        },
+        "delta": {
+            key: {"eV": float(value), "meV": 1000.0 * float(value)}
+            for key, value in delta.items()
+        },
         "cef": {
             "point_group": stevens["symmetry"],
             "mode_q3": stevens["mode_q3"],
             "J": float(stevens["J0"]),
             "B_params_eV": {name: float(value) for name, value in stevens["B_params"].items()},
             "B_params_meV": {name: 1000.0 * float(value) for name, value in stevens["B_params"].items()},
+            "stevens_fit_residual": float(stevens["stevens_fit_residual"]),
         },
     }
 
 
+# ---------------------------------------------------------------------------
+# Output writers
+# ---------------------------------------------------------------------------
+
 def write_analysis_outputs(result: dict[str, Any], out_dir: str | Path) -> None:
-    """Write compact zeta/CEF parameter files."""
+    """Write the three onsite parameter files (txt, json, cef toml)."""
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
 
-    lines = _summary_lines(result)
-    (target / "onsite_params.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (target / "onsite_params.txt").write_text("\n".join(_summary_lines(result)) + "\n", encoding="utf-8")
     (target / "onsite_params.json").write_text(
         json.dumps(_json_summary(result), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -245,8 +324,12 @@ def write_analysis_outputs(result: dict[str, Any], out_dir: str | Path) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# RE / n_ele resolution
+# ---------------------------------------------------------------------------
+
 def infer_re_from_path(path: str | Path) -> str | None:
-    """Infer the RE symbol from a data/data-DFT style onsite path."""
+    """Infer the RE symbol from a ``data/`` or ``data-DFT/`` style onsite path."""
     parts = Path(path).parts
     for part in reversed(parts):
         match = re.match(r"^([A-Z][a-z]?)[A-Z]", part)
@@ -256,7 +339,7 @@ def infer_re_from_path(path: str | Path) -> str | None:
 
 
 def resolve_n_ele(*, n_ele: int | None, re_name: str | None, onsite: str | Path) -> tuple[int, str | None]:
-    """Resolve f electron count from explicit n_ele, RE, or path inference."""
+    """Resolve f electron count from explicit ``n_ele``, ``--RE``, or path inference."""
     if n_ele is not None:
         return int(n_ele), re_name
     resolved_re = None if re_name in {None, "auto"} else str(re_name)
@@ -271,6 +354,10 @@ def resolve_n_ele(*, n_ele: int | None, re_name: str | None, onsite: str | Path)
     return RE_TO_N_ELE[resolved_re], resolved_re
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("onsite", type=Path, help="w90_extract onsite.txt")
@@ -278,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--n-ele", type=int, help="Override f electron count")
     parser.add_argument("--symmetry", choices=("C3v", "Oh"), default="C3v")
     parser.add_argument("--mode-q3", choices=("sin", "cos"), default="sin")
-    parser.add_argument("--output-dir", type=Path, help="Write zeta/CEF params and a cef_states TOML file")
+    parser.add_argument("--output-dir", type=Path, help="Write parameter / CEF TOML files")
     parser.add_argument("--json", action="store_true", help="Print JSON summary instead of text")
     args = parser.parse_args(argv)
 
@@ -299,6 +386,10 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(_summary_lines(result)))
     return 0
 
+
+# ---------------------------------------------------------------------------
+# Internals
+# ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=None)
 def _lsjm_for_n(n_ele: int) -> dict[str, Any]:
@@ -326,13 +417,27 @@ def _slater_ratio_defaults(n_ele: int) -> dict[str, float]:
     }
 
 
-@lru_cache(maxsize=1)
-def _build_hsoc_unit_operator_1b() -> NDArray[np.complexfloating]:
-    one = build_space_ls_operator()
-    return one["Lx"] @ one["Sx"] + one["Ly"] @ one["Sy"] + one["Lz"] @ one["Sz"]
+@lru_cache(maxsize=4)
+def _build_ls_operator(ell: int) -> NDArray[np.complexfloating]:
+    """Return the ``(2l+1)*2``-dim ``L.S`` matrix in the ``(m, sigma=down/up)`` interleaved basis."""
+    dim_orb = 2 * int(ell) + 1
+    m_vals = np.arange(-ell, ell + 1, dtype=float)
+    Lz = np.diag(m_vals).astype(complex)
+    Lp = np.zeros((dim_orb, dim_orb), dtype=complex)
+    for c, m in enumerate(m_vals[:-1]):
+        Lp[c + 1, c] = np.sqrt(ell * (ell + 1) - m * (m + 1))
+    Lm = Lp.conj().T
+    Lx = 0.5 * (Lp + Lm)
+    Ly = -0.5j * (Lp - Lm)
+    Sx = 0.5 * np.array([[0, 1], [1, 0]], dtype=complex)
+    Sy = -0.5j * np.array([[0, -1], [1, 0]], dtype=complex)
+    Sz = 0.5 * np.diag([-1.0, 1.0]).astype(complex)
+    return np.kron(Lx, Sx) + np.kron(Ly, Sy) + np.kron(Lz, Sz)
 
 
-def _build_stevens_templates(J0: float, *, symmetry: Symmetry, mode_q3: ModeQ3) -> dict[str, NDArray[np.complexfloating]]:
+def _build_stevens_templates(
+    J0: float, *, symmetry: Symmetry, mode_q3: ModeQ3
+) -> dict[str, NDArray[np.complexfloating]]:
     ops = build_cef_stevens_operators(J0, symmetry=symmetry, mode_q3=mode_q3)
     if symmetry == "Oh":
         return {
@@ -373,15 +478,25 @@ def _relative_norm(delta: NDArray[np.complexfloating], ref: NDArray[np.complexfl
 def _summary_lines(result: dict[str, Any]) -> list[str]:
     cef = result["cef"]
     lines = [
-        "# w90_onsite zeta and REChX CEF parameters",
+        "# w90_onsite SOC / Delta / CEF parameters",
         f"RE {result.get('RE') or 'unknown'}",
         f"n_ele {int(result['n_ele'])}",
-        f"zeta_eV {float(result['zeta_eV']):.12e}",
-        f"zeta_meV {float(result['zeta_meV']):.12e}",
-        f"point_group {cef['point_group']}",
-        f"mode_q3 {cef['mode_q3']}",
-        f"J {float(cef['J']):.12e}",
     ]
+    for label in _F_SITES:
+        entry = result["zeta"][label]
+        lines.append(f"zeta_{label}_eV {float(entry['eV']):.12e}")
+        lines.append(f"zeta_{label}_meV {float(entry['meV']):.12e}")
+    for label in _LIG_SITES:
+        entry = result["lambda_p"][label]
+        lines.append(f"lambda_p_{label}_eV {float(entry['eV']):.12e}")
+        lines.append(f"lambda_p_{label}_meV {float(entry['meV']):.12e}")
+        lines.append(f"lambda_p_{label}_orbital_bandwidth_eV {float(entry['orbital_bandwidth']):.12e}")
+    for key, entry in result["delta"].items():
+        lines.append(f"delta_{key}_eV {float(entry['eV']):.12e}")
+        lines.append(f"delta_{key}_meV {float(entry['meV']):.12e}")
+    lines.append(f"point_group {cef['point_group']}")
+    lines.append(f"mode_q3 {cef['mode_q3']}")
+    lines.append(f"J {float(cef['J']):.12e}")
     for name, value in cef["B_params_eV"].items():
         lines.append(f"{name}_eV {float(value):.12e}")
         lines.append(f"{name}_meV {float(cef['B_params_meV'][name]):.12e}")
@@ -393,8 +508,9 @@ def _json_summary(result: dict[str, Any]) -> dict[str, Any]:
         "schema_version": result["schema_version"],
         "RE": result.get("RE"),
         "n_ele": int(result["n_ele"]),
-        "zeta_eV": float(result["zeta_eV"]),
-        "zeta_meV": float(result["zeta_meV"]),
+        "zeta": result["zeta"],
+        "lambda_p": result["lambda_p"],
+        "delta": result["delta"],
         "cef": result["cef"],
     }
 
