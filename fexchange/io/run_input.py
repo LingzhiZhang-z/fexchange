@@ -153,14 +153,14 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
         _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for L2+")
         _chk("inputs" in cfg, "002", f"[inputs] required for window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("hopping_file")), "003", "inputs.hopping_file required")
+        _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for L2+")
+        _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
     if branch == "sopt" and win("L3"):
         _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for sopt L3")
-        _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
     if branch == "fopt":
         _validate_ligands(cfg)
         if win("L3"):
             _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for fopt L3")
-            _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
 
 
 def _validate_fsite(section: dict[str, Any], name: str, *, require_core: bool) -> None:

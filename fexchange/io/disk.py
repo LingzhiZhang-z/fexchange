@@ -121,20 +121,9 @@ def build_stage_path(
     elif stage == "L2":
         return root / _require_stage_token("run_name", run_name, stage) / "L2"
     elif stage == "L3":
-        return (
-            root
-            / _require_stage_token("run_name", run_name, stage)
-            / "L3"
-            / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
-        )
+        return root / _require_stage_token("run_name", run_name, stage) / "L3"
     elif stage == "spin12":
-        return (
-            root
-            / _require_stage_token("run_name", run_name, stage)
-            / "L3"
-            / f"kramer-{_require_stage_token('kramer_name', kramer_name, stage)}"
-            / "spin12"
-        )
+        return root / _require_stage_token("run_name", run_name, stage) / "L3" / "spin12"
     else:
         raise IOError_(
             "FXE-IO-001",

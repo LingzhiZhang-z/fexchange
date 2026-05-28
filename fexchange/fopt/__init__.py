@@ -8,7 +8,7 @@ from fexchange.fopt.precompute import (
     compute_L1_f,
     compute_L1_p,
 )
-from fexchange.fopt.contraction import build_L2, build_L3, project_W
+from fexchange.fopt.contraction import build_L2, build_L3
 
 __all__ = [
     "N_ORB_F",
@@ -19,5 +19,4 @@ __all__ = [
     "compute_L1_p",
     "build_L2",
     "build_L3",
-    "project_W",
 ]

@@ -29,8 +29,8 @@ MUST:
 - `runtime.run_name` is required when `end_level >= L2`.
 - `runtime.run_name` is also required when `model.scheme = "ED"` and
   `end_level >= L1`, because ED intermediate artifacts are run-scoped.
-- `runtime.kramer_name` is required for projector-dependent final outputs:
-  SOPT `L3` and FOPT `L3`.
+- `runtime.kramer_name` is required for `end_level >= L2`, because L2 consumes
+  the projector and writes projector-dependent projected factors.
 - Both branches terminate at `L3`. FOPT `L3` includes total/process raw
   `h_eff_4` outputs and total/process spin-1/2 exchange outputs. Runtime FOPT
   exchange output requires a two-dimensional projected local space.
@@ -117,7 +117,7 @@ lambda_p = 0.0
 ## 5) Inputs Table (MUST)
 MUST:
 - `[inputs].hopping_file` is required for `end_level >= L2`.
-- `[inputs].projector_file` is required for SOPT `L3` and FOPT `L3`.
+- `[inputs].projector_file` is required for `end_level >= L2`.
 - Runtime matrix text files use multi-block format with `[key]` headers.
 - SOPT hopping must contain block `[t_mu]` with shape `(14, 14)`.
 - FOPT hopping must contain blocks `[t_f1_lig1]`, `[t_f1_lig2]`,

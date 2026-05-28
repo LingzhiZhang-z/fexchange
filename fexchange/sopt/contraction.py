@@ -1,9 +1,10 @@
 """
-SOPT runtime contraction for external levels L2 (route factors) and L3
-(W-projected final output).
+SOPT runtime contraction for external levels L2 (projected route factors) and L3
+(denominator-weighted final output).
 
-Canonical runtime path: L2 -> ``build_L3``, which fuses denominator summation
-with the final L3 W projection (04-02 §3).
+Canonical runtime path: L2 -> ``build_L3``. L2 consumes the low-energy
+projector W and stores route factors directly in the projected basis; L3 then
+only performs denominator-weighted Gram contractions.
 
 ``build_L3_legacy`` and ``build_L4_legacy`` retain the algebraic split used by
 the reference implementation. They are not on the runtime path; they serve as
@@ -77,21 +78,25 @@ def _denominator_vector(
 def build_L2(
     l1_result: dict[str, Any],
     t_mu: NDArray[np.complexfloating],
+    W: NDArray[np.complexfloating],
 ) -> dict[str, Any]:
     """
-    Build route factors M_A and M_B (04-02 §1).
+    Build projected route factors M_A and M_B (04-02 §1).
 
-    M_A^R_{uv; j1,j2} = sum_{p,q} t_mu[p,q] A^{i,p}_{u,j1} conj(B^{j,q}_{j2,v})
-    M_B^R_{rs; j1,j2} = sum_{p',q'} conj(t_mu[p',q']) conj(B^{i,p'}_{j1,r}) A^{j,q'}_{s,j2}
+    M_A^R_{uv; a,b} = sum_{p,q,j1,j2} t_mu[p,q] A^{i,p}_{u,j1} W[j1,a]
+                      conj(B^{j,q}_{j2,v}) W[j2,b]
+    M_B^R_{rs; a,b} = sum_{p,q,j1,j2} conj(t_mu[p,q]) conj(B^{i,p}_{j1,r}) W[j1,a]
+                      A^{j,q}_{s,j2} W[j2,b]
 
     Parameters
     ----------
     l1_result : output from build_L1.
     t_mu : hopping matrix (n_orb, n_orb). t_mu[p,q] = hopping from site-j orbital q to site-i orbital p.
+    W : projector from SOC-lowest f^n LSJM subspace to the target local basis.
 
     Returns dict with M_A, M_B arrays.
-    M_A shape: (n_u * n_v, n_j * n_j)  or equivalently (n_u, n_v, n_j, n_j)
-    M_B shape: (n_v * n_u, n_j * n_j)  similarly
+    M_A shape: (n_u, n_v, n_k, n_k)
+    M_B shape: (n_v, n_u, n_k, n_k)
     """
     A = l1_result["A"]  # (n_orb, n_u, n_j)
     B = l1_result["B"]  # (n_orb, n_j, n_v)
@@ -99,6 +104,7 @@ def build_L2(
     n_u = l1_result["n_u"]
     n_j = l1_result["n_j"]
     n_v = l1_result["n_v"]
+    W_arr = np.asarray(W, dtype=np.complex128)
 
     if t_mu.shape != (n_orb, n_orb):
         raise BindError(
@@ -106,16 +112,25 @@ def build_L2(
             f"t_mu shape {t_mu.shape} != ({n_orb},{n_orb})",
             actual={"lhs_shape": list(t_mu.shape), "rhs_shape": [n_orb, n_orb]},
         )
+    if W_arr.ndim != 2 or W_arr.shape[0] != n_j:
+        raise BindError(
+            "FXE-BIND-003",
+            f"W shape {tuple(W_arr.shape)} incompatible with n_j={n_j}",
+            expected={"W_shape": [n_j, "n_k"]},
+            actual={"W_shape": list(W_arr.shape), "n_j": n_j},
+        )
 
-    logger.info("L2: Building route factors")
+    n_k = W_arr.shape[1]
+    logger.info("L2: Building projected route factors, n_j=%d -> n_k=%d", n_j, n_k)
 
-    # Route A: M_A[u,v,j1,j2] = sum_{p,q} t[p,q] * A[p,u,j1] * conj(B[q,j2,v])
-    # Optimal contraction path (optimize=True): first contract t with A -> (n_orb,n_u,n_j),
-    # then contract with conj(B) -> (n_u,n_v,n_j,n_j). Single BLAS ZGEMM for the heavy step.
-    M_A = np.einsum("pq,puj,qkv->uvjk", t_mu, A, B.conj(), optimize=True)
+    A_k = np.einsum("puj,ja->pua", A, W_arr, optimize=True)
+    Bc_k = np.einsum("pjv,ja->pav", B.conj(), W_arr, optimize=True)
 
-    # Route B: M_B[r,s,j1,j2] = sum_{p,q} conj(t[p,q]) * conj(B[p,j1,r]) * A[q,s,j2]
-    M_B = np.einsum("pq,par,qsb->rsab", t_mu.conj(), B.conj(), A, optimize=True)
+    # Route A: M_A[u,v,a,b] = sum_{p,q} t[p,q] * A_k[p,u,a] * conj(B)_k[q,b,v]
+    M_A = np.einsum("pq,pua,qbv->uvab", t_mu, A_k, Bc_k, optimize=True)
+
+    # Route B: M_B[r,s,a,b] = sum_{p,q} conj(t[p,q]) * conj(B)_k[p,a,r] * A_k[q,s,b]
+    M_B = np.einsum("pq,par,qsb->rsab", t_mu.conj(), Bc_k, A_k, optimize=True)
 
     logger.info("L2 complete: M_A shape=%s, M_B shape=%s", M_A.shape, M_B.shape)
 
@@ -125,6 +140,7 @@ def build_L2(
         "n_u": n_u,
         "n_v": n_v,
         "n_j": n_j,
+        "n_k": n_k,
     }
 
 
@@ -216,20 +232,19 @@ def build_L3(
     l2_result: dict[str, Any],
     E_u_np1: NDArray[np.floating],
     E_u_nm1: NDArray[np.floating],
-    W: NDArray[np.complexfloating],
     n_ele: int,
 ) -> dict[str, Any]:
     """
-    Canonical runtime final-L3 path: fused denominator sum + W projection (04-02 §3).
+    Canonical runtime final-L3 path: denominator sum over projected L2 factors.
 
-    This is the implementation the pipeline runs. It projects the external
-    (j1,j2) legs of each route factor to the target Kramers/non-Kramers basis
-    *first*, then does the denominator-weighted Gram contraction directly in the
-    n_k space -- so the (n_j, n_j, n_j, n_j) `h_pre_j_mu` tensor is never
-    materialized. Intermediate-state sums and denominators are unchanged.
+    This is the implementation the pipeline runs. L2 has already projected the
+    external legs to the target Kramers/non-Kramers basis, so L3 only does the
+    denominator-weighted Gram contraction in n_k space. The
+    (n_j, n_j, n_j, n_j) `h_pre_j_mu` tensor is never materialized.
 
     Correctness contract: algebraically equal to
-    `build_L4_legacy(build_L3_legacy(...), W)`
+    `build_L4_legacy(build_L3_legacy(raw_l2, ...), W)` when `l2_result` is
+    built from the same raw L1/hopping/projector inputs.
     (the reference oracle), pinned at 1e-12 by
     `tests/test_contraction.py::test_build_l3_matches_legacy_materialized_projector`.
     The equality holds because W acts only on the external j-legs and the
@@ -241,19 +256,16 @@ def build_L3(
     slightly slower, when n_k ~= n_j (W near-square), since the projection is
     then applied per intermediate-state pair rather than once on the aggregate.
     """
-    M_A = l2_result["M_A"]  # (n_u, n_v, n_j, n_j)
-    M_B = l2_result["M_B"]  # (n_r, n_s, n_j, n_j)
-    n_j = l2_result["n_j"]
-
-    if W.shape[0] != n_j:
+    M_A = l2_result["M_A"]  # (n_u, n_v, n_k, n_k)
+    M_B = l2_result["M_B"]  # (n_r, n_s, n_k, n_k)
+    n_k = int(l2_result.get("n_k", M_A.shape[2]))
+    if M_A.ndim != 4 or M_B.ndim != 4 or M_A.shape[2:] != (n_k, n_k) or M_B.shape[2:] != (n_k, n_k):
         raise BindError(
             "FXE-BIND-003",
-            f"W.shape[0]={W.shape[0]} != n_j={n_j}",
-            actual={"W_shape": list(W.shape), "n_j": n_j},
+            "L3 requires projected L2 tensors with trailing axes (n_k,n_k)",
+            actual={"M_A_shape": list(M_A.shape), "M_B_shape": list(M_B.shape), "n_k": n_k},
         )
-
-    n_k = W.shape[1]
-    logger.info("L3 fused: denominator summation and W projection, n_j=%d -> n_k=%d", n_j, n_k)
+    logger.info("L3: denominator summation over projected route factors, n_k=%d", n_k)
 
     n_u = M_A.shape[0]
     n_v = M_A.shape[1]
@@ -279,12 +291,8 @@ def build_L3(
         expected_right=n_s,
     )
 
-    # Project ket-side route amplitudes once: M_K[m,a,b] = M[m,j1,j2] W[j1,a] W[j2,b].
-    M_A_k = np.einsum("uvij,ia,jb->uvab", M_A, W, W, optimize=True)
-    M_B_k = np.einsum("rsij,ia,jb->rsab", M_B, W, W, optimize=True)
-
-    YA = M_A_k.reshape(n_u * n_v, n_k * n_k)
-    YB = M_B_k.reshape(n_r * n_s, n_k * n_k)
+    YA = M_A.reshape(n_u * n_v, n_k * n_k)
+    YB = M_B.reshape(n_r * n_s, n_k * n_k)
 
     hA = YA.conj().T @ ((1.0 / denom_A)[:, None] * YA)
     hB = YB.conj().T @ ((1.0 / denom_B)[:, None] * YB)
@@ -295,7 +303,7 @@ def build_L3(
     Heff_flat = Heff.reshape(n_k * n_k, n_k * n_k)
     check_hermitian(Heff_flat, label="Heff", module="contraction")
 
-    logger.info("L3 fused complete: Heff shape=%s", Heff.shape)
+    logger.info("L3 complete: Heff shape=%s", Heff.shape)
 
     return {
         "h_mu_abcd": h_mu,

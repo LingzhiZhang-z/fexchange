@@ -38,9 +38,8 @@ Code form:
       n-{n+1}/states.npz
     L1/
       F/data.npz
-    L2/
-    L3/
-      kramer-{kramer_name}/
+    L2/data.npz
+    L3/data.npz
 ```
 
 Note:
@@ -59,7 +58,7 @@ Code form:
 ./outputs/demo_run/IONED/n-7/states.npz
 ./outputs/demo_run/L1/F/data.npz
 ./outputs/demo_run/L2/data.npz
-./outputs/demo_run/L3/kramer-k1/data.npz
+./outputs/demo_run/L3/data.npz
 ```
 
 ## 4) Optional Snapshot Files (Audit-Only)

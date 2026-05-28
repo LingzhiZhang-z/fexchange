@@ -1,4 +1,4 @@
-"""fopt L2: V_+ blocks for cluster (4 (f_site, ligand) pairs x 3 sectors = 12 blocks)."""
+"""fopt L2/L3 contraction for projected active-pair blocks and path sums."""
 
 from __future__ import annotations
 
@@ -27,10 +27,14 @@ def _compute_pair_V_plus(
     F_creation: NDArray[np.complexfloating],
     P_creation: NDArray[np.complexfloating],
     t_fp: NDArray[np.complexfloating],
+    W: NDArray[np.complexfloating],
+    *,
+    sector: str,
 ) -> dict[str, Any]:
-    """V_+ 4-leg tensor for one (f_site, ligand) pair x one sector."""
+    """Projected V_+ 4-leg tensor for one (f_site, ligand) pair x one sector."""
     n_orb_f, dim_high_f, dim_low_f = F_creation.shape
     n_orb_p, dim_high_p, dim_low_p = P_creation.shape
+    W_arr = np.asarray(W, dtype=DTYPE_COMPLEX)
 
     if t_fp.shape != (n_orb_f, n_orb_p):
         raise BindError(
@@ -38,14 +42,36 @@ def _compute_pair_V_plus(
             f"t_fp shape {tuple(t_fp.shape)} != ({n_orb_f}, {n_orb_p})",
             actual={"t_shape": list(t_fp.shape), "expected": [n_orb_f, n_orb_p]},
         )
+    expected_w_dim = dim_high_f if sector == "fnm1_p6" else dim_low_f
+    if W_arr.ndim != 2 or W_arr.shape[0] != expected_w_dim:
+        raise BindError(
+            "FXE-BIND-003",
+            f"W shape {tuple(W_arr.shape)} incompatible with sector {sector!r}",
+            expected={"W_shape": [expected_w_dim, "n_k"], "sector": sector},
+            actual={"W_shape": list(W_arr.shape), "sector": sector},
+        )
 
-    V_plus = np.einsum(
-        "ab,aik,blj->ijkl",
-        t_fp.astype(DTYPE_COMPLEX),
-        F_creation,
-        P_creation.conj(),
-        optimize=True,
-    )
+    n_k = int(W_arr.shape[1])
+    if sector == "fnm1_p6":
+        F_projected = np.einsum("aik,ix->axk", F_creation, W_arr.conj(), optimize=True)
+        V_plus = np.einsum(
+            "ab,axk,blj->xjkl",
+            t_fp.astype(DTYPE_COMPLEX, copy=False),
+            F_projected,
+            P_creation.conj(),
+            optimize=True,
+        )
+        dim_high_f = n_k
+    else:
+        F_projected = np.einsum("aik,kx->aix", F_creation, W_arr, optimize=True)
+        V_plus = np.einsum(
+            "ab,aix,blj->ijxl",
+            t_fp.astype(DTYPE_COMPLEX, copy=False),
+            F_projected,
+            P_creation.conj(),
+            optimize=True,
+        )
+        dim_low_f = n_k
 
     return {
         "V_plus": V_plus,
@@ -59,11 +85,16 @@ def _compute_pair_V_plus(
 def build_L2(
     l1: dict[str, Any],
     t: dict[tuple[int, int], NDArray[np.complexfloating]],
+    W: NDArray[np.complexfloating],
 ) -> dict[tuple[int, int, str], dict[str, Any]]:
-    """V_+ blocks: 4 (f_site, ligand) pairs x 3 sectors = 12 blocks."""
+    """Projected V_+ blocks: 4 (f_site, ligand) pairs x 3 sectors = 12 blocks."""
     return {
         (f_site, ligand, sector): _compute_pair_V_plus(
-            l1["f"][f_site][f_key], l1["p"][ligand][p_key], t_fp,
+            l1["f"][f_site][f_key],
+            l1["p"][ligand][p_key],
+            t_fp,
+            W,
+            sector=sector,
         )
         for (f_site, ligand), t_fp in t.items()
         for sector, f_key, p_key in _SECTORS
@@ -71,47 +102,8 @@ def build_L2(
 
 
 # ---------------------------------------------------------------------------
-# L3 skeleton: H_eff from 32 path amplitudes, with W projection applied here
-# (no separate L4 since W is consumed inside L3).
+# L3 skeleton: H_eff from 32 path amplitudes over projected L2 blocks.
 # ---------------------------------------------------------------------------
-
-def project_W(
-    l2: dict[tuple[int, int, str], dict[str, Any]],
-    W: NDArray[np.complexfloating],
-) -> dict[tuple[int, int, str], dict[str, Any]]:
-    """Project the f^n LSJM end of each V_+ block to doublet (n_k).
-
-    For sector "fn_p6", "fn_p5": project low_f end (input is f^n, ket side, use W).
-    For sector "fnm1_p6"     : project high_f end (output is f^n, bra side, use W.conj()).
-    W : (2J+1, n_k) projector, shared by all f-sites. Column a = doublet state a in LSJM basis.
-    """
-    n_k = W.shape[1]
-    W_conj = W.conj()
-    result: dict[tuple[int, int, str], dict[str, Any]] = {}
-    for (f_site, ligand, sector), block in l2.items():
-        expected = block["dim_high_f"] if sector == "fnm1_p6" else block["dim_low_f"]
-        if W.shape[0] != expected:
-            raise BindError(
-                "FXE-BIND-003",
-                f"W.shape[0]={W.shape[0]} != dim_soc_lowest(n)={expected}"
-                f" at block (f_site={f_site}, ligand={ligand}, sector={sector!r})",
-                expected={"W_shape_0": expected},
-                actual={
-                    "W_shape": list(W.shape),
-                    "expected": expected,
-                    "block_key": [f_site, ligand, sector],
-                },
-            )
-        V_plus = block["V_plus"]
-        new_block = dict(block)
-        if sector == "fnm1_p6":
-            new_block["V_plus"] = np.einsum("ijkl,ia->ajkl", V_plus, W_conj)
-            new_block["dim_high_f"] = n_k
-        else:
-            new_block["V_plus"] = np.einsum("ijkl,ka->ijal", V_plus, W)
-            new_block["dim_low_f"] = n_k
-        result[(f_site, ligand, sector)] = new_block
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -646,20 +638,18 @@ def _cluster_sign(n_ele: int, sign_const: int) -> int:
 def build_L3(
     l2: dict[tuple[int, int, str], dict[str, Any]],
     energies: dict[str, NDArray[np.floating]],
-    W: NDArray[np.complexfloating],
     n_ele: int,
     *,
     return_per_path: bool = False,
 ) -> NDArray[np.complexfloating] | dict[str, Any]:
     """H_eff[f1_fin, f2_fin, f1_init, f2_init] (n_k,)*4 from 32 path amplitudes.
 
-    l2       : build_L2 output {(f_site, ligand, sector): pair_dict}.
+    l2       : projected build_L2 output {(f_site, ligand, sector): pair_dict}.
     energies : {"f_np1", "f_nm1", "p_5_lig1", "p_5_lig2", "p_4_lig1",
                "p_4_lig2"} -> 1D ndarray. Optional "E_0" key (default 0) is
                the single-site f^n GS energy; cluster GS = 2*E_0. Path
                denominators subtract n_exc * E_0 where n_exc is the number of
                f-sites excited in the intermediate state.
-    W        : (2J+1, n_k) doublet projector, shared by all f-sites.
     n_ele    : f-shell electron count (used for cluster sign).
     return_per_path : if False (default), return H_total only. If True, return
                       a dict {"H_total", "per_path", "per_process"} for debug:
@@ -672,9 +662,7 @@ def build_L3(
     Output ordering matches sopt's [c, d, a, b] bra/ket convention so that
     `Heff.reshape(n_k**2, n_k**2)` plugs straight into `spin12_map`.
     """
-    l2_proj = project_W(l2, W)
-
-    n_k = l2_proj[(1, 1, "fn_p6")]["V_plus"].shape[2]
+    n_k = l2[(1, 1, "fn_p6")]["V_plus"].shape[2]
     H = np.zeros((n_k,) * 4, dtype=DTYPE_COMPLEX)
     per_path: dict[tuple[str, int, str | None], NDArray[np.complexfloating]] = {}
     per_process: dict[str, NDArray[np.complexfloating]] = {
@@ -694,10 +682,10 @@ def build_L3(
     # Process 1: alternating single-ligand (4 paths).
     for idx, (f_first, lig, sign_const) in enumerate(_PROCESS1_PATHS):
         f_other = 3 - f_first
-        V_1 = l2_proj[(f_first, lig, "fn_p6")  ]["V_plus"]
-        V_2 = l2_proj[(f_other, lig, "fnm1_p6")]["V_plus"]
-        V_3 = l2_proj[(f_other, lig, "fnm1_p6")]["V_plus"]
-        V_4 = l2_proj[(f_first, lig, "fn_p6")  ]["V_plus"]
+        V_1 = l2[(f_first, lig, "fn_p6")  ]["V_plus"]
+        V_2 = l2[(f_other, lig, "fnm1_p6")]["V_plus"]
+        V_3 = l2[(f_other, lig, "fnm1_p6")]["V_plus"]
+        V_4 = l2[(f_first, lig, "fn_p6")  ]["V_plus"]
         H_native = _path_amplitude_process1(
             V_1, V_2, V_3, V_4, E_np1, E_nm1, energies[f"p_5_lig{lig}"], E_0=E_0
         )
@@ -708,10 +696,10 @@ def build_L3(
 
     # Process 2: onion single-ligand (8 paths).
     for idx, (r1, r2, r3, r4, lig, sign_const) in enumerate(_PROCESS2_PATHS):
-        V_1 = l2_proj[(r1, lig, "fn_p6")]["V_plus"]
-        V_2 = l2_proj[(r2, lig, "fn_p5")]["V_plus"]
-        V_3 = l2_proj[(r3, lig, "fn_p5")]["V_plus"]
-        V_4 = l2_proj[(r4, lig, "fn_p6")]["V_plus"]
+        V_1 = l2[(r1, lig, "fn_p6")]["V_plus"]
+        V_2 = l2[(r2, lig, "fn_p5")]["V_plus"]
+        V_3 = l2[(r3, lig, "fn_p5")]["V_plus"]
+        V_4 = l2[(r4, lig, "fn_p6")]["V_plus"]
         pattern = "A" if r3 == r1 else "B"
         H_native = _path_amplitude_process2(
             V_1,
@@ -732,10 +720,10 @@ def build_L3(
     # Process 3: alternating cross-ligand (4 paths).
     for idx, (f_first, lig_a, lig_b, sign_const) in enumerate(_PROCESS3_PATHS):
         f_other = 3 - f_first
-        V_1 = l2_proj[(f_first, lig_a, "fn_p6")  ]["V_plus"]
-        V_2 = l2_proj[(f_other, lig_a, "fnm1_p6")]["V_plus"]
-        V_3 = l2_proj[(f_other, lig_b, "fnm1_p6")]["V_plus"]
-        V_4 = l2_proj[(f_first, lig_b, "fn_p6")  ]["V_plus"]
+        V_1 = l2[(f_first, lig_a, "fn_p6")  ]["V_plus"]
+        V_2 = l2[(f_other, lig_a, "fnm1_p6")]["V_plus"]
+        V_3 = l2[(f_other, lig_b, "fnm1_p6")]["V_plus"]
+        V_4 = l2[(f_first, lig_b, "fn_p6")  ]["V_plus"]
         H_native = _path_amplitude_process3(
             V_1,
             V_2,
@@ -754,10 +742,10 @@ def build_L3(
 
     # Process 4: onion crossed double-ligand (8 paths).
     for idx, (r_a, lig_a, r_b, lig_b, r_c, lig_c, r_d, lig_d, sign_const) in enumerate(_PROCESS4_PATHS):
-        V_1 = l2_proj[(r_a, lig_a, "fn_p6")]["V_plus"]
-        V_2 = l2_proj[(r_b, lig_b, "fn_p6")]["V_plus"]
-        V_3 = l2_proj[(r_c, lig_c, "fn_p6")]["V_plus"]
-        V_4 = l2_proj[(r_d, lig_d, "fn_p6")]["V_plus"]
+        V_1 = l2[(r_a, lig_a, "fn_p6")]["V_plus"]
+        V_2 = l2[(r_b, lig_b, "fn_p6")]["V_plus"]
+        V_3 = l2[(r_c, lig_c, "fn_p6")]["V_plus"]
+        V_4 = l2[(r_d, lig_d, "fn_p6")]["V_plus"]
         pattern = "A" if r_c == r_a else "B"
         H_native = _path_amplitude_process4(
             V_1,
@@ -777,10 +765,10 @@ def build_L3(
 
     # Process 5: onion uncrossed double-ligand (8 paths).
     for idx, (r_a, lig_a, r_b, lig_b, r_c, lig_c, r_d, lig_d, sign_const) in enumerate(_PROCESS5_PATHS):
-        V_1 = l2_proj[(r_a, lig_a, "fn_p6")]["V_plus"]
-        V_2 = l2_proj[(r_b, lig_b, "fn_p6")]["V_plus"]
-        V_3 = l2_proj[(r_c, lig_c, "fn_p6")]["V_plus"]
-        V_4 = l2_proj[(r_d, lig_d, "fn_p6")]["V_plus"]
+        V_1 = l2[(r_a, lig_a, "fn_p6")]["V_plus"]
+        V_2 = l2[(r_b, lig_b, "fn_p6")]["V_plus"]
+        V_3 = l2[(r_c, lig_c, "fn_p6")]["V_plus"]
+        V_4 = l2[(r_d, lig_d, "fn_p6")]["V_plus"]
         pattern = "A" if r_c == r_a else "B"
         H_native = _path_amplitude_process5(
             V_1,

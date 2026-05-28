@@ -312,7 +312,7 @@ PRB 绘图缩放规则（必须和参考图一致）：
 每次 `fexchange run` 成功后，最终交换结果写在 run-scoped final artifact 目录：
 
 ```
-<output_root>/<run_name>/L3/kramer-<kramer_name>/exchange.txt
+<output_root>/<run_name>/L3/exchange.txt
 ```
 
 `exchange.txt` 是 human-readable sidecar；机器契约仍然是同目录的 `data.npz`。

@@ -11,9 +11,10 @@ Runtime tolerances, deterministic linear algebra, and global input gates follow
 Level semantics:
 - $L0$: Fock-basis primitive-transition level (construct transition elements on canonical Fock basis only; no site labels $i/j$; no external state-file dependency).
 - $L1$: local transition-vertex construction (rotate intermediate $f^{n+1}/f^{n-1}$ legs and project the $f^n$ leg onto the lowest-SOC LSJM subspace).
-- $L2$: route-factor construction level (compute $M_A/M_B$ from $A/B$, site-binding, and hopping contraction).
-- $L3$: denominator-weighted fixed-Kramers-basis output (apply $W$ projection and produce
-  single-channel $\mathrm{Heff}^{(\mu)}$).
+- $L2$: projected route-factor construction level (compute $M_A/M_B$ from $A/B$,
+  site-binding, hopping contraction, and the low-energy projector $W$).
+- $L3$: denominator-weighted fixed-Kramers-basis output (produce single-channel
+  $\mathrm{Heff}^{(\mu)}$ from projected $M_A/M_B$).
 
 Execution order:
 - Default and required order is $L0 \to L1 \to L2 \to L3$ for final output.
@@ -131,16 +132,15 @@ Definitions:
 
 Large module (full SOPT chain, $L0 \to L3$):
 - Input variables: `E_u`, `U_np1`, `U_n_soc0`, `U_nm1`, `t_mu`, `W`, `labels_abcd`, `labels_order_id`.
-- Intermediate variables: `X`, `Y`, `A`, `B`, `E_uv`, `E_rs`, `M_A`, `M_B`, `h_pre_j_mu`.
+- Intermediate variables: `X`, `Y`, `A`, `B`, `E_uv`, `E_rs`, `M_A`, `M_B`.
 - Output variables: `h_mu_abcd`, `Heff_mu_abcd`.
 
 Small modules (per level):
 - $L0$: input `{}`; intermediate `{sign/workspace}`; output `{X, Y}`.
 - $L1$: input `{X, Y, U_np1, U_n_soc0, U_nm1}`; intermediate `{workspace}`; output `{A, B}`.
-- $L2$: input `{A, B, t_mu}`; intermediate `{workspace}`; output `{M_A, M_B}`.
-- $L3$: input `{M_A, M_B, E_u, W, labels_abcd, labels_order_id}` or
-  `{h_pre_j_mu, W, labels_abcd, labels_order_id}`; intermediate
-  `{h_pre_mu}`; output `{h_mu_abcd, Heff_mu_abcd}`.
+- $L2$: input `{A, B, t_mu, W}`; intermediate `{workspace}`; output `{M_A, M_B}` in the projected local basis.
+- $L3$: input `{M_A, M_B, E_u, labels_abcd, labels_order_id}`; intermediate
+  `{h_mu_abcd}`; output `{h_mu_abcd, Heff_mu_abcd}`.
 
 ## 1) Core SOPT Rule
 MUST:
@@ -322,7 +322,7 @@ MUST:
 - Large-module outputs must include: `h_mu_abcd`, `Heff_mu_abcd`.
 - `Heff_mu_abcd` may be consumed by module 04-03 as post-processing input for
   spin-$\tfrac{1}{2}$ mapping.
-- Large-module intermediate variables (`X/Y/A/B/E_uv/E_rs/M_A/M_B/h_pre_j_mu`) must not be treated as final public outputs.
+- Large-module intermediate variables (`X/Y/A/B/E_uv/E_rs/M_A/M_B`) must not be treated as final public outputs.
 - In split-level execution, upstream level outputs may be used as downstream inputs; they remain intermediate variables in large-module semantics.
 - $E_{uv}/E_{rs}$ are internal denominator composite energies derived from
   `E_u`, and must not be persisted as external outputs.
@@ -347,7 +347,7 @@ $$
 Code form:
 ```text
 module_inputs       = {E_u, U_np1, U_n_soc0, U_nm1, t_mu, W, labels_abcd, labels_order_id}
-module_internal     = {X, Y, A, B, E_uv, E_rs, M_A, M_B, h_pre_j_mu}
+module_internal     = {X, Y, A, B, E_uv, E_rs, M_A, M_B}
 module_outputs      = {h_mu_abcd, Heff_mu_abcd}
 submodule_handoff   = {L0: X/Y, L1: A/B, L2: M_A&M_B, L3: h_mu_abcd&Heff_mu_abcd}
 labels_order_id     = "abcd_lex_v1"
