@@ -2,122 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_EIG_CLUSTER, EPS_ZERO
+from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_ZERO
 from fexchange.utils.errors import BindError, NumError
 
 logger = logging.getLogger("fexchange")
 FOPT_PROCESS_LABELS = ("P1", "P2", "P3", "P4", "P5")
-
-
-# ===========================================================================
-# Degeneracy-level collapse  (EXACT optimization for the L3 fourth-order sum)
-#
-# Each fourth-order path below (_path_amplitude_processN) sums over the FULL
-# f^{n+1}/f^{n-1} intermediate sectors (n_u ~ 3003 states for f^5), an n_u^2 cost
-# in the onion processes P4/P5. The resolvent 1/(E_A + E_B + ...) depends ONLY on
-# the intermediate ENERGY, and atomic Coulomb+SOC leaves the 2J+1 states of each
-# (alpha,L,S,J) multiplet exactly degenerate. So the per-state sum regroups
-# EXACTLY by distinct energy LEVEL (distributive law):
-#
-#     sum_A  M[A] w(E_A) M'[A]  =  sum_level w(e_level) ( sum_{A in level} M[A] M'[A] )
-#
-# Every state is kept; identical-energy states are summed (into per-level "Gram"
-# tensors, _sum_by_level) BEFORE the resolvent. This turns n_u -> n_levels (~293)
-# and n_u^2 -> n_levels^2: ~100x faster, ~30x less memory at f^5, NO approximation.
-# Grouping is by ACTUAL degeneracy (not analytic label), so it stays exact for ED
-# (numerically-canonicalized IONED energies) and degrades gracefully -- still
-# exact, just less collapse -- if a crystal field is ever added to the intermediate
-# sectors (degeneracy -> Kramers/symmetry doublets).
-#
-# Learnable reference: each _path_amplitude_processN keeps its literal per-state
-# einsum derivation in-line (the "H[a,b,c,d] = sum_{...}" comment blocks); the
-# literal per-state einsums themselves are committed as the independent oracle
-# `_ps_processN` in tests/test_fopt_l2.py, which pins this collapse at round-off.
-#
-# Exactness precondition (numerical): a degenerate level must be tight relative to
-# the zero-denominator guard. _energy_levels groups within EPS_EIG_CLUSTER (1e-10);
-# _resolvent rejects |denom| < EPS_ZERO (1e-12). Production energies arrive
-# canonicalized -- ion_ed gives every cluster member one identical mean energy
-# (intra-level spread exactly 0), LSJM is degenerate to round-off -- so the level
-# mean is a no-op and the result is bit-exact vs the per-state sum. Only a raw,
-# non-canonicalized feed with a genuine spread in the (EPS_ZERO, EPS_EIG_CLUSTER)
-# window could make the level-mean resolvent deviate or flip the near-zero guard;
-# that does not occur on any current code path.
-# ===========================================================================
-
-
-@dataclass(frozen=True)
-class _EnergyLevels:
-    """Degenerate-energy grouping of one intermediate sector (f^{n+1} or f^{n-1}).
-
-    energy   : (n_levels,) canonical energy per level (cluster mean), ascending.
-    order    : (n_states,) stable argsort that sorts states by energy.
-    starts   : (n_levels,) start index of each level in the sorted order; strictly
-               increasing and 0-based (required for np.add.reduceat in _sum_by_level).
-    n_states : number of intermediate states (the un-collapsed dimension).
-    """
-    energy: NDArray[np.float64]
-    order: NDArray[np.integer]
-    starts: NDArray[np.integer]
-    n_states: int
-
-    @property
-    def n_levels(self) -> int:
-        return int(self.energy.size)
-
-
-def _energy_levels(E: NDArray[np.floating], *, tol: float = EPS_EIG_CLUSTER) -> _EnergyLevels:
-    """Partition intermediate-state energies into degenerate levels (the collapse key).
-
-    A new level is cut when an energy exceeds its level's FIRST member by more than
-    ``tol`` (gap-to-start, matching spectrum/ion_ed._clusters): this bounds each
-    level's diameter by ``tol`` and avoids single-linkage chaining of a slow drift.
-    The canonical level energy is the cluster mean; the resolvents and the per-level
-    Gram sums both use it, so the regrouping is exact (see the module note above).
-    """
-    arr = np.asarray(E, dtype=float).reshape(-1)
-    if arr.size == 0:
-        empty = np.asarray([], dtype=np.int64)
-        return _EnergyLevels(arr.astype(np.float64, copy=False), empty, empty, 0)
-    order = np.argsort(arr, kind="stable")
-    sorted_e = arr[order]
-    starts_list: list[int] = []
-    energy_list: list[float] = []
-    start = 0
-    for idx in range(1, int(sorted_e.size) + 1):
-        if idx == sorted_e.size or abs(float(sorted_e[idx]) - float(sorted_e[start])) > tol:
-            starts_list.append(start)
-            energy_list.append(float(np.mean(sorted_e[start:idx])))
-            start = idx
-    return _EnergyLevels(
-        energy=np.asarray(energy_list, dtype=np.float64),
-        order=order.astype(np.int64, copy=False),
-        starts=np.asarray(starts_list, dtype=np.int64),
-        n_states=int(arr.size),
-    )
-
-
-def _sum_by_level(values: NDArray[np.complexfloating], levels: _EnergyLevels) -> NDArray[np.complexfloating]:
-    """Sum ``values`` along axis 0 within each degenerate level (the per-level Gram pre-sum).
-
-    Returns a (n_levels, ...) array whose row k corresponds to ``levels.energy[k]``.
-    Sort-by-energy then ``np.add.reduceat`` over ``levels.starts``; correctness relies
-    on ``starts`` being strictly increasing and 0-based (guaranteed by _energy_levels).
-    ``np.take`` materializes a transient sorted copy.
-    """
-    if values.shape[0] != levels.n_states:
-        raise ValueError(
-            f"level-collapse axis has length {values.shape[0]}, expected {levels.n_states}"
-        )
-    sorted_values = np.take(values, levels.order, axis=0)
-    return np.add.reduceat(sorted_values, levels.starts, axis=0)
 
 
 # (sector_label, f_creation_key in compute_L1_f output, p_creation_key in compute_L1_p output)
@@ -276,14 +171,8 @@ def _path_amplitude_process1(
     E_p5:  NDArray[np.floating],
     *,
     E_0: float = 0.0,
-    levels_np1: _EnergyLevels | None = None,
-    levels_nm1: _EnergyLevels | None = None,
 ) -> NDArray[np.complexfloating]:
     """Process-1 (alternating single-ligand): V+(r_X) V-(r_Y) V+(r_Y) V-(r_X).
-
-    Computed via the exact degeneracy-level collapse (see the module note above):
-    the per-state einsum derived below is summed over degenerate energy LEVELS
-    (per-level Gram tensors TA/TB via _sum_by_level), not over individual states.
 
     Timeline (f-site [═══] solid, ligand hole [┄┄┄] dashed):
                               V_1        V_2        V_3        V_4
@@ -298,17 +187,9 @@ def _path_amplitude_process1(
     M3 = V_3[:, :, :, 0]   # (b=r_Y_fin,   H=p^5, B=r_Y^{n-1})
     M4 = V_4[:, :, :, 0]   # (A=r_X^{n+1}, H=p^5, a=r_X_fin)
 
-    if levels_np1 is None:
-        levels_np1 = _energy_levels(E_np1)
-    if levels_nm1 is None:
-        levels_nm1 = _energy_levels(E_nm1)
-
-    G_s1 = _resolvent(levels_np1.energy[:, None] + E_p5[None, :] - E_0, label="P1.s1")  # 1 f-site
-    G_s2 = _resolvent(
-        levels_np1.energy[:, None] + levels_nm1.energy[None, :] - 2.0 * E_0,
-        label="P1.s2",
-    )  # 2 f-sites
-    G_s3 = _resolvent(levels_np1.energy[:, None] + E_p5[None, :] - E_0, label="P1.s3")  # 1 f-site
+    G_s1 = _resolvent(E_np1[:, None] + E_p5 [None, :] -       E_0, label="P1.s1")  # 1 f-site
+    G_s2 = _resolvent(E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0, label="P1.s2")  # 2 f-sites
+    G_s3 = _resolvent(E_np1[:, None] + E_p5 [None, :] -       E_0, label="P1.s3")  # 1 f-site
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §2)
@@ -346,9 +227,14 @@ def _path_amplitude_process1(
     #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3 ─┘ └─/E_s2─┘ └─ V_2† ─┘ └─/E_s1─┘ └─ V_1 ─┘
     # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n-1})  G = γ_1 (lig p^5)  H = γ_3 (lig p^5)
     # Free outputs  : a = r_X_fin        b = r_Y_fin        c = r_X_init       d = r_Y_init   (n_k doublet)
-    TA = _sum_by_level(np.einsum("AHa,AGc->AHaGc", M4.conj(), M1, optimize=True), levels_np1)
-    TB = _sum_by_level(np.einsum("bHB,dGB->BbHdG", M3, M2.conj(), optimize=True), levels_nm1)
-    return np.einsum("LHaGc,LG,LM,LH,MbHdG->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+    return np.einsum(
+        "AHa, AH, bHB, AB, dGB, AG, AGc -> abcd",
+        M4.conj(), G_s3,
+        M3,        G_s2,
+        M2.conj(), G_s1,
+        M1,
+        optimize=True,
+    )
 
 
 def _path_amplitude_process2(
@@ -362,13 +248,8 @@ def _path_amplitude_process2(
     *,
     pattern: str,
     E_0: float = 0.0,
-    levels_np1: _EnergyLevels | None = None,
 ) -> NDArray[np.complexfloating]:
     """Process-2 (onion single-ligand): V+(r_X) V+(r_Y) V-(?) V-(?), same lig.
-
-    Computed via the exact degeneracy-level collapse (see the module note above):
-    the per-state einsum derived below is summed over degenerate energy LEVELS
-    (per-level Gram tensors TA/TB via _sum_by_level), not over individual states.
 
     p_lig trajectory: p^6 -> p^5(γ_1) -> p^4(γ_2) -> p^5(γ_3) -> p^6.
     Pattern A (FIFO): V_3 lowers r_X, V_4 lowers r_Y  (V_1↔V_3 share A, V_2↔V_4 share B).
@@ -393,15 +274,8 @@ def _path_amplitude_process2(
     M3 = V_3                # (high_f, H=p^4, low_f, K=p^5)
     M4 = V_4[:, :, :, 0]   # (high_f, K=p^5, low_f)
 
-    if levels_np1 is None:
-        levels_np1 = _energy_levels(E_np1)
-    E_level = levels_np1.energy
-
-    G_s1 = _resolvent(E_level[:, None] + E_p5[None, :] - E_0, label="P2.s1")  # 1 f-site
-    G_s2 = _resolvent(
-        E_level[:, None, None] + E_level[None, :, None] + E_p4[None, None, :] - 2.0 * E_0,
-        label="P2.s2",
-    )  # 2 f-sites
+    G_s1 = _resolvent(E_np1[:, None] + E_p5[None, :] -       E_0, label="P2.s1")                                # 1 f-site
+    G_s2 = _resolvent(E_np1[:, None, None] + E_np1[None, :, None] + E_p4[None, None, :] - 2.0 * E_0, label="P2.s2")  # 2 f-sites
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §3, Pattern A path)
@@ -421,24 +295,34 @@ def _path_amplitude_process2(
     # Reduced S:  S_1 = (α, d, γ_1, Ω_2)   S_2 = (α, β, γ_2, Ω_2)   S_3 = (a, β, γ_3, Ω_2)
     # so the s_2 denominator is 3-D (α, β, γ_2). Renaming A=α, B=β, G=γ_1, H=γ_2, K=γ_3.
     if pattern == "A":
-        G_s3 = _resolvent(E_level[:, None] + E_p5[None, :] - E_0, label="P2.s3A")  # (B, K)  1 f-site (only r_Y still excited in s_3)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5[None, :] - E_0, label="P2.s3A")  # (B, K)  1 f-site (only r_Y still excited in s_3)
         #   H[a,b,c,d] = sum_{A,B,G,H,K}  M4*[B,K,a] G_s3[B,K] M3*[A,H,b,K] G_s2[A,B,H] M2[B,H,d,G] G_s1[A,G] M1[A,G,c]
         #                                 └─ V_4† ─┘ └─/E_s3─┘ └── V_3† ──┘ └─/E_s2──┘ └── V_2 ──┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ_1 (p^5)  H = γ_2 (p^4)  K = γ_3 (p^5)
         # Free outputs  : a = r_Y_fin       b = r_X_fin       c = r_X_init     d = r_Y_init      (FIFO: V_4 on r_Y, V_3 on r_X)
-        TA = _sum_by_level(np.einsum("AHbK,AGc->AHbKGc", M3.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BKa,BHdG->BKaHdG", M4.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("LHbKGc,LG,LMH,MK,MKaHdG->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "BKa, BK, AHbK, ABH, BHdG, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     if pattern == "B":
         # LIFO: V_3 lowers r_Y, V_4 lowers r_X.  V_3↔V_2 share B (r_Y^{n+1});  V_4↔V_1 share A (r_X^{n+1}).
         # Same δ-collapse structure as Pattern A but the V_3/V_4 site-pairings swap, so the
         # high_f indices on M_3* and M_4* swap A<->B compared with FIFO.  Same 5 free dummies.
-        G_s3 = _resolvent(E_level[:, None] + E_p5[None, :] - E_0, label="P2.s3B")  # (A, K)  1 f-site (only r_X still excited in s_3)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5[None, :] - E_0, label="P2.s3B")  # (A, K)  1 f-site (only r_X still excited in s_3)
         #   H[a,b,c,d] = sum_{A,B,G,H,K}  M4*[A,K,a] G_s3[A,K] M3*[B,H,b,K] G_s2[A,B,H] M2[B,H,d,G] G_s1[A,G] M1[A,G,c]
         # Free outputs (LIFO): a = r_X_fin, b = r_Y_fin, c = r_X_init, d = r_Y_init.
-        TA = _sum_by_level(np.einsum("AKa,AGc->AKaGc", M4.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BHbK,BHdG->BHbKdG", M3.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("LKaGc,LG,LMH,LK,MHbKdG->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "AKa, AK, BHbK, ABH, BHdG, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     raise ValueError(f"Unknown process-2 pattern: {pattern!r}")
 
 
@@ -453,14 +337,8 @@ def _path_amplitude_process3(
     E_p5_b: NDArray[np.floating],
     *,
     E_0: float = 0.0,
-    levels_np1: _EnergyLevels | None = None,
-    levels_nm1: _EnergyLevels | None = None,
 ) -> NDArray[np.complexfloating]:
     """Process-3 (alternating cross-ligand): V_1/V_2 on lig_a, V_3/V_4 on lig_b.
-
-    Computed via the exact degeneracy-level collapse (see the module note above):
-    the per-state einsum derived below is summed over degenerate energy LEVELS
-    (per-level Gram tensors TA/TB via _sum_by_level), not over individual states.
 
     Same f-site dynamics as process 1 (r_X particle nested with r_Y hole),
     but the two p^5 hole excursions live on different ligands.
@@ -479,17 +357,9 @@ def _path_amplitude_process3(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    if levels_np1 is None:
-        levels_np1 = _energy_levels(E_np1)
-    if levels_nm1 is None:
-        levels_nm1 = _energy_levels(E_nm1)
-
-    G_s1 = _resolvent(levels_np1.energy[:, None] + E_p5_a[None, :] - E_0, label="P3.s1")   # 1 f-site (lig_a p^5)
-    G_s2 = _resolvent(
-        levels_np1.energy[:, None] + levels_nm1.energy[None, :] - 2.0 * E_0,
-        label="P3.s2",
-    )   # 2 f-sites
-    G_s3 = _resolvent(levels_np1.energy[:, None] + E_p5_b[None, :] - E_0, label="P3.s3")   # 1 f-site (lig_b p^5)
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P3.s1")   # 1 f-site (lig_a p^5)
+    G_s2 = _resolvent(E_np1[:, None] + E_nm1[None, :] - 2.0 * E_0, label="P3.s2")   # 2 f-sites
+    G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P3.s3")   # 1 f-site (lig_b p^5)
 
     # ─── Derivation: full cluster sum -> local-index einsum ─────────────────
     # (ref: standards/fopt/L3_full_cluster_expansion.md §4)
@@ -514,9 +384,14 @@ def _path_amplitude_process3(
     #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3 ─┘ └─/E_s2─┘ └─ V_2† ─┘ └─/E_s1─┘ └─ V_1 ─┘
     # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n-1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
     # Free outputs  : a = r_X_fin        b = r_Y_fin        c = r_X_init           d = r_Y_init   (n_k doublet)
-    TA = _sum_by_level(np.einsum("AHa,AGc->AHaGc", M4.conj(), M1, optimize=True), levels_np1)
-    TB = _sum_by_level(np.einsum("bHB,dGB->BbHdG", M3, M2.conj(), optimize=True), levels_nm1)
-    return np.einsum("LHaGc,LG,LM,LH,MbHdG->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+    return np.einsum(
+        "AHa, AH, bHB, AB, dGB, AG, AGc -> abcd",
+        M4.conj(), G_s3,
+        M3,        G_s2,
+        M2.conj(), G_s1,
+        M1,
+        optimize=True,
+    )
 
 
 def _path_amplitude_process4(
@@ -530,13 +405,8 @@ def _path_amplitude_process4(
     *,
     pattern: str,
     E_0: float = 0.0,
-    levels_np1: _EnergyLevels | None = None,
 ) -> NDArray[np.complexfloating]:
     """Process-4 (onion crossed double-ligand): all 4 vertices on "fn_p6", crossed lig.
-
-    Computed via the exact degeneracy-level collapse (see the module note above):
-    the per-state einsum derived below is summed over degenerate energy LEVELS
-    (per-level Gram tensors TA/TB via _sum_by_level), not over individual states.
 
     V_1 raises r_X via lig_a, V_2 raises r_Y via lig_b; V_3, V_4 lower on the OTHER lig.
     Pattern A (FIFO): V_3 lowers r_X via lig_b, V_4 lowers r_Y via lig_a.
@@ -561,14 +431,10 @@ def _path_amplitude_process4(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    if levels_np1 is None:
-        levels_np1 = _energy_levels(E_np1)
-    E_level = levels_np1.energy
-
-    G_s1 = _resolvent(E_level[:, None] + E_p5_a[None, :] - E_0, label="P4.s1")                            # 1 f-site
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P4.s1")                            # 1 f-site
     G_s2 = _resolvent(
-        E_level[:, None, None, None]
-      + E_level[None, :, None, None]
+        E_np1[:, None, None, None]
+      + E_np1[None, :, None, None]
       + E_p5_a[None, None, :, None]
       + E_p5_b[None, None, None, :]
       - 2.0 * E_0,
@@ -595,24 +461,34 @@ def _path_amplitude_process4(
     # Renaming A=α, B=β, G=γ, H=δ.
 
     if pattern == "A":
-        G_s3 = _resolvent(E_level[:, None] + E_p5_a[None, :] - E_0, label="P4.s3A")  # (B, G)  1 f-site (r_Y still up on lig_a)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P4.s3A")  # (B, G)  1 f-site (r_Y still up on lig_a)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[B,G,a] G_s3[B,G] M3*[A,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
         # Free outputs  : a = r_Y_fin       b = r_X_fin       c = r_X_init        d = r_Y_init   (FIFO: V_4 on r_Y, V_3 on r_X)
-        TA = _sum_by_level(np.einsum("AHb,AGc->AHbGc", M3.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BGa,BHd->BGaHd", M4.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("iHbGc,iG,ijGH,jG,jGaHd->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "BGa, BG, AHb, ABGH, BHd, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     if pattern == "B":
         # LIFO: V_3 lowers r_Y via lig_a, V_4 lowers r_X via lig_b.  Same δ-collapse
         # produces the same 4 free dummies; V_3/V_4 site-pairings swap so M_3*, M_4*
         # high_f labels swap A <-> B compared with FIFO.
-        G_s3 = _resolvent(E_level[:, None] + E_p5_b[None, :] - E_0, label="P4.s3B")  # (A, H)  1 f-site (r_X still up on lig_b)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P4.s3B")  # (A, H)  1 f-site (r_X still up on lig_b)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,H,a] G_s3[A,H] M3*[B,G,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         # Free outputs (LIFO): a = r_X_fin, b = r_Y_fin, c = r_X_init, d = r_Y_init.
-        TA = _sum_by_level(np.einsum("AHa,AGc->AHaGc", M4.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BGb,BHd->BGbHd", M3.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("iHaGc,iG,ijGH,iH,jGbHd->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "AHa, AH, BGb, ABGH, BHd, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     raise ValueError(f"Unknown process-4 pattern: {pattern!r}")
 
 
@@ -627,13 +503,8 @@ def _path_amplitude_process5(
     *,
     pattern: str,
     E_0: float = 0.0,
-    levels_np1: _EnergyLevels | None = None,
 ) -> NDArray[np.complexfloating]:
     """Process-5 (onion uncrossed double-ligand): all 4 vertices on "fn_p6".
-
-    Computed via the exact degeneracy-level collapse (see the module note above):
-    the per-state einsum derived below is summed over degenerate energy LEVELS
-    (per-level Gram tensors TA/TB via _sum_by_level), not over individual states.
 
     Each f-site borrows from AND returns to its OWN ligand (vs Process-4
     which returns crossed).  V_1 raises r_X via lig_a, V_2 raises r_Y via
@@ -654,14 +525,10 @@ def _path_amplitude_process5(
     M3 = V_3[:, :, :, 0]
     M4 = V_4[:, :, :, 0]
 
-    if levels_np1 is None:
-        levels_np1 = _energy_levels(E_np1)
-    E_level = levels_np1.energy
-
-    G_s1 = _resolvent(E_level[:, None] + E_p5_a[None, :] - E_0, label="P5.s1")                            # 1 f-site (A,G)
+    G_s1 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P5.s1")                            # 1 f-site (A,G)
     G_s2 = _resolvent(
-        E_level[:, None, None, None]
-      + E_level[None, :, None, None]
+        E_np1[:, None, None, None]
+      + E_np1[None, :, None, None]
       + E_p5_a[None, None, :, None]
       + E_p5_b[None, None, None, :]
       - 2.0 * E_0,
@@ -670,22 +537,32 @@ def _path_amplitude_process5(
 
     if pattern == "A":
         # h3=B11 (returns r_X via lig_a), h4=B22 (returns r_Y via lig_b).
-        G_s3 = _resolvent(E_level[:, None] + E_p5_b[None, :] - E_0, label="P5.s3A")  # (B, H)  r_Y still up on lig_b
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_b[None, :] - E_0, label="P5.s3A")  # (B, H)  r_Y still up on lig_b
         #   H_standard[a,b,c,d] = sum_{A,B,G,H}  M4*[B,H,b] G_s3[B,H] M3*[A,G,a] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
         #                               └─ V_4† ─┘ └─/E_s3─┘ └─ V_3† ─┘ └── /E_s2 ──┘ └─ V_2 ─┘ └─/E_s1─┘ └─ V_1 ─┘
         # Summed dummies: A = α (f_X^{n+1})  B = β (f_Y^{n+1})  G = γ (lig_a p^5)  H = δ (lig_b p^5)
         # Return native axes (V_4_fin, V_3_fin, V_1_init, V_2_init), so the
         # standard formula's first two output axes are intentionally swapped.
-        TA = _sum_by_level(np.einsum("AGa,AGc->AGac", M3.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BHb,BHd->BHbd", M4.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("iGac,iG,ijGH,jH,jHbd->bacd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "BHb, BH, AGa, ABGH, BHd, AG, AGc -> bacd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     if pattern == "B":
         # h3=B22 (returns r_Y via lig_b), h4=B11 (returns r_X via lig_a).
-        G_s3 = _resolvent(E_level[:, None] + E_p5_a[None, :] - E_0, label="P5.s3B")  # (A, G)  r_X still up on lig_a (== G_s1 form)
+        G_s3 = _resolvent(E_np1[:, None] + E_p5_a[None, :] - E_0, label="P5.s3B")  # (A, G)  r_X still up on lig_a (== G_s1 form)
         #   H[a,b,c,d] = sum_{A,B,G,H}  M4*[A,G,a] G_s3[A,G] M3*[B,H,b] G_s2[A,B,G,H] M2[B,H,d] G_s1[A,G] M1[A,G,c]
-        TA = _sum_by_level(np.einsum("AGa,AGc->AGac", M4.conj(), M1, optimize=True), levels_np1)
-        TB = _sum_by_level(np.einsum("BHb,BHd->BHbd", M3.conj(), M2, optimize=True), levels_np1)
-        return np.einsum("iGac,iG,ijGH,iG,jHbd->abcd", TA, G_s1, G_s2, G_s3, TB, optimize=True)
+        return np.einsum(
+            "AGa, AG, BHb, ABGH, BHd, AG, AGc -> abcd",
+            M4.conj(), G_s3,
+            M3.conj(), G_s2,
+            M2,        G_s1,
+            M1,
+            optimize=True,
+        )
     raise ValueError(f"Unknown process-5 pattern: {pattern!r}")
 
 
@@ -795,8 +672,6 @@ def build_L3(
     E_np1 = energies["f_np1"]
     E_nm1 = energies["f_nm1"]
     E_0   = float(energies.get("E_0", 0.0))
-    levels_np1 = _energy_levels(E_np1)
-    levels_nm1 = _energy_levels(E_nm1)
 
     def _accumulate(proc: str, idx: int, pattern: str | None, contribution):
         H[:] += contribution
@@ -812,16 +687,7 @@ def build_L3(
         V_3 = l2[(f_other, lig, "fnm1_p6")]["V_plus"]
         V_4 = l2[(f_first, lig, "fn_p6")  ]["V_plus"]
         H_native = _path_amplitude_process1(
-            V_1,
-            V_2,
-            V_3,
-            V_4,
-            E_np1,
-            E_nm1,
-            energies[f"p_5_lig{lig}"],
-            E_0=E_0,
-            levels_np1=levels_np1,
-            levels_nm1=levels_nm1,
+            V_1, V_2, V_3, V_4, E_np1, E_nm1, energies[f"p_5_lig{lig}"], E_0=E_0
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=f_first, r2=f_other, r3=f_other, r4=f_first,
@@ -845,7 +711,6 @@ def build_L3(
             energies[f"p_4_lig{lig}"],
             pattern=pattern,
             E_0=E_0,
-            levels_np1=levels_np1,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=r1, r2=r2, r3=r3, r4=r4,
@@ -869,8 +734,6 @@ def build_L3(
             energies[f"p_5_lig{lig_a}"],
             energies[f"p_5_lig{lig_b}"],
             E_0=E_0,
-            levels_np1=levels_np1,
-            levels_nm1=levels_nm1,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=f_first, r2=f_other, r3=f_other, r4=f_first,
@@ -894,7 +757,6 @@ def build_L3(
             energies[f"p_5_lig{lig_b}"],
             pattern=pattern,
             E_0=E_0,
-            levels_np1=levels_np1,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=r_a, r2=r_b, r3=r_c, r4=r_d,
@@ -918,7 +780,6 @@ def build_L3(
             energies[f"p_5_lig{lig_b}"],
             pattern=pattern,
             E_0=E_0,
-            levels_np1=levels_np1,
         )
         contribution = _cluster_sign(n_ele, sign_const) * _to_standard(
             H_native, r1=r_a, r2=r_b, r3=r_c, r4=r_d,
