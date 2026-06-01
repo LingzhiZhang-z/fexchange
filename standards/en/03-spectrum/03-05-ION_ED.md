@@ -7,10 +7,13 @@ This file defines the optional full single-ion ED representation used by
 MUST:
 - IONED is defined only for fixed f-electron sectors.
 - IONED diagonalizes the full single-ion Hamiltonian
-  `Hion = H_int + H_soc`.
+  `Hion = H_int + H_soc`, with optional one-body `H_cef` when the runtime
+  supplies `inputs.hcef_file`.
 - IONED is used only for adjacent intermediate sectors `f^(n-1)` and
   `f^(n+1)` in current runtime schemes.
 - The main `f^n` low-energy subspace remains the LSJM SOC-lowest subspace.
+  Manual Kramers input, when enabled by `runtime.kramer_source = "manual"`,
+  is handled by L1 binding and is not an IONED main-sector replacement.
 
 Validation:
 - IONED must not change `L0`.
@@ -22,11 +25,14 @@ MUST:
   `01-00`.
 - `H_int` follows module `02-01`.
 - `H_soc` follows module `02-02`.
+- Optional one-body `H_cef` follows module `02-03` lifted to the fixed
+  Fock sector as
+  `H_cef = sum_{p,q} h_cef[p,q] c_p^dag c_q`.
 - The numerical diagonalization is a Hermitian ED:
 
 Code form:
 ```text
-evals, evecs = eigh(H_int + H_soc)
+evals, evecs = eigh(H_int + H_soc + optional(H_cef))
 V_fock_ed = evecs
 energies = evals + offset
 ```
@@ -34,6 +40,7 @@ energies = evals + offset
 Validation:
 - `Hion` must be Hermitian.
 - `V_fock_ed` columns must be orthonormal.
+- `h_cef` must be Hermitian and use the canonical f spin-orbital order.
 
 ## 3) Degenerate Subspace Canonicalization (MUST)
 MUST:

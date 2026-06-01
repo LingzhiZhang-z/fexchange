@@ -20,7 +20,10 @@ from fexchange.io.disk import (
     validate_meta,
     write_exchange_matrix_txt,
 )
-from fexchange.pipeline.keys import level_key, projector_content_signature, sector_branch
+from fexchange.pipeline.keys import (
+    level_key,
+    sector_branch,
+)
 from fexchange.pipeline.source_writer import build_resolved_inputs_summary
 from fexchange.utils.numerics import numerics_meta
 
@@ -476,9 +479,10 @@ def persist_ion_ed(
             "F6": float(physics.get("F6", 0.0)),
             "zeta": float(physics.get("zeta", 0.0)),
             "offset": float(physics.get("offset", 0.0)),
+            "includes_hcef": bool(physics.get("includes_hcef", False)),
         },
         tensor_name="V_fock_ed, energies",
-        physical_meaning="Full single-ion ED eigenstates of H_int + H_soc",
+        physical_meaning="Full single-ion ED eigenstates of H_int + H_soc (+ H_cef when supplied)",
         basis_id=str(result.get("basis_id", f"fock14_n{n_ele}_lex_v1")),
         index_definition="V_fock_ed(alpha_fock,state), energies(state)",
         logical_shape=[*np.asarray(result["V_fock_ed"]).shape],
@@ -630,8 +634,22 @@ def persist_l1_fopt(
     n_ele: int,
     r42: float,
     r62: float,
+    main_subspace: dict[str, Any] | None = None,
 ) -> None:
     f_vertex = result["f"][1]
+    subspace_id = "soc_lowest_hunds_v1"
+    subspace_meta: dict[str, Any] = {}
+    if isinstance(main_subspace, dict):
+        subspace_id = str(main_subspace.get("subspace_id", subspace_id))
+        subspace_meta = dict(main_subspace.get("meta", {}))
+        if subspace_id == "soc_lowest_hunds_v1" and not subspace_meta:
+            subspace_meta = {
+                "alpha0": main_subspace.get("alpha0"),
+                "L0": main_subspace.get("L0"),
+                "S0": main_subspace.get("S0"),
+                "J0": main_subspace.get("J0"),
+                "n_j": main_subspace.get("n_j"),
+            }
     hash_f = atomic_write_npz(
         f_dir / "data.npz",
         F_n_np1=f_vertex["F_n_np1"],
@@ -648,7 +666,11 @@ def persist_l1_fopt(
         index_definition="F_n_np1(kappa,u,j), F_nm1_n(kappa,j,v)",
         logical_shape=[*f_vertex["F_n_np1"].shape],
         payload_files=["data.npz"],
-        extra={"numerics_meta": numerics_meta()},
+        extra={
+            "fn_ground_subspace_id": subspace_id,
+            "main_subspace_meta": subspace_meta,
+            "numerics_meta": numerics_meta(),
+        },
     )
     atomic_write_json(f_dir / "meta.json", meta)
 
@@ -696,7 +718,6 @@ def persist_l2_fopt(
     r62: float,
 ) -> None:
     hashes: list[str] = []
-    projector_sha1 = projector_content_signature(cfg)
     kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     for fs in (1, 2):
         for lig in (1, 2):
@@ -717,7 +738,6 @@ def persist_l2_fopt(
             n_ele=n_ele,
             r42=r42,
             r62=r62,
-            projector_sha1=projector_sha1,
         ),
         tensor_name="V_plus",
         physical_meaning="FOPT projected active-pair p-to-f hopping blocks",
@@ -728,7 +748,6 @@ def persist_l2_fopt(
         extra={
             "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "numerics_meta": numerics_meta(),
         },
     )
@@ -745,7 +764,6 @@ def persist_l2_fopt(
             "r62": r62,
             "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "content_hash": ":".join(hashes),
         },
     )
@@ -768,7 +786,6 @@ def persist_l3_fopt(
     residual = np.asarray(result["mapping_residual"], dtype=float)
     residual_processes = np.asarray(result["mapping_residual_processes"], dtype=float)
     kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
-    projector_sha1 = projector_content_signature(cfg)
     content_hash = atomic_write_npz(
         stage_dir / "data.npz",
         h_eff_4=h,
@@ -797,7 +814,6 @@ def persist_l3_fopt(
             n_ele=n_ele,
             r42=r42,
             r62=r62,
-            projector_sha1=projector_sha1,
         ),
         tensor_name="h_eff_4, h_eff_4_processes, J_mu, J_mu_processes",
         physical_meaning="FOPT fourth-order effective Hamiltonian and spin-1/2 exchange, total and process-resolved",
@@ -828,7 +844,6 @@ def persist_l3_fopt(
             "Jh": float(cfg["fsite"]["Jh"]),
             "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "content_hash": content_hash,
         },
     )
@@ -846,6 +861,16 @@ def persist_l1(
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     content_hash = atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
+    subspace_id = str(soc0.get("subspace_id", "soc_lowest_hunds_v1"))
+    subspace_meta = dict(soc0.get("meta", {}))
+    if subspace_id == "soc_lowest_hunds_v1":
+        subspace_meta = {
+            "alpha0": soc0["alpha0"],
+            "L0": soc0["L0"],
+            "S0": soc0["S0"],
+            "J0": soc0["J0"],
+            "n_j": soc0["n_j"],
+        }
     meta = build_meta(
         module="sopt.precompute",
         level="L1",
@@ -864,14 +889,9 @@ def persist_l1(
         payload_files=["data.npz"],
         extra={
             "vertex_axis_order_id": "A(kappa,u,j),B(kappa,j,v)",
-            "fn_ground_subspace_id": "soc_lowest_hunds_v1",
-            "soc0_meta": {
-                "alpha0": soc0["alpha0"],
-                "L0": soc0["L0"],
-                "S0": soc0["S0"],
-                "J0": soc0["J0"],
-                "n_j": soc0["n_j"],
-            },
+            "fn_ground_subspace_id": subspace_id,
+            "main_subspace_meta": subspace_meta,
+            "soc0_meta": subspace_meta if subspace_id == "soc_lowest_hunds_v1" else {},
             "numerics_meta": numerics_meta(),
         },
     )
@@ -904,7 +924,6 @@ def persist_l2(
     source_names = cfg.get("inputs", {})
     hopping_name = str(source_names.get("hopping_name", ""))
     kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
-    projector_sha1 = projector_content_signature(cfg)
     content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
@@ -915,7 +934,6 @@ def persist_l2(
             n_ele=n_ele,
             r42=r42,
             r62=r62,
-            projector_sha1=projector_sha1,
         ),
         tensor_name="M_A/M_B",
         physical_meaning="Projected route factors for denominator contraction",
@@ -927,7 +945,6 @@ def persist_l2(
             "axis_order_id": {"M_A": "uvab_v1", "M_B": "rsab_v1"},
             "hopping_name": hopping_name,
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "n_j": int(result.get("n_j", 0)),
             "n_k": int(result.get("n_k", np.asarray(result["M_A"]).shape[2])),
             "numerics_meta": numerics_meta(),
@@ -946,7 +963,6 @@ def persist_l2(
             "r62": r62,
             "hopping_name": hopping_name,
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "content_hash": content_hash,
         },
     )
@@ -966,7 +982,6 @@ def persist_l3_sopt(
     fsite = cfg["fsite"]
     hopping_name = str(cfg.get("inputs", {}).get("hopping_name", ""))
     kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
-    projector_sha1 = projector_content_signature(cfg)
     payload = {
         "h_mu_abcd": result["h_mu_abcd"],
         "Heff_mu_abcd": result["Heff_mu_abcd"],
@@ -993,7 +1008,6 @@ def persist_l3_sopt(
             n_ele=n_ele,
             r42=r42,
             r62=r62,
-            projector_sha1=projector_sha1,
         ),
         tensor_name="h_mu_abcd, Heff_mu_abcd",
         physical_meaning="Final projected effective exchange tensor",
@@ -1008,7 +1022,6 @@ def persist_l3_sopt(
             "human_readable_files": human_readable_files,
             "hopping_name": hopping_name,
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "numerics_meta": numerics_meta(),
         },
     )
@@ -1028,7 +1041,6 @@ def persist_l3_sopt(
             "zeta": float(fsite["zeta"]),
             "hopping_name": hopping_name,
             "kramer_name": kramer_name,
-            "projector_sha1": projector_sha1,
             "content_hash": content_hash,
         },
     )

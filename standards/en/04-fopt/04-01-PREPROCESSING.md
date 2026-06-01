@@ -86,7 +86,11 @@ MUST:
   ligand-specific p working bases.
 - The f working basis is selected by `model.scheme`: LSJM adjacent-sector
   transforms for `RS`, and IONED adjacent-sector transforms for `ED`.
-- The main-sector f leg remains the SOC-lowest LSJM subspace in both schemes.
+- The main-sector f leg is the SOC-lowest LSJM subspace in the default
+  `runtime.kramer_source = "stevens"` route.
+- In `runtime.kramer_source = "manual"`, the main-sector f leg is the
+  user-supplied orthonormal `f^n` Fock-basis Kramers low-energy subspace, and
+  the L1/F artifact must be run-scoped.
 - Apply physical one-particle frame rotations on the primitive orbital axis.
 - Keep f-site labels `r` and ligand labels `lambda` explicit.
 - Record all state-basis and one-particle-frame order ids in metadata.

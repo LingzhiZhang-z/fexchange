@@ -50,7 +50,6 @@ def build_resolved_inputs_summary(
     n_ele: int,
     r42: float,
     r62: float,
-    projector_sha1: str = "",
 ) -> dict[str, Any]:
     """Flatten the current run's resolved scalar inputs for artifact provenance."""
     runtime = _as_dict(cfg.get("runtime"))
@@ -66,13 +65,14 @@ def build_resolved_inputs_summary(
         "r42": float(r42),
         "r62": float(r62),
         "energy_reference": fsite.get("energy_reference", "lsjm_ground"),
+        "kramer_source": runtime.get("kramer_source", "stevens"),
         "hopping_name": inputs.get("hopping_name", ""),
         "hopping_file": inputs.get("hopping_file", ""),
         "kramer_name": runtime.get("kramer_name", ""),
         "projector_file": inputs.get("projector_file", ""),
+        "kramer_file": inputs.get("kramer_file", ""),
+        "hcef_file": inputs.get("hcef_file", ""),
     }
-    if projector_sha1:
-        summary["projector_sha1"] = projector_sha1
 
     branches = _as_dict(cfg.get("_branches"))
     if branches:

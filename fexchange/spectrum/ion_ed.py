@@ -1,4 +1,4 @@
-"""Full single-ion ED spectrum for H_int + H_soc."""
+"""Full single-ion ED spectrum for H_int + H_soc with optional H_cef."""
 
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ from numpy.typing import NDArray
 from fexchange.core.fock import make_basis_id
 from fexchange.core.space_ls import build_space_ls_matrix
 from fexchange.core.states import fix_phase
+from fexchange.hamiltonian.hcef import build_hcef_matrix_fock
 from fexchange.hamiltonian.hint import build_hint_matrix
 from fexchange.hamiltonian.hsoc import build_hsoc_matrix
 from fexchange.utils.checks import check_hermitian, check_orthonormal
 from fexchange.utils.constants import N_ORB
 from fexchange.utils.errors import NumError, PhysError
-from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_EIG_CLUSTER, EPS_NORM
+from fexchange.utils.numerics import DTYPE_COMPLEX, EPS_EIG_CLUSTER, EPS_NORM, EPS_ZERO
 
 __all__ = ["build_ion_ed"]
 
@@ -32,12 +33,14 @@ def build_ion_ed(
     offset: float = 0.0,
     n_orb: int = N_ORB,
     lsjm_reference: dict[str, Any] | None = None,
+    hcef_1b: NDArray[np.complexfloating] | None = None,
 ) -> dict[str, Any]:
-    """Diagonalize Hion = H_int + H_soc in one fixed f-electron sector.
+    """Diagonalize Hion = H_int + H_soc (+ H_cef) in one fixed f-electron sector.
 
     The returned ``V_fock_ed`` columns are ED eigenvectors in the canonical Fock
-    basis. Within each degenerate energy cluster the basis is fixed by J^2 and
-    then Jz, so the column order is reproducible and carries stable J/M labels.
+    basis. Without CEF, degenerate clusters are fixed by J^2 and then Jz. With
+    CEF, J is not generally a good quantum number, so degenerate clusters are
+    fixed by projected Jz and only expectation-value diagnostics are reported.
     """
     if not 0 <= n_ele <= n_orb:
         raise PhysError(
@@ -50,6 +53,12 @@ def build_ion_ed(
     H = build_hint_matrix(n_ele, {0: F0, 2: F2, 4: F4, 6: F6}, n_orb=n_orb)
     if zeta != 0.0:
         H = H + build_hsoc_matrix(n_ele, zeta=zeta, n_orb=n_orb)
+    hcef_norm = 0.0
+    if hcef_1b is not None:
+        hcef_arr = np.asarray(hcef_1b, dtype=DTYPE_COMPLEX)
+        hcef_norm = float(np.linalg.norm(hcef_arr))
+        if hcef_norm > EPS_ZERO:
+            H = H + build_hcef_matrix_fock(hcef_arr, n_ele, n_orb=n_orb)
     check_hermitian(H, label="Hion", module="ion_ed")
 
     evals, evecs = np.linalg.eigh(H)
@@ -58,13 +67,26 @@ def build_ion_ed(
     evecs = evecs[:, order]
 
     ang = build_space_ls_matrix(n_ele, n_orb)
-    V_fock, energies, labels, j_values, m_values, group_ids = _canonicalize_degenerate_spaces(
-        evals,
-        evecs,
-        J2=ang["J2"],
-        Jz=ang["Jz"],
-        offset=float(offset),
-    )
+    if hcef_norm > EPS_ZERO:
+        V_fock, energies, labels, j_values, m_values, group_ids = _canonicalize_general_spaces(
+            evals,
+            evecs,
+            J2=ang["J2"],
+            Jz=ang["Jz"],
+            offset=float(offset),
+        )
+        state_order_id = "ioned_energy_Jz_projected_v1"
+        j_order_id = "ioned_general_Jz_projected_v1"
+    else:
+        V_fock, energies, labels, j_values, m_values, group_ids = _canonicalize_degenerate_spaces(
+            evals,
+            evecs,
+            J2=ang["J2"],
+            Jz=ang["Jz"],
+            offset=float(offset),
+        )
+        state_order_id = "ioned_energy_J_M_v1"
+        j_order_id = "ioned_J_M_v1"
     check_orthonormal(V_fock, label="V_ioned", module="ion_ed")
 
     if lsjm_reference is not None:
@@ -81,8 +103,8 @@ def build_ion_ed(
         "basis_id": make_basis_id(n_ele, n_orb),
         "n_ele": n_ele,
         "n_orb": n_orb,
-        "state_order_id": "ioned_energy_J_M_v1",
-        "j_order_id": "ioned_J_M_v1",
+        "state_order_id": state_order_id,
+        "j_order_id": j_order_id,
         "orbital_order_id": "f14_m-3..3_sigma(-1/2,+1/2)_interleaved_v1",
         "physics": {
             "F0": float(F0),
@@ -91,6 +113,8 @@ def build_ion_ed(
             "F6": float(F6),
             "zeta": float(zeta),
             "offset": float(offset),
+            "hcef_1b_norm": hcef_norm,
+            "includes_hcef": bool(hcef_norm > EPS_ZERO),
         },
     }
 
@@ -161,6 +185,80 @@ def _canonicalize_degenerate_spaces(
                         "j2": j2_value,
                     }
                 )
+
+    if not columns:
+        raise NumError(
+            "FXE-NUM-001",
+            "IONED produced no eigenvectors",
+            module="ion_ed",
+            level="IONED",
+            actual={"n_evals": int(evals.size)},
+        )
+
+    V = np.column_stack(columns).astype(DTYPE_COMPLEX, copy=False)
+    return (
+        V,
+        np.asarray(energy_out, dtype=float),
+        labels,
+        np.asarray(j_out, dtype=float),
+        np.asarray(m_out, dtype=float),
+        np.asarray(group_out, dtype=np.int64),
+    )
+
+
+def _canonicalize_general_spaces(
+    evals: NDArray[np.floating],
+    evecs: NDArray[np.complexfloating],
+    *,
+    J2: NDArray[np.complexfloating],
+    Jz: NDArray[np.complexfloating],
+    offset: float,
+) -> tuple[
+    NDArray[np.complexfloating],
+    NDArray[np.floating],
+    list[dict[str, Any]],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.integer],
+]:
+    columns: list[NDArray[np.complexfloating]] = []
+    energy_out: list[float] = []
+    labels: list[dict[str, Any]] = []
+    j_out: list[float] = []
+    m_out: list[float] = []
+    group_out: list[int] = []
+
+    for group_id, (lo, hi) in enumerate(_clusters(evals, EPS_EIG_CLUSTER)):
+        V_energy = evecs[:, lo:hi]
+        e_group = float(np.mean(evals[lo:hi])) + offset
+
+        jz_blk = V_energy.conj().T @ Jz @ V_energy
+        m_vals, U_m = np.linalg.eigh(jz_blk)
+        m_order = np.argsort(m_vals.real)
+        m_vals = m_vals.real[m_order]
+        U_m = U_m[:, m_order]
+        V_m = V_energy @ U_m
+
+        for local_idx in range(V_m.shape[1]):
+            vec = fix_phase(V_m[:, local_idx])
+            j2_exp = float(np.real(np.vdot(vec, J2 @ vec)))
+            m_exp = float(np.real(np.vdot(vec, Jz @ vec)))
+            columns.append(vec)
+            energy_out.append(e_group)
+            j_out.append(np.nan)
+            m_out.append(m_exp)
+            group_out.append(group_id)
+            labels.append(
+                {
+                    "energy_group": group_id,
+                    "energy": e_group,
+                    "J": None,
+                    "M": m_exp,
+                    "twoJ": None,
+                    "twoM": None,
+                    "j2_expectation": j2_exp,
+                }
+            )
 
     if not columns:
         raise NumError(

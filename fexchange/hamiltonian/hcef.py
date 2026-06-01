@@ -12,8 +12,10 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from fexchange.core.fermion import one_body_operator_matrix
 from fexchange.core.space_j import normalize_J
 from fexchange.core.stevens import build_cef_stevens_operators
+from fexchange.utils.constants import N_ORB
 from fexchange.utils.checks import check_hermitian
 from fexchange.utils.errors import PhysError
 from fexchange.utils.numerics import DTYPE_COMPLEX
@@ -62,4 +64,24 @@ def build_hcef_matrix_J(
         )
 
     check_hermitian(H, label="H_cef", module="hcef")
+    return H
+
+
+def build_hcef_matrix_fock(
+    h_cef_1b: NDArray[np.complexfloating],
+    n_ele: int,
+    n_orb: int = N_ORB,
+) -> NDArray[np.complexfloating]:
+    """Lift a one-body CEF matrix to a fixed-occupation Fock sector."""
+    h = np.asarray(h_cef_1b, dtype=DTYPE_COMPLEX)
+    if h.shape != (n_orb, n_orb):
+        raise PhysError(
+            "FXE-PHYS-001",
+            f"h_cef_1b shape {h.shape} != ({n_orb},{n_orb})",
+            module="hcef",
+            actual={"shape": list(h.shape), "n_orb": n_orb},
+        )
+    check_hermitian(h, label="h_cef_1b", module="hcef")
+    H = one_body_operator_matrix(h, n_ele, n_orb)
+    check_hermitian(H, label="H_cef_fock", module="hcef")
     return H

@@ -251,6 +251,11 @@ The Kramers/CEF projector $W$ maps from the SOC-lowest LSJM subspace (dimension 
 defined in `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` Section 0.2.1)
 to the target low-energy CEF basis (dimension $n_k$).
 
+In `runtime.kramer_source = "manual"`, L1 already uses the external
+Fock-basis Kramers states as the main low-energy basis. In that route, $W$ is
+the identity on the L1 `j` axis unless a later standard explicitly introduces
+an additional post-projector.
+
 Construction procedure:
 1. Start with $U^{n,\mathrm{soc0}}$ columns (the SOC-lowest $J_0$ multiplet in Fock basis).
 2. Build $H_{\mathrm{cef}}$ projected into this $J_0$ subspace:
@@ -295,6 +300,7 @@ W = evecs[:, :n_k]                        # (n_j, n_k)
 
 Validation:
 - $W^\dagger W = I_{n_k}$ within `eps_orth`.
+- In `manual`, `W = I_{n_k}` and no external `projector_file` is required.
 - For Kramers doublet: TR-pair and gauge checks from module 02-05.
 - `W.shape = (n_j, n_k)` where `n_j` matches L1 output $j$-axis dimension.
 - `kramer_name` must be recorded in metadata.

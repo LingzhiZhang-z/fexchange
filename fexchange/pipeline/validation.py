@@ -12,9 +12,6 @@ from numpy.typing import NDArray
 from fexchange.io.disk import build_stage_path, load_json_checked, load_npz_checked, validate_meta
 from fexchange.pipeline.artifacts import ARTIFACT_FILE_SPEC
 from fexchange.pipeline.keys import (
-    branch_signature,
-    denominator_signature,
-    extract_source_names,
     sector_ratios,
     three_sectors,
 )
@@ -53,8 +50,6 @@ def validate_upstream_artifacts(
     if not required:
         return
     output_root = cfg["paths"]["output_root"]
-    sn = extract_source_names(cfg)
-    kramer_name = sn.kramer_name
     run_name = str(cfg.get("runtime", {}).get("run_name", ""))
     branch = str(cfg.get("runtime", {}).get("branch", "sopt"))
     missing: list[str] = []
@@ -101,11 +96,7 @@ def validate_upstream_artifacts(
         d = build_stage_path(
             output_root,
             "L1",
-            n=n_ele,
-            r42=r42,
-            r62=r62,
-            scheme=scheme,
-            branch_signature=branch_signature(cfg, n_ele=n_ele),
+            run_name=run_name,
         )
         _check_spec(d, "L1")
     if "L2" in required:
@@ -120,7 +111,6 @@ def validate_upstream_artifacts(
             output_root,
             "L3",
             run_name=run_name,
-            kramer_name=kramer_name,
         )
         _check_spec(d, "L3_FOPT" if branch == "fopt" else "L3")
 

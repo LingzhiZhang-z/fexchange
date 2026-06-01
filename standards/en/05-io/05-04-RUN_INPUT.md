@@ -26,11 +26,15 @@ MUST:
 - `runtime.branch` is required and must be `sopt` or `fopt`.
 - `runtime.end_level` is required and must be one of
   `LMSM`, `LSJM`, `L0`, `L1`, `L2`, `L3`.
-- `runtime.run_name` is required when `end_level >= L2`.
-- `runtime.run_name` is also required when `model.scheme = "ED"` and
-  `end_level >= L1`, because ED intermediate artifacts are run-scoped.
-- `runtime.kramer_name` is required for `end_level >= L2`, because L2 consumes
-  the projector and writes projector-dependent projected factors.
+- `runtime.run_name` is required when `end_level >= L1`, because `L1/F` and all
+  downstream artifacts are run-scoped for every scheme and Kramers route (RS and
+  ED, stevens and manual).
+- `runtime.kramer_name` is required for `end_level >= L2`, because L2 writes
+  Kramers-dependent projected factors. In `stevens` mode it labels the
+  projector input; in `manual` mode it labels the external Kramers basis.
+- `runtime.kramer_source` is optional and defaults to `stevens`.
+  Accepted normalized values are `stevens` and `manual`; runtime loaders may
+  accept legacy aliases `steven` and `mannual`.
 - Both branches terminate at `L3`. FOPT `L3` includes total/process raw
   `h_eff_4` outputs and total/process spin-1/2 exchange outputs. Runtime FOPT
   exchange output requires a two-dimensional projected local space.
@@ -42,6 +46,7 @@ branch = "fopt"
 end_level = "L3"
 run_name = "lab_A"
 kramer_name = "proj_a"
+kramer_source = "stevens"
 ```
 
 ## 3) f-Site Table (MUST)
@@ -59,6 +64,8 @@ MUST:
   - `energy_reference` (`lsjm_ground` or `zero`)
 - `[fsite_nm1]` and `[fsite_np1]` may override any subset of:
   `RE`, `F2_ratio`, `F4_ratio`, `F6_ratio`, `U`, `Jh`, `zeta`, `offset`.
+  Adjacent sectors may therefore carry their own Slater ratios (e.g.
+  neighboring-element presets).
 - `[fsite_np1]` may alternatively set `Uplus`, the target minimum energy gap
   from the main `f^n` reference to the `f^{n+1}` sector. `Uplus` is mutually
   exclusive with `fsite_np1.offset`.
@@ -117,7 +124,12 @@ lambda_p = 0.0
 ## 5) Inputs Table (MUST)
 MUST:
 - `[inputs].hopping_file` is required for `end_level >= L2`.
-- `[inputs].projector_file` is required for `end_level >= L2`.
+- `[inputs].projector_file` is required for `end_level >= L2` when
+  `runtime.kramer_source = "stevens"`.
+- `[inputs].kramer_file` is required for `end_level >= L1` when
+  `runtime.kramer_source = "manual"`.
+- `[inputs].hcef_file` is optional. When present with `model.scheme = "ED"`,
+  it is used as a one-body CEF matrix in adjacent-sector IONED.
 - Runtime matrix text files use multi-block format with `[key]` headers.
 - SOPT hopping must contain block `[t_mu]` with shape `(14, 14)`.
 - FOPT hopping must contain blocks `[t_f1_lig1]`, `[t_f1_lig2]`,
@@ -129,12 +141,23 @@ MUST:
   numeric order to form `W` with shape `(n_j, n_k)`.
 - Projector binary input (`.npy` / `.npz`) is a rank-2 array (key `W` for
   `.npz`) with `shape[0] == n_j`.
+- Manual Kramers text input starts with `fn <n>` and then uses exactly two
+  blocks, `[K_state_0]` and `[K_state_1]`. Each data row has exactly 16 fields:
+  `real imag occ_0 ... occ_13`. The occupation fields are `0/1` values in the
+  canonical f spin-orbital order, and each row must have exactly `n` occupied
+  orbitals. Blocks are stacked in numeric order to form
+  `K_fock.shape = (dim_fock(n), n_k)`.
+- `hcef_file` is a Hermitian `14 x 14` one-body matrix in the canonical f
+  spin-orbital order. Text input may use block `[hcef]` with `14*14` complex
+  rows or a plain matrix format accepted by the runtime matrix loader.
 
 Code form:
 ```toml
 [inputs]
 hopping_file = "data/hopping/wan_v1.txt"
 projector_file = "data/projector/kr_a.txt"
+hcef_file = "data/hcef/hcef_14x14.txt"
+kramer_file = "data/kramer/manual_kramer.txt"
 ```
 
 ## 6) ED Scheme Example (MUST)

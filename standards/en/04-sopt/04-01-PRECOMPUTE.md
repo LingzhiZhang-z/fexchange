@@ -15,7 +15,7 @@ This file covers $L0/L1$ and uses three variable classes:
 
 Per-level definition:
 - $L0$: input `{}`; intermediate `{sign/workspace}`; output `{X, Y}`.
-- $L1$: input `{X, Y, U_np1, U_n_soc0, U_nm1}`; intermediate `{workspace}`; output `{A, B}`.
+- $L1$: input `{X, Y, U_np1, U_n_low, U_nm1}`; intermediate `{workspace}`; output `{A, B}`.
 
 Constraint:
 - Runtime hopping/Kramer objects are not part of this module.
@@ -23,14 +23,19 @@ Constraint:
 
 ## 0.1) Boundary with External Hopping/Kramer Inputs (MUST)
 MUST:
-- Levels `L0/L1` must not consume external hopping or Kramer inputs.
+- Levels `L0/L1` must not consume external hopping inputs.
+- Levels `L0/L1` must not consume Kramer/projector inputs in the default
+  `runtime.kramer_source = "stevens"` route.
+- In the explicit `runtime.kramer_source = "manual"` route, L1 consumes the
+  run-input `f^n` Fock-basis Kramers state file as its main low-energy
+  subspace and the L1 artifact must be run-scoped.
 - Hopping/Kramer schemas are enforced only in module `04-02`.
 - `L1` outputs must carry deterministic axis metadata required by downstream runtime binding:
   LSJM-subspace order id for `j` axes and orbital-order identity for `kappa/p/q` mapping.
 
 Code form:
 ```text
-L0_L1_inputs_exclude = {t_mu, W, kramer_labels, labels_abcd, E_u}
+L0_L1_inputs_exclude = {t_mu, W, labels_abcd, E_u}
 L1_meta_required = {j_order_id, orbital_order_id, vertex_axis_order_id}
 ```
 
@@ -96,13 +101,18 @@ MUST:
   $f^{n-1}$) according to `model.scheme`.
 - In `model.scheme = "RS"`, intermediate-sector transforms are LSJM transforms.
 - In `model.scheme = "ED"`, intermediate-sector transforms are IONED transforms
-  from module `03-05`; the main-sector low-energy leg remains the SOC-lowest
-  LSJM subspace.
-- This level projects the $f^n$ leg from Fock basis to the SOC-lowest LSJM subspace (the $f^n$ LSJM ground multiplet).
+  from module `03-05`.
+- In `runtime.kramer_source = "stevens"` (default), this level projects the
+  $f^n$ leg from Fock basis to the SOC-lowest LSJM subspace (the $f^n$ LSJM
+  ground multiplet).
+- In `runtime.kramer_source = "manual"`, this level projects the $f^n$ leg
+  from Fock basis to the user-supplied orthonormal Kramers low-energy basis.
 - Do not introduce Kramers labels $a,b,c,d$ at this level.
 - $U^{(m)}$ is the selected column-wise Fock-to-working-basis transform matrix
   in sector $f^m$: LSJM for `RS`, IONED for `ED`.
-- $U^{n,\mathrm{soc0}}$ is the column-wise transform from $f^n$ Fock basis to the SOC-lowest LSJM subspace.
+- $U^{n,\mathrm{low}}$ is the column-wise transform from $f^n$ Fock basis to
+  the selected low-energy subspace:
+  `U_n_soc0` for `stevens`, and `K_fock` for `manual`.
 - Intermediate-state indices use only $u,v,r,s$.
 
 Math:
@@ -112,7 +122,7 @@ A^{\kappa,n}_{u j}
 \sum_{\alpha,\beta}
 \left(U^{n+1}_{\alpha u}\right)^{\ast}
 X^{\kappa,n}_{\alpha\beta}
-\left(U^{n,\mathrm{soc0}}_{\beta j}\right),
+\left(U^{n,\mathrm{low}}_{\beta j}\right),
 $$
 
 Math:
@@ -120,29 +130,29 @@ $$
 B^{\kappa,n-1}_{j v}
 =
 \sum_{\beta,\gamma}
-\left(U^{n,\mathrm{soc0}}_{\beta j}\right)^{\ast}
+\left(U^{n,\mathrm{low}}_{\beta j}\right)^{\ast}
 Y^{\kappa,n-1}_{\beta\gamma}
 \left(U^{n-1}_{\gamma v}\right).
 $$
 
 Math:
 $$
-\langle u^{n+1} \rvert f_{\kappa}^{\dagger} \lvert j^{n,\mathrm{soc0}}\rangle
+\langle u^{n+1} \rvert f_{\kappa}^{\dagger} \lvert j^{n,\mathrm{low}}\rangle
 =
 A^{\kappa,n}_{u j},
 \qquad
-\langle j^{n,\mathrm{soc0}} \rvert f_{\kappa} \lvert u^{n+1}\rangle
+\langle j^{n,\mathrm{low}} \rvert f_{\kappa} \lvert u^{n+1}\rangle
 =
 \left(A^{\kappa,n}_{u j}\right)^{\ast}.
 $$
 
 Math:
 $$
-\langle j^{n,\mathrm{soc0}} \rvert f_{\kappa}^{\dagger} \lvert v^{n-1}\rangle
+\langle j^{n,\mathrm{low}} \rvert f_{\kappa}^{\dagger} \lvert v^{n-1}\rangle
 =
 B^{\kappa,n-1}_{j v},
 \qquad
-\langle v^{n-1} \rvert f_{\kappa} \lvert j^{n,\mathrm{soc0}}\rangle
+\langle v^{n-1} \rvert f_{\kappa} \lvert j^{n,\mathrm{low}}\rangle
 =
 \left(B^{\kappa,n-1}_{j v}\right)^{\ast}.
 $$
@@ -152,14 +162,17 @@ Code form:
 build generic {A_kappa_n[u,j], B_kappa_nm1[j,v]} without site labels
 rotate (n+1)/(n-1) legs with U_np1, U_nm1
 select U_np1/U_nm1 from LSJM when scheme=RS, from IONED when scheme=ED
-project n-leg to SOC-low subspace with U_n_soc0
+project n-leg to selected low subspace with U_n_low
 recover reverse direction by complex conjugation
 ```
 
 Validation:
 - Vertex tensor dimensions must match sector dimensions.
 - Operator direction ($\dagger$ / non-$\dagger$) must match index semantics.
-- This level must use $U^{n,\mathrm{soc0}}$, and its column space must cover only SOC-lowest LSJM subspace.
+- In `stevens`, this level must use $U^{n,\mathrm{soc0}}$, and its column
+  space must cover only the SOC-lowest LSJM subspace.
+- In `manual`, this level must use the user-supplied orthonormal `K_fock`
+  columns, and its `j` axis is the manual low-energy/Kramers state axis.
 - `ED` must not replace the main-sector low-energy LSJM projector; it replaces
   only the adjacent intermediate-sector transforms and energies.
 - This level must not contain Kramers indices $a,b,c,d$ or projector $W$.

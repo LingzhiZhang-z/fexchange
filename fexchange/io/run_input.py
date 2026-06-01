@@ -126,6 +126,8 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
     branch = str(runtime["branch"])
     end = str(runtime["end_level"])
     win = lambda lv: LEVEL_ORDER[lv] <= LEVEL_ORDER[end]
+    kramer_source = _normalize_kramer_source(runtime.get("kramer_source", "stevens"))
+    runtime["kramer_source"] = kramer_source
 
     _chk("fsite" in cfg, "002", "[fsite] required")
     _validate_fsite(cfg["fsite"], "fsite", require_core=True)
@@ -146,15 +148,18 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
     _chk(scheme in {"RS", "ED"}, "003", "model.scheme must be 'RS' or 'ED'")
     cfg["model"]["scheme"] = scheme
 
-    if scheme == "ED" and win("L1"):
-        _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for ED L1+")
+    if win("L1"):
+        _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for L1+")
+    if kramer_source == "manual" and win("L1"):
+        _chk("inputs" in cfg, "002", f"[inputs] required for manual kramer window ..{end}")
+        _chk(_nonempty(cfg["inputs"].get("kramer_file")), "003", "inputs.kramer_file required for runtime.kramer_source='manual'")
 
     if win("L2"):
-        _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for L2+")
         _chk("inputs" in cfg, "002", f"[inputs] required for window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("hopping_file")), "003", "inputs.hopping_file required")
         _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for L2+")
-        _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
+        if kramer_source == "stevens":
+            _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
     if branch == "sopt" and win("L3"):
         _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for sopt L3")
     if branch == "fopt":
@@ -334,6 +339,31 @@ def _slater(r42: float, r62: float, jh: float, name: str) -> tuple[float, float,
 def _chk(cond: bool, code: str, msg: str, **ctx: Any) -> None:
     if not cond:
         raise InputError(f"FXE-INPUT-{code}", msg, **ctx)
+
+
+def _normalize_kramer_source(value: Any) -> str:
+    if value is None:
+        return "stevens"
+    if not isinstance(value, str):
+        raise InputError(
+            "FXE-INPUT-003",
+            "runtime.kramer_source must be 'stevens' or 'manual'",
+            actual={"kramer_source": value},
+        )
+    token = value.strip().lower()
+    aliases = {
+        "steven": "stevens",
+        "stevens": "stevens",
+        "manual": "manual",
+        "mannual": "manual",
+    }
+    if token not in aliases:
+        raise InputError(
+            "FXE-INPUT-003",
+            "runtime.kramer_source must be 'stevens' or 'manual'",
+            actual={"kramer_source": value},
+        )
+    return aliases[token]
 
 
 def _num(x: Any) -> bool:

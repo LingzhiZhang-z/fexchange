@@ -60,13 +60,6 @@ def core_dir_token(n: int, r42: float, r62: float, scheme: str = "RS") -> str:
     return f"n-{n}_r42-{fmt8(r42)}_r62-{fmt8(r62)}_scheme-{scheme}"
 
 
-def _safe_label_token(value: str) -> str:
-    token = value.strip()
-    token = token.replace(os.sep, "_").replace("/", "_")
-    token = token.replace(" ", "_")
-    return token or "auto"
-
-
 def build_stage_path(
     output_root: str,
     stage: str,
@@ -76,21 +69,16 @@ def build_stage_path(
     r62: float = 0.0,
     scheme: str = "RS",
     run_name: str = "",
-    U: float = 0.0,
-    Jh: float = 0.0,
-    kramer_name: str = "",
-    branch_signature: str = "",
     ligand_soc: str = "",
     ligand_n: int = 0,
     p_transition: str = "",
 ) -> Path:
     """Build deterministic artifact path for a given stage (05-00 §2-3)."""
     root = Path(output_root)
-    core = core_dir_token(n, r42, r62, scheme)
     if stage == "L0":
         return root / "core" / "L0"
     elif stage in ("LMSM", "LSJM"):
-        return root / "core" / stage / core
+        return root / "core" / stage / core_dir_token(n, r42, r62, scheme)
     elif stage == "ligand":
         soc_token = _require_stage_token("ligand_soc", ligand_soc, stage)
         if ligand_n <= 0:
@@ -103,21 +91,11 @@ def build_stage_path(
     elif stage == "IONED":
         return root / _require_stage_token("run_name", run_name, stage) / "IONED" / f"n-{n}"
     elif stage == "L1_F":
-        if scheme == "ED":
-            return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
-        d = root / "core" / "L1" / "F" / core
-        if branch_signature:
-            d = d / _safe_label_token(branch_signature)
-        return d
+        return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
     elif stage == "L1_P":
         return root / "core" / "L1" / "P" / _require_stage_token("p_transition", p_transition, stage)
     elif stage == "L1":
-        if scheme == "ED":
-            return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
-        d = root / "core" / "L1" / "F" / core
-        if branch_signature:
-            d = d / _safe_label_token(branch_signature)
-        return d
+        return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
     elif stage == "L2":
         return root / _require_stage_token("run_name", run_name, stage) / "L2"
     elif stage == "L3":

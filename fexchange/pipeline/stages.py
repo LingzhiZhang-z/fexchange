@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from fexchange.core.fock import det_index, dim_sector, enumerate_dets, make_basis_id
 from fexchange.io.disk import build_stage_path
 from fexchange.io.matrix import load_matrix_file, load_txt_blocks
 from fexchange.pipeline.artifacts import (
@@ -34,7 +35,6 @@ from fexchange.pipeline.artifacts import (
     try_load_stateset,
 )
 from fexchange.pipeline.keys import (
-    branch_signature,
     labels_abcd_lex,
     level_key,
     sector_branch,
@@ -49,8 +49,8 @@ from fexchange.spectrum.ligand import build_ligand_spectrum
 from fexchange.spectrum.lsjm import build_lsjm, select_soc_lowest_subspace
 from fexchange.spectrum.lsms import build_lsms
 from fexchange.sopt.spin12 import spin12_map
-from fexchange.utils.checks import check_orthonormal
-from fexchange.utils.errors import BindError, InputError, SchemaError
+from fexchange.utils.checks import check_hermitian, check_orthonormal
+from fexchange.utils.errors import BindError, IOError_, InputError, SchemaError
 
 
 def _reference_scheme(scheme: str) -> str:
@@ -59,6 +59,14 @@ def _reference_scheme(scheme: str) -> str:
 
 def _uses_ion_ed(scheme: str) -> bool:
     return str(scheme).upper() == "ED"
+
+
+def _kramer_source(cfg: dict[str, Any]) -> str:
+    return str(cfg.get("runtime", {}).get("kramer_source", "stevens"))
+
+
+def _uses_manual_kramer(cfg: dict[str, Any]) -> bool:
+    return _kramer_source(cfg) == "manual"
 
 
 def _ls_reference_sectors(n_ele: int, scheme: str) -> tuple[int, ...]:
@@ -79,6 +87,197 @@ def _sector_fsite(cfg: dict[str, Any], n_ele: int) -> dict[str, Any]:
         "Missing fsite parameters for IONED sector",
         actual={"n_ele": n_ele},
     )
+
+
+def _load_hcef_1b(cfg: dict[str, Any], *, n_orb: int) -> np.ndarray | None:
+    inputs = cfg.get("inputs", {})
+    if not isinstance(inputs, dict) or not inputs.get("hcef_file"):
+        return None
+    path = Path(str(inputs["hcef_file"]))
+    if path.suffix.lower() in {".txt", ".dat"}:
+        try:
+            blocks = load_txt_blocks(path, {"hcef": n_orb * n_orb})
+            h = np.asarray(blocks["hcef"], dtype=np.complex128).reshape(n_orb, n_orb)
+            check_hermitian(h, label="hcef_file", module="pipeline")
+            return h
+        except SchemaError:
+            pass
+    h = np.asarray(load_matrix_file(path, preferred_key="hcef"), dtype=np.complex128)
+    if h.ndim == 1 and h.size == n_orb * n_orb:
+        h = h.reshape(n_orb, n_orb)
+    if h.ndim != 2 or h.shape != (n_orb, n_orb):
+        raise BindError(
+            "FXE-BIND-003",
+            f"hcef_file shape mismatch: {h.shape} != ({n_orb},{n_orb})",
+            expected={"shape": [n_orb, n_orb]},
+            actual={"shape": list(h.shape)},
+            paths={"path": str(path)},
+        )
+    check_hermitian(h, label="hcef_file", module="pipeline")
+    return h
+
+
+def _load_manual_kramer(path: Path, *, n_ele: int, n_orb: int) -> dict[str, Any]:
+    if not path.exists():
+        raise IOError_("FXE-IO-001", f"Required input file missing: {path}", paths={"path": str(path)})
+    try:
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as exc:
+        raise IOError_("FXE-IO-001", f"Failed reading kramer_file: {path}", paths={"path": str(path)}) from exc
+
+    logical_lines: list[tuple[int, str]] = []
+    for lineno, raw in enumerate(raw_lines, start=1):
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            logical_lines.append((lineno, line))
+    if not logical_lines:
+        raise SchemaError("FXE-SCHEMA-002", "kramer_file is empty", paths={"path": str(path)})
+
+    first_lineno, first = logical_lines[0]
+    first_tokens = first.replace("=", " ").split()
+    if len(first_tokens) != 2 or first_tokens[0].lower() != "fn":
+        raise SchemaError(
+            "FXE-SCHEMA-002",
+            "kramer_file first non-comment line must be 'fn <n>'",
+            actual={"lineno": first_lineno, "line": first},
+            paths={"path": str(path)},
+        )
+    try:
+        file_n = int(first_tokens[1])
+    except ValueError as exc:
+        raise SchemaError(
+            "FXE-SCHEMA-002",
+            "kramer_file fn value must be an integer",
+            actual={"lineno": first_lineno, "line": first},
+            paths={"path": str(path)},
+        ) from exc
+    if file_n != n_ele:
+        raise BindError(
+            "FXE-BIND-003",
+            "kramer_file fn does not match fsite.n_ele",
+            expected={"n_ele": n_ele},
+            actual={"fn": file_n},
+            paths={"path": str(path)},
+        )
+
+    blocks: dict[int, dict[int, complex]] = {}
+    current: int | None = None
+    dets = enumerate_dets(n_ele, n_orb)
+    for lineno, line in logical_lines[1:]:
+        if line.startswith("[") and line.endswith("]"):
+            key = line[1:-1].strip()
+            if not key.startswith("K_state_"):
+                raise SchemaError(
+                    "FXE-SCHEMA-002",
+                    "kramer_file block keys must be [K_state_<idx>]",
+                    actual={"lineno": lineno, "key": key},
+                    paths={"path": str(path)},
+                )
+            try:
+                idx = int(key.removeprefix("K_state_"))
+            except ValueError as exc:
+                raise SchemaError(
+                    "FXE-SCHEMA-002",
+                    "kramer_file K_state index must be an integer",
+                    actual={"lineno": lineno, "key": key},
+                    paths={"path": str(path)},
+                ) from exc
+            if idx in blocks:
+                raise SchemaError(
+                    "FXE-SCHEMA-002",
+                    "Duplicate K_state block",
+                    actual={"lineno": lineno, "key": key},
+                    paths={"path": str(path)},
+                )
+            blocks[idx] = {}
+            current = idx
+            continue
+
+        if current is None:
+            raise SchemaError(
+                "FXE-SCHEMA-002",
+                "kramer_file data appeared before any [K_state_<idx>] block",
+                actual={"lineno": lineno, "line": line},
+                paths={"path": str(path)},
+            )
+        parts = line.split()
+        if len(parts) != n_orb + 2:
+            raise SchemaError(
+                "FXE-SCHEMA-002",
+                "kramer_file data rows must be: real imag occ_0 ... occ_13",
+                expected={"fields": n_orb + 2},
+                actual={"lineno": lineno, "fields": len(parts)},
+                paths={"path": str(path)},
+            )
+        try:
+            coeff = complex(float(parts[0]), float(parts[1]))
+            occ = [int(v) for v in parts[2:]]
+        except ValueError as exc:
+            raise SchemaError(
+                "FXE-SCHEMA-002",
+                "Failed parsing kramer_file row",
+                actual={"lineno": lineno, "line": line},
+                paths={"path": str(path)},
+            ) from exc
+        if any(v not in (0, 1) for v in occ):
+            raise SchemaError(
+                "FXE-SCHEMA-002",
+                "kramer_file occupation entries must be 0 or 1",
+                actual={"lineno": lineno, "occupation": occ},
+                paths={"path": str(path)},
+            )
+        if sum(occ) != n_ele:
+            raise BindError(
+                "FXE-BIND-003",
+                "kramer_file determinant occupation count does not match fn",
+                expected={"n_ele": n_ele},
+                actual={"lineno": lineno, "occupation_count": int(sum(occ))},
+                paths={"path": str(path)},
+            )
+        det = sum(int(v) << p for p, v in enumerate(occ))
+        if det in blocks[current]:
+            raise SchemaError(
+                "FXE-SCHEMA-002",
+                "Duplicate determinant in K_state block",
+                actual={"lineno": lineno, "det": det, "state": current},
+                paths={"path": str(path)},
+            )
+        det_index(det, dets)
+        blocks[current][det] = coeff
+
+    indices = sorted(blocks)
+    if indices != [0, 1]:
+        raise BindError(
+            "FXE-BIND-003",
+            "manual kramer_file must contain exactly [K_state_0] and [K_state_1]",
+            expected={"indices": [0, 1]},
+            actual={"indices": indices},
+            paths={"path": str(path)},
+        )
+    V = np.zeros((dim_sector(n_ele, n_orb), len(indices)), dtype=np.complex128)
+    for col, state_idx in enumerate(indices):
+        for det, coeff in blocks[state_idx].items():
+            V[det_index(det, dets), col] = coeff
+    check_orthonormal(V, label="K_fock_manual", module="projection")
+    return {
+        "U_n_soc0": V,
+        "n_j": int(V.shape[1]),
+        "subspace_id": "direct_kramer_fock_v1",
+        "meta": {
+            "n_j": int(V.shape[1]),
+            "basis_id": make_basis_id(n_ele, n_orb),
+            "source_format": "manual_fn_occupancy_v1",
+            "path": str(path),
+        },
+    }
+
+
+def _select_main_subspace(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> dict[str, Any]:
+    if _uses_manual_kramer(cfg):
+        return _load_manual_kramer(Path(str(cfg["inputs"]["kramer_file"])), n_ele=n_ele, n_orb=n_orb)
+    soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])
+    soc0["subspace_id"] = "soc_lowest_hunds_v1"
+    return soc0
 
 
 def ensure_lsms_all_three(
@@ -174,6 +373,7 @@ def ensure_ion_ed_adjacent(
 ) -> None:
     output_root = cfg["paths"]["output_root"]
     run_name = str(cfg.get("runtime", {}).get("run_name", ""))
+    hcef_1b = _load_hcef_1b(cfg, n_orb=n_orb)
     for sec in (n_ele - 1, n_ele + 1):
         key = f"ioned_{sec}"
         if key in state:
@@ -197,6 +397,7 @@ def ensure_ion_ed_adjacent(
             offset=float(fsite.get("offset", 0.0)),
             n_orb=n_orb,
             lsjm_reference=state.get(f"lsjm_{sec}"),
+            hcef_1b=hcef_1b,
         )
         state[key] = result
         persist_ion_ed(stage_dir, cfg, result, n_ele=sec, r42=sec_r42, r62=sec_r62)
@@ -234,7 +435,6 @@ def ensure_l1_sopt(
 
     if "l1" in state:
         return
-    branch_sig = branch_signature(cfg, n_ele=n_ele)
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L1",
@@ -243,7 +443,6 @@ def ensure_l1_sopt(
         r62=r62,
         scheme=scheme,
         run_name=str(cfg.get("runtime", {}).get("run_name", "")),
-        branch_signature=branch_sig,
     )
     loaded = try_load_l1(stage_dir, expected_key=level_key("L1", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -254,7 +453,7 @@ def ensure_l1_sopt(
     ensure_lsjm_all_three(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
     if _uses_ion_ed(scheme):
         ensure_ion_ed_adjacent(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62)
-    soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])
+    soc0 = _select_main_subspace(cfg, state, n_ele=n_ele, n_orb=n_orb)
     state["soc0"] = soc0
     U_np1 = state[f"ioned_{n_ele + 1}"]["V_fock"] if _uses_ion_ed(scheme) else state[f"lsjm_{n_ele + 1}"]["V_fock"]
     U_nm1 = state[f"ioned_{n_ele - 1}"]["V_fock"] if _uses_ion_ed(scheme) else state[f"lsjm_{n_ele - 1}"]["V_fock"]
@@ -266,10 +465,7 @@ def ensure_l1_sopt(
     )
     state["l1"] = result
     persist_l1(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, soc0=soc0)
-    if _uses_ion_ed(scheme):
-        write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
-    else:
-        write_core_source_txt(stage_dir, {"level": "L1", "branch": "sopt", "n_ele": n_ele})
+    write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
 
 
 def ensure_l2_sopt(
@@ -299,7 +495,10 @@ def ensure_l2_sopt(
         return
 
     ensure_l1_sopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
-    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l1"]["n_j"])
+    if _uses_manual_kramer(cfg):
+        W = np.eye(int(state["l1"]["n_j"]), dtype=np.complex128)
+    else:
+        W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l1"]["n_j"])
     check_orthonormal(W, label="W_input", module="projection")
     t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb)
     state["t_mu"] = t_mu
@@ -406,7 +605,6 @@ def ensure_l1_fopt(
 
     if "l1" in state:
         return
-    branch_sig = branch_signature(cfg, n_ele=n_ele)
     f_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L1_F",
@@ -415,7 +613,6 @@ def ensure_l1_fopt(
         r62=r62,
         scheme=scheme,
         run_name=str(cfg.get("runtime", {}).get("run_name", "")),
-        branch_signature=branch_sig,
     )
     p_dirs = _p_l1_dirs(cfg)
     loaded = try_load_l1_fopt(
@@ -432,7 +629,7 @@ def ensure_l1_fopt(
     if _uses_ion_ed(scheme):
         ensure_ion_ed_adjacent(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62)
     ensure_ligand(cfg, state)
-    soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])
+    soc0 = _select_main_subspace(cfg, state, n_ele=n_ele, n_orb=n_orb)
     state["soc0"] = soc0
     U_np1 = state[f"ioned_{n_ele + 1}"]["V_fock"] if _uses_ion_ed(scheme) else state[f"lsjm_{n_ele + 1}"]["V_fock"]
     U_nm1 = state[f"ioned_{n_ele - 1}"]["V_fock"] if _uses_ion_ed(scheme) else state[f"lsjm_{n_ele - 1}"]["V_fock"]
@@ -453,9 +650,8 @@ def ensure_l1_fopt(
     }
     result = {"f": {1: f_vertex, 2: f_vertex}, "p": p_vertices}
     state["l1"] = result
-    persist_l1_fopt(f_dir, p_dirs, cfg, result, n_ele=n_ele, r42=r42, r62=r62)
-    if _uses_ion_ed(scheme):
-        write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
+    persist_l1_fopt(f_dir, p_dirs, cfg, result, n_ele=n_ele, r42=r42, r62=r62, main_subspace=soc0)
+    write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
 
 
 def ensure_l2_fopt(
@@ -485,7 +681,10 @@ def ensure_l2_fopt(
         return
     ensure_l1_fopt(cfg, state, n_ele=n_ele, n_orb=n_orb, r42=r42, r62=r62, scheme=scheme)
     n_j = state["l1"]["f"][1]["F_n_np1"].shape[2]
-    W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=n_j)
+    if _uses_manual_kramer(cfg):
+        W = np.eye(int(n_j), dtype=np.complex128)
+    else:
+        W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=n_j)
     check_orthonormal(W, label="W_input", module="projection")
     t = _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6)
     state["t_per_pair"] = t
