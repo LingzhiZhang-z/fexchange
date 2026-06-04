@@ -31,7 +31,7 @@ Code form:
       P/n-4_to_5_{soc|nsoc}/
       P/n-5_to_6_{soc|nsoc}/
 
-  <run_name>/
+  <output_run>/  # defaults to <output_root>/<run_name>
     source.txt
     IONED/
       n-{n-1}/states.npz

@@ -150,6 +150,7 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
 
     if win("L1"):
         _chk(_nonempty(runtime.get("run_name")), "003", "runtime.run_name required for L1+")
+        _chk(_nonempty(cfg["paths"].get("output_run")), "003", "paths.output_run must be a non-empty string for L1+")
     if kramer_source == "manual" and win("L1"):
         _chk("inputs" in cfg, "002", f"[inputs] required for manual kramer window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("kramer_file")), "003", "inputs.kramer_file required for runtime.kramer_source='manual'")
@@ -238,6 +239,15 @@ def _normalize(cfg: dict[str, Any]) -> None:
         unit = units.get("energy", "raw")
         _chk(isinstance(unit, str) and bool(unit.strip()), "003", "units.energy must be a non-empty string")
         units["energy"] = unit
+
+    paths = cfg["paths"]
+    for key in ("output_root", "output_run"):
+        if isinstance(paths.get(key), str):
+            paths[key] = paths[key].strip()
+    if not _nonempty(paths.get("output_run")):
+        run_name = str(cfg.get("runtime", {}).get("run_name", "")).strip()
+        if _nonempty(paths.get("output_root")) and run_name:
+            paths["output_run"] = str(Path(paths["output_root"]) / run_name)
 
     for sec in ("fsite", "fsite_nm1", "fsite_np1"):
         s = cfg.get(sec)

@@ -8,7 +8,7 @@ from typing import Any
 
 
 def write_run_source_txt(run_dir: Path, cfg: dict[str, Any]) -> None:
-    """Write ``<run_name>/source.txt`` from the current resolved run inputs."""
+    """Write ``source.txt`` under the resolved run output directory."""
     path = run_dir / "source.txt"
     derived = cfg.get("_derived", {})
     fsite = cfg.get("fsite", {})
@@ -55,12 +55,15 @@ def build_resolved_inputs_summary(
     runtime = _as_dict(cfg.get("runtime"))
     model = _as_dict(cfg.get("model"))
     inputs = _as_dict(cfg.get("inputs"))
+    paths = _as_dict(cfg.get("paths"))
     fsite = _as_dict(cfg.get("fsite"))
     summary: dict[str, Any] = {
         "standard_version": cfg.get("standard_version", ""),
         "scheme": model.get("scheme", "RS"),
         "branch": runtime.get("branch", ""),
         "run_name": runtime.get("run_name", ""),
+        "output_root": paths.get("output_root", ""),
+        "output_run": paths.get("output_run", ""),
         "n": int(n_ele),
         "r42": float(r42),
         "r62": float(r62),

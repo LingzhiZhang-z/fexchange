@@ -160,7 +160,22 @@ hcef_file = "data/hcef/hcef_14x14.txt"
 kramer_file = "data/kramer/manual_kramer.txt"
 ```
 
-## 6) ED Scheme Example (MUST)
+## 6) Paths Table (MUST)
+MUST:
+- `[paths].output_root` is required and anchors core artifacts and global index
+  files.
+- `[paths].output_run` is optional. When omitted, it defaults to
+  `<output_root>/<runtime.run_name>`. When set, run-scoped artifacts
+  (`IONED`, `L1/F`, `L2`, `L3`, `source.txt`, `run.log`) are written there.
+
+Code form:
+```toml
+[paths]
+output_root = "./outputs"
+output_run = "./outputs/custom_run_dir"
+```
+
+## 7) ED Scheme Example (MUST)
 Code form:
 ```toml
 [model]
@@ -172,7 +187,7 @@ end_level = "L1"
 run_name = "ed_demo"
 ```
 
-## 7) Minimal FOPT Example (MUST)
+## 8) Minimal FOPT Example (MUST)
 Code form:
 ```toml
 schema_version = "fxe.run_input.v1"
@@ -208,6 +223,7 @@ lambda_p = 0.0
 
 [paths]
 output_root = "./outputs"
+# output_run = "./outputs/demo"  # optional; defaults to output_root/run_name
 
 [runtime]
 branch = "fopt"

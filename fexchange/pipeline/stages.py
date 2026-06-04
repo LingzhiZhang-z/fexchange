@@ -379,7 +379,13 @@ def ensure_ion_ed_adjacent(
         if key in state:
             continue
         sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
-        stage_dir = build_stage_path(output_root, "IONED", n=sec, run_name=run_name)
+        stage_dir = build_stage_path(
+            output_root,
+            "IONED",
+            n=sec,
+            run_name=run_name,
+            output_run=cfg["paths"]["output_run"],
+        )
         expected_key = level_key("IONED", n_ele=sec, r42=sec_r42, r62=sec_r62, cfg=cfg)
         loaded = try_load_ion_ed(stage_dir, expected_key=expected_key)
         if loaded is not None:
@@ -401,7 +407,7 @@ def ensure_ion_ed_adjacent(
         )
         state[key] = result
         persist_ion_ed(stage_dir, cfg, result, n_ele=sec, r42=sec_r42, r62=sec_r62)
-        write_run_source_txt(Path(output_root) / run_name, cfg)
+        write_run_source_txt(Path(cfg["paths"]["output_run"]), cfg)
 
 
 def ensure_l0_sopt(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> None:
@@ -443,6 +449,7 @@ def ensure_l1_sopt(
         r62=r62,
         scheme=scheme,
         run_name=str(cfg.get("runtime", {}).get("run_name", "")),
+        output_run=cfg["paths"]["output_run"],
     )
     loaded = try_load_l1(stage_dir, expected_key=level_key("L1", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -465,7 +472,7 @@ def ensure_l1_sopt(
     )
     state["l1"] = result
     persist_l1(stage_dir, cfg, result, n_ele=n_ele, r42=r42, r62=r62, soc0=soc0)
-    write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
+    write_run_source_txt(Path(cfg["paths"]["output_run"]), cfg)
 
 
 def ensure_l2_sopt(
@@ -482,12 +489,13 @@ def ensure_l2_sopt(
 
     if "l2" in state:
         return
-    run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
+    run_dir = Path(cfg["paths"]["output_run"])
     write_run_source_txt(run_dir, cfg)
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L2",
         run_name=cfg["runtime"]["run_name"],
+        output_run=cfg["paths"]["output_run"],
     )
     loaded = try_load_l2(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -526,6 +534,7 @@ def ensure_l3_sopt(
         cfg["paths"]["output_root"],
         "L3",
         run_name=cfg["runtime"]["run_name"],
+        output_run=cfg["paths"]["output_run"],
     )
     loaded = try_load_l3_sopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -613,6 +622,7 @@ def ensure_l1_fopt(
         r62=r62,
         scheme=scheme,
         run_name=str(cfg.get("runtime", {}).get("run_name", "")),
+        output_run=cfg["paths"]["output_run"],
     )
     p_dirs = _p_l1_dirs(cfg)
     loaded = try_load_l1_fopt(
@@ -651,7 +661,7 @@ def ensure_l1_fopt(
     result = {"f": {1: f_vertex, 2: f_vertex}, "p": p_vertices}
     state["l1"] = result
     persist_l1_fopt(f_dir, p_dirs, cfg, result, n_ele=n_ele, r42=r42, r62=r62, main_subspace=soc0)
-    write_run_source_txt(Path(cfg["paths"]["output_root"]) / str(cfg["runtime"]["run_name"]), cfg)
+    write_run_source_txt(Path(cfg["paths"]["output_run"]), cfg)
 
 
 def ensure_l2_fopt(
@@ -668,12 +678,13 @@ def ensure_l2_fopt(
 
     if "l2" in state:
         return
-    run_dir = Path(cfg["paths"]["output_root"]) / cfg["runtime"]["run_name"]
+    run_dir = Path(cfg["paths"]["output_run"])
     write_run_source_txt(run_dir, cfg)
     stage_dir = build_stage_path(
         cfg["paths"]["output_root"],
         "L2",
         run_name=cfg["runtime"]["run_name"],
+        output_run=cfg["paths"]["output_run"],
     )
     loaded = try_load_l2_fopt(stage_dir, expected_key=level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:
@@ -713,6 +724,7 @@ def ensure_l3_fopt(
         cfg["paths"]["output_root"],
         "L3",
         run_name=cfg["runtime"]["run_name"],
+        output_run=cfg["paths"]["output_run"],
     )
     loaded = try_load_l3_fopt(stage_dir, expected_key=level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg))
     if loaded is not None:

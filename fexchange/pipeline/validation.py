@@ -50,6 +50,7 @@ def validate_upstream_artifacts(
     if not required:
         return
     output_root = cfg["paths"]["output_root"]
+    output_run = str(cfg.get("paths", {}).get("output_run", ""))
     run_name = str(cfg.get("runtime", {}).get("run_name", ""))
     branch = str(cfg.get("runtime", {}).get("branch", "sopt"))
     missing: list[str] = []
@@ -97,6 +98,7 @@ def validate_upstream_artifacts(
             output_root,
             "L1",
             run_name=run_name,
+            output_run=output_run,
         )
         _check_spec(d, "L1")
     if "L2" in required:
@@ -104,6 +106,7 @@ def validate_upstream_artifacts(
             output_root,
             "L2",
             run_name=run_name,
+            output_run=output_run,
         )
         _check_spec(d, "L2")
     if "L3" in required:
@@ -111,6 +114,7 @@ def validate_upstream_artifacts(
             output_root,
             "L3",
             run_name=run_name,
+            output_run=output_run,
         )
         _check_spec(d, "L3_FOPT" if branch == "fopt" else "L3")
 

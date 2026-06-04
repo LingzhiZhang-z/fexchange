@@ -141,7 +141,9 @@ def _run_pipeline(toml_path: str, *, log_level: str) -> int:
 
         total = time.time() - t0
         logger.info("pipeline complete in %.3fs", total)
-        print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}")
+        output_run = cfg["paths"].get("output_run", "")
+        run_msg = f" output_run={output_run}" if output_run else ""
+        print(f"[fexchange] Done. total={total:.3f}s output_root={output_root}{run_msg}")
         return 0
     except Exception:
         logger.exception("pipeline failed")
@@ -179,7 +181,7 @@ def _install_run_log_handler(cfg: dict[str, Any], *, log_level: str) -> logging.
     run_name = cfg.get("runtime", {}).get("run_name")
     if not run_name:
         return None
-    path = Path(cfg["paths"]["output_root"]) / str(run_name) / "run.log"
+    path = Path(cfg["paths"]["output_run"]) / "run.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(path, mode="w", encoding="utf-8")
     handler.setLevel(logging.DEBUG if log_level == "DEBUG" else logging.INFO)

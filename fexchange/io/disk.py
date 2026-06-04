@@ -69,6 +69,7 @@ def build_stage_path(
     r62: float = 0.0,
     scheme: str = "RS",
     run_name: str = "",
+    output_run: str = "",
     ligand_soc: str = "",
     ligand_n: int = 0,
     p_transition: str = "",
@@ -88,26 +89,30 @@ def build_stage_path(
                 actual={"ligand_n": ligand_n},
             )
         return root / "core" / "ligand" / soc_token / f"n-{ligand_n}"
-    elif stage == "IONED":
-        return root / _require_stage_token("run_name", run_name, stage) / "IONED" / f"n-{n}"
-    elif stage == "L1_F":
-        return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
     elif stage == "L1_P":
         return root / "core" / "L1" / "P" / _require_stage_token("p_transition", p_transition, stage)
-    elif stage == "L1":
-        return root / _require_stage_token("run_name", run_name, stage) / "L1" / "F"
-    elif stage == "L2":
-        return root / _require_stage_token("run_name", run_name, stage) / "L2"
-    elif stage == "L3":
-        return root / _require_stage_token("run_name", run_name, stage) / "L3"
-    elif stage == "spin12":
-        return root / _require_stage_token("run_name", run_name, stage) / "L3" / "spin12"
+    elif stage in ("IONED", "L1_F", "L1", "L2", "L3", "spin12"):
+        run_token = _require_stage_token("run_name", run_name, stage)
+        run_root = (
+            Path(output_run.strip())
+            if isinstance(output_run, str) and output_run.strip()
+            else root / run_token
+        )
     else:
         raise IOError_(
             "FXE-IO-001",
             f"Unknown stage: {stage}",
             actual={"stage": stage},
         )
+    if stage == "IONED":
+        return run_root / "IONED" / f"n-{n}"
+    elif stage in ("L1_F", "L1"):
+        return run_root / "L1" / "F"
+    elif stage == "L2":
+        return run_root / "L2"
+    elif stage == "L3":
+        return run_root / "L3"
+    return run_root / "L3" / "spin12"
 
 
 def _require_stage_token(field_name: str, value: str, stage: str) -> str:
