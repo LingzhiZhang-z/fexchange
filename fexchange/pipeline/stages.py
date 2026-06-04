@@ -393,7 +393,7 @@ def ensure_ion_ed_adjacent(
             F2=float(fsite.get("F2", 0.0)),
             F4=float(fsite.get("F4", 0.0)),
             F6=float(fsite.get("F6", 0.0)),
-            zeta=float(fsite.get("zeta", 0.0)),
+            zeta=float(fsite["zeta"]),
             offset=float(fsite.get("offset", 0.0)),
             n_orb=n_orb,
             lsjm_reference=state.get(f"lsjm_{sec}"),

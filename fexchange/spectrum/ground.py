@@ -158,6 +158,18 @@ def select_non_kramers_doublet(
     psi1 = evecs[:, 0].copy()
     psi2 = evecs[:, 1].copy()
     Delta_nk = float(evals[1] - evals[0])
+    if Delta_nk > eps_nk_split:
+        raise PhysError(
+            "FXE-PHYS-001",
+            f"Lowest non-Kramers pair not degenerate: E0={evals[0]:.6e}, E1={evals[1]:.6e}",
+            module="non_kramers",
+            actual={
+                "E0": float(evals[0]),
+                "E1": float(evals[1]),
+                "delta": Delta_nk,
+                "eps_nk_split": float(eps_nk_split),
+            },
+        )
     is_quasi_doublet = Delta_nk <= eps_nk_split
 
     Psi = np.column_stack([psi1, psi2])

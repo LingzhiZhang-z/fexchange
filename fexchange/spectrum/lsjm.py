@@ -415,10 +415,20 @@ def select_soc_lowest_subspace(
 
     J0 = twoJ0 / 2.0
     if abs(J0 - J0_hund) > 1e-10:
-        logger.warning(
-            "J0 selection (%.1f) differs from Hund's third rule (%.1f) "
-            "for term (alpha=%d, L=%d, twoS=%d); zeta sign may be wrong.",
-            J0, J0_hund, alpha0, L0, twoS0,
+        raise PhysError(
+            "FXE-PHYS-001",
+            f"SOC-lowest J0={J0:.1f} disagrees with Hund's third rule J0={J0_hund:.1f} "
+            f"(alpha={alpha0}, L={L0}, twoS={twoS0}); check zeta sign / coef_zeta.",
+            module="lsjm",
+            stage="LSJM",
+            op="select_soc_lowest",
+            actual={
+                "J0": float(J0),
+                "J0_hund": float(J0_hund),
+                "alpha": int(alpha0),
+                "L": int(L0),
+                "twoS": int(twoS0),
+            },
         )
 
     # Select columns matching (alpha0, L0, twoS0, twoJ0)

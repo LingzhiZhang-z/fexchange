@@ -35,6 +35,9 @@ from pathlib import Path
 
 import numpy as np
 
+from fexchange.utils.errors import NumError
+from fexchange.utils.numerics import EPS_ZERO
+
 _BASIS_CUBIC_F = ("xi", "eta", "zeta", "A", "alpha", "beta", "gamma")
 _BASIS_COMPLEX_F = ("Y3,-3", "Y3,-2", "Y3,-1", "Y3,0", "Y3,1", "Y3,2", "Y3,3")
 
@@ -143,9 +146,17 @@ def hopping_fpf(
     delta_pf: float,
 ) -> np.ndarray:
     """Compute the effective 7×7 f-p-f hopping in the cubic basis."""
+    delta = float(delta_pf)
+    if not np.isfinite(delta) or abs(delta) < EPS_ZERO:
+        raise NumError(
+            "FXE-NUM-002",
+            "f-p-f denominator delta_pf is non-finite or ~ 0",
+            module="slater_koster_pf",
+            actual={"delta_pf": delta, "threshold": EPS_ZERO},
+        )
     h_pf1 = hopping_pf(l1, m1, n1, pf_sigma, pf_pi)
     h_pf2 = hopping_pf(l2, m2, n2, pf_sigma, pf_pi)
-    return h_pf1.conj().T @ h_pf2 / delta_pf
+    return h_pf1.conj().T @ h_pf2 / delta
 
 
 def fpf_cubic_7x7(
