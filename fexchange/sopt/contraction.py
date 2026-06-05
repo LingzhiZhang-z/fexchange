@@ -232,7 +232,6 @@ def build_L3(
     l2_result: dict[str, Any],
     E_u_np1: NDArray[np.floating],
     E_u_nm1: NDArray[np.floating],
-    n_ele: int,
 ) -> dict[str, Any]:
     """
     Canonical runtime final-L3 path: denominator sum over projected L2 factors.

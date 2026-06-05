@@ -87,7 +87,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 
 def _validate_structure(cfg: dict[str, Any]) -> None:
-    for k in ("schema_version", "standard_version", "run_id", "title"):
+    for k in ("schema_version", "standard_version"):
         _chk(k in cfg, "002", f"Missing: {k}")
     if cfg["schema_version"] != RUN_SCHEMA_VERSION:
         raise SchemaError(
@@ -103,7 +103,7 @@ def _validate_structure(cfg: dict[str, Any]) -> None:
             expected={"standard_version": STANDARD_VERSION},
             actual={"standard_version": cfg["standard_version"]},
         )
-    for k in ("paths", "runtime", "checks"):
+    for k in ("paths", "runtime"):
         _chk(k in cfg, "002", f"Missing section: [{k}]")
     extras = sorted(k for k in cfg if k not in _ALLOWED)
     _chk(not extras, "003", f"Unknown sections: {extras}")
@@ -135,10 +135,6 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
         if side in cfg:
             _validate_fsite(cfg[side], side, require_core=False)
 
-    c = cfg["checks"]
-    _chk(isinstance(c.get("strict_mode"), bool), "003", "checks.strict_mode must be bool")
-    _chk(_nonempty(c.get("eps_profile")), "003", "checks.eps_profile must be non-empty string")
-
     output_root = cfg["paths"].get("output_root")
     _chk(_nonempty(output_root), "003", "paths.output_root must be a non-empty string")
 
@@ -158,15 +154,10 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
     if win("L2"):
         _chk("inputs" in cfg, "002", f"[inputs] required for window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("hopping_file")), "003", "inputs.hopping_file required")
-        _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for L2+")
         if kramer_source == "stevens":
             _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
-    if branch == "sopt" and win("L3"):
-        _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for sopt L3")
     if branch == "fopt":
         _validate_ligands(cfg)
-        if win("L3"):
-            _chk(_nonempty(runtime.get("kramer_name")), "003", "runtime.kramer_name required for fopt L3")
 
 
 def _validate_fsite(section: dict[str, Any], name: str, *, require_core: bool) -> None:
@@ -231,15 +222,6 @@ def _validate_ligands(cfg: dict[str, Any]) -> None:
 
 
 def _normalize(cfg: dict[str, Any]) -> None:
-    units = cfg.get("units")
-    if units is None:
-        cfg["units"] = {"energy": "raw"}
-    else:
-        _chk(isinstance(units, dict), "003", "[units] must be a table")
-        unit = units.get("energy", "raw")
-        _chk(isinstance(unit, str) and bool(unit.strip()), "003", "units.energy must be a non-empty string")
-        units["energy"] = unit
-
     paths = cfg["paths"]
     for key in ("output_root", "output_run"):
         if isinstance(paths.get(key), str):

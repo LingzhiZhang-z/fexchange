@@ -307,10 +307,6 @@ def build_W(
     n_ele: int,
 ) -> dict[str, Any]:
     """Build ground-state doublet projector W from CEF diagonalization."""
-    runtime = cfg.get("runtime", {})
-    kramer_name = str(runtime.get("kramer_name", "")) if isinstance(runtime, dict) else ""
-    if not kramer_name:
-        raise InputError("FXE-INPUT-003", "runtime.kramer_name required for CEF projector construction")
     cef = _build_cef_inputs(cfg, state, n_ele=n_ele)
     J0 = cef["J0"]
     ground_irrep = cef["symmetry_meta"].get("irrep_primary", "unknown")
@@ -352,7 +348,6 @@ def build_W(
     return {
         "W": W,
         "kramer_basis_id": kramer_basis_id,
-        "kramer_name": kramer_name,
         "j_order_id": cef["lsjm_n"].get("j_order_id"),
         "gauge_meta": gauge_meta,
         "symmetry_meta": cef["symmetry_meta"],

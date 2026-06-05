@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 
 from fexchange.io.disk import (
-    append_index_record,
     atomic_write_json,
     atomic_write_npz,
     build_meta,
@@ -22,20 +21,11 @@ from fexchange.io.disk import (
 )
 from fexchange.pipeline.keys import (
     level_key,
-    sector_branch,
 )
 from fexchange.pipeline.source_writer import build_resolved_inputs_summary
-from fexchange.utils.numerics import numerics_meta
 
 logger = logging.getLogger("fexchange")
 
-
-def _fsite_for_index(cfg: dict[str, Any], n_ele: int) -> dict[str, Any]:
-    branch = sector_branch(cfg, n_ele)
-    if isinstance(branch, dict) and isinstance(branch.get("fsite"), dict):
-        return branch["fsite"]
-    fsite = cfg.get("fsite", {})
-    return fsite if isinstance(fsite, dict) else {}
 
 # Artifact file spec: maps level -> list of (filename, minimum_required_npz_keys_or_None_for_json).
 # These are the minimum keys needed for loading/validation, not the full set of stored keys.
@@ -390,7 +380,6 @@ def persist_stateset(
     r42: float,
     r62: float,
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
     payload: dict[str, Any] = {
         "V_fock": result["V_fock"],
         "coef_F0": result["coef_F0"],
@@ -400,7 +389,7 @@ def persist_stateset(
     }
     if "coef_zeta" in result:
         payload["coef_zeta"] = result["coef_zeta"]
-    content_hash = atomic_write_npz(stage_dir / f"{level}.npz", **payload)
+    atomic_write_npz(stage_dir / f"{level}.npz", **payload)
 
     module_name = "representations.lsms" if level == "LMSM" else "representations.lsjm"
     meta = build_meta(
@@ -429,23 +418,9 @@ def persist_stateset(
             "j_order_id": result.get("j_order_id"),
             "n_orb": result.get("n_orb"),
             "n_ele": result.get("n_ele"),
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key(level, n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": module_name,
-            "level": level,
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_ion_ed(
@@ -457,7 +432,6 @@ def persist_ion_ed(
     r42: float,
     r62: float,
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
     physics = result.get("physics", {})
     payload = {
         "V_fock_ed": result["V_fock_ed"],
@@ -466,7 +440,7 @@ def persist_ion_ed(
         "M": np.asarray(result.get("M", []), dtype=float),
         "energy_group": np.asarray(result.get("energy_group", []), dtype=np.int64),
     }
-    content_hash = atomic_write_npz(stage_dir / "states.npz", **payload)
+    atomic_write_npz(stage_dir / "states.npz", **payload)
     meta = build_meta(
         module="spectrum.ion_ed",
         level="IONED",
@@ -498,26 +472,9 @@ def persist_ion_ed(
             "n_ele": int(result.get("n_ele", n_ele)),
             "n_orb": int(result.get("n_orb", 14)),
             "physics": physics,
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": meta["key"],
-            "module": "spectrum.ion_ed",
-            "level": "IONED",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "U": float(physics.get("F0", 0.0)),
-            "Jh": float(_fsite_for_index(cfg, n_ele).get("Jh", 0.0)),
-            "zeta": float(physics.get("zeta", 0.0)),
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_l0(
@@ -527,9 +484,8 @@ def persist_l0(
     *,
     n_ele: int,
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
-    hash_x = atomic_write_npz(stage_dir / f"f_create_{n_ele}_to_{n_ele + 1}.npz", data=result["X"])
-    hash_y = atomic_write_npz(stage_dir / f"f_create_{n_ele - 1}_to_{n_ele}.npz", data=result["Y"])
+    atomic_write_npz(stage_dir / f"f_create_{n_ele}_to_{n_ele + 1}.npz", data=result["X"])
+    atomic_write_npz(stage_dir / f"f_create_{n_ele - 1}_to_{n_ele}.npz", data=result["Y"])
     meta = build_meta(
         module="sopt.precompute",
         level="L0",
@@ -541,20 +497,8 @@ def persist_l0(
         index_definition="data(kappa,high,low)",
         logical_shape=[*result["X"].shape],
         payload_files=[f"f_create_{n_ele}_to_{n_ele + 1}.npz", f"f_create_{n_ele - 1}_to_{n_ele}.npz"],
-        extra={"numerics_meta": numerics_meta()},
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key("L0", n_ele=n_ele, r42=0.0, r62=0.0, cfg=cfg),
-            "module": "sopt.precompute",
-            "level": "L0",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "content_hash": f"{hash_x}:{hash_y}",
-        },
-    )
 
 
 def persist_l0_fopt(
@@ -565,19 +509,8 @@ def persist_l0_fopt(
     n_ele: int,
 ) -> None:
     persist_l0(stage_dir, cfg, result["f"], n_ele=n_ele)
-    hash_p56 = atomic_write_npz(stage_dir / "p_create_5_to_6.npz", data=result["p"]["P_raw_5_6"])
-    hash_p45 = atomic_write_npz(stage_dir / "p_create_4_to_5.npz", data=result["p"]["P_raw_4_5"])
-    append_index_record(
-        cfg["paths"]["output_root"],
-        {
-            "key": level_key("L0", n_ele=n_ele, r42=0.0, r62=0.0, cfg=cfg),
-            "module": "fopt.precompute",
-            "level": "L0",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "content_hash": f"{hash_p56}:{hash_p45}",
-        },
-    )
+    atomic_write_npz(stage_dir / "p_create_5_to_6.npz", data=result["p"]["P_raw_5_6"])
+    atomic_write_npz(stage_dir / "p_create_4_to_5.npz", data=result["p"]["P_raw_4_5"])
 
 
 def persist_ligand(
@@ -587,7 +520,7 @@ def persist_ligand(
     *,
     soc: bool,
 ) -> None:
-    content_hash = atomic_write_npz(
+    atomic_write_npz(
         stage_dir / "data.npz",
         V_fock=result["V_fock"],
         coef_Delta=result["coef_Delta"],
@@ -608,21 +541,9 @@ def persist_ligand(
         extra={
             "n_ele": int(result["n_ele"]),
             "soc": bool(soc),
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        cfg["paths"]["output_root"],
-        {
-            "key": meta["key"],
-            "module": "spectrum.ligand",
-            "level": "ligand",
-            "path": str(stage_dir),
-            "n": int(result["n_ele"]),
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_l1_fopt(
@@ -650,7 +571,7 @@ def persist_l1_fopt(
                 "J0": main_subspace.get("J0"),
                 "n_j": main_subspace.get("n_j"),
             }
-    hash_f = atomic_write_npz(
+    atomic_write_npz(
         f_dir / "data.npz",
         F_n_np1=f_vertex["F_n_np1"],
         F_nm1_n=f_vertex["F_nm1_n"],
@@ -669,16 +590,14 @@ def persist_l1_fopt(
         extra={
             "fn_ground_subspace_id": subspace_id,
             "main_subspace_meta": subspace_meta,
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(f_dir / "meta.json", meta)
 
-    p_hashes: list[str] = [hash_f]
     for ligand, p_vertex in result["p"].items():
         for key, filename_key in (("P_5_6", "P_5_6"), ("P_4_5", "P_4_5")):
             stage_dir = p_dirs[ligand][filename_key]
-            p_hashes.append(atomic_write_npz(stage_dir / "data.npz", data=p_vertex[key]))
+            atomic_write_npz(stage_dir / "data.npz", data=p_vertex[key])
             p_meta = build_meta(
                 module="fopt.precompute",
                 level="L1",
@@ -690,22 +609,8 @@ def persist_l1_fopt(
                 index_definition="data(kappa,high,low)",
                 logical_shape=[*p_vertex[key].shape],
                 payload_files=["data.npz"],
-                extra={"numerics_meta": numerics_meta()},
             )
             atomic_write_json(stage_dir / "meta.json", p_meta)
-    append_index_record(
-        cfg["paths"]["output_root"],
-        {
-            "key": level_key("L1", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": "fopt.precompute",
-            "level": "L1",
-            "path": str(f_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "content_hash": ":".join(p_hashes),
-        },
-    )
 
 
 def persist_l2_fopt(
@@ -717,17 +622,13 @@ def persist_l2_fopt(
     r42: float,
     r62: float,
 ) -> None:
-    hashes: list[str] = []
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     for fs in (1, 2):
         for lig in (1, 2):
-            hashes.append(
-                atomic_write_npz(
-                    stage_dir / f"V_plus_f{fs}_lig{lig}.npz",
-                    fn_p6=result[(fs, lig, "fn_p6")]["V_plus"],
-                    fn_p5=result[(fs, lig, "fn_p5")]["V_plus"],
-                    fnm1_p6=result[(fs, lig, "fnm1_p6")]["V_plus"],
-                )
+            atomic_write_npz(
+                stage_dir / f"V_plus_f{fs}_lig{lig}.npz",
+                fn_p6=result[(fs, lig, "fn_p6")]["V_plus"],
+                fn_p5=result[(fs, lig, "fn_p5")]["V_plus"],
+                fnm1_p6=result[(fs, lig, "fnm1_p6")]["V_plus"],
             )
     meta = build_meta(
         module="fopt.contraction",
@@ -745,28 +646,8 @@ def persist_l2_fopt(
         index_definition="V_plus(f_out,p_out,f_in,p_in), with the f^n leg projected to k",
         logical_shape=[],
         payload_files=[f"V_plus_f{fs}_lig{lig}.npz" for fs in (1, 2) for lig in (1, 2)],
-        extra={
-            "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
-            "kramer_name": kramer_name,
-            "numerics_meta": numerics_meta(),
-        },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        cfg["paths"]["output_root"],
-        {
-            "key": meta["key"],
-            "module": "fopt.contraction",
-            "level": "L2",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
-            "kramer_name": kramer_name,
-            "content_hash": ":".join(hashes),
-        },
-    )
 
 
 def persist_l3_fopt(
@@ -785,8 +666,7 @@ def persist_l3_fopt(
     j_mu_processes = np.asarray(result["J_mu_processes"], dtype=float)
     residual = np.asarray(result["mapping_residual"], dtype=float)
     residual_processes = np.asarray(result["mapping_residual_processes"], dtype=float)
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
-    content_hash = atomic_write_npz(
+    atomic_write_npz(
         stage_dir / "data.npz",
         h_eff_4=h,
         h_eff_4_processes=h_processes,
@@ -823,30 +703,9 @@ def persist_l3_fopt(
         payload_files=["data.npz"],
         extra={
             "human_readable_files": ["exchange.txt"],
-            "process_labels": process_labels.tolist(),
-            "mapping_residual": float(residual),
-            "mapping_residual_processes": residual_processes.tolist(),
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        cfg["paths"]["output_root"],
-        {
-            "key": meta["key"],
-            "module": "fopt.contraction",
-            "level": "L3",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "U": float(cfg["fsite"]["U"]),
-            "Jh": float(cfg["fsite"]["Jh"]),
-            "hopping_name": cfg.get("inputs", {}).get("hopping_name"),
-            "kramer_name": kramer_name,
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_l1(
@@ -859,8 +718,7 @@ def persist_l1(
     r62: float,
     soc0: dict[str, Any],
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
-    content_hash = atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
+    atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
     subspace_id = str(soc0.get("subspace_id", "soc_lowest_hunds_v1"))
     subspace_meta = dict(soc0.get("meta", {}))
     if subspace_id == "soc_lowest_hunds_v1":
@@ -892,23 +750,9 @@ def persist_l1(
             "fn_ground_subspace_id": subspace_id,
             "main_subspace_meta": subspace_meta,
             "soc0_meta": subspace_meta if subspace_id == "soc_lowest_hunds_v1" else {},
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key("L1", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": "sopt.precompute",
-            "level": "L1",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_l2(
@@ -920,11 +764,7 @@ def persist_l2(
     r42: float,
     r62: float,
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
-    source_names = cfg.get("inputs", {})
-    hopping_name = str(source_names.get("hopping_name", ""))
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
-    content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
+    atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
         level="L2",
@@ -943,29 +783,11 @@ def persist_l2(
         payload_files=["data.npz"],
         extra={
             "axis_order_id": {"M_A": "uvab_v1", "M_B": "rsab_v1"},
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
             "n_j": int(result.get("n_j", 0)),
             "n_k": int(result.get("n_k", np.asarray(result["M_A"]).shape[2])),
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key("L2", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": "sopt.contraction",
-            "level": "L2",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
-            "content_hash": content_hash,
-        },
-    )
 
 
 def persist_l3_sopt(
@@ -978,10 +800,6 @@ def persist_l3_sopt(
     r62: float,
     labels: np.ndarray,
 ) -> None:
-    output_root = cfg["paths"]["output_root"]
-    fsite = cfg["fsite"]
-    hopping_name = str(cfg.get("inputs", {}).get("hopping_name", ""))
-    kramer_name = str(cfg.get("runtime", {}).get("kramer_name", ""))
     payload = {
         "h_mu_abcd": result["h_mu_abcd"],
         "Heff_mu_abcd": result["Heff_mu_abcd"],
@@ -990,7 +808,7 @@ def persist_l3_sopt(
     if "J_mu" in result:
         payload["J_mu"] = result["J_mu"]
         payload["mapping_residual"] = np.asarray(result["mapping_residual"], dtype=float)
-    content_hash = atomic_write_npz(stage_dir / "data.npz", **payload)
+    atomic_write_npz(stage_dir / "data.npz", **payload)
     human_readable_files: list[str] = []
     if "J_mu" in result and "mapping_residual" in result:
         write_exchange_matrix_txt(
@@ -1020,27 +838,6 @@ def persist_l3_sopt(
             "jmu_available": "J_mu" in result,
             "mapping_residual": result.get("mapping_residual"),
             "human_readable_files": human_readable_files,
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
-            "numerics_meta": numerics_meta(),
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
-    append_index_record(
-        output_root,
-        {
-            "key": level_key("L3", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-            "module": "sopt.contraction",
-            "level": "L3",
-            "path": str(stage_dir),
-            "n": n_ele,
-            "r42": r42,
-            "r62": r62,
-            "U": float(fsite["U"]),
-            "Jh": float(fsite["Jh"]),
-            "zeta": float(fsite["zeta"]),
-            "hopping_name": hopping_name,
-            "kramer_name": kramer_name,
-            "content_hash": content_hash,
-        },
-    )

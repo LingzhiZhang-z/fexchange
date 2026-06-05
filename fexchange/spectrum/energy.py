@@ -13,29 +13,6 @@ from fexchange.spectrum.lsjm import select_soc_lowest_subspace
 from fexchange.utils.errors import InputError
 
 
-def _legacy_shared_branch(cfg: dict[str, Any], *, n_ele: int) -> dict[str, Any]:
-    """Build a single-sector branch from pre-branch cfg payloads."""
-    fsite_cfg = cfg.get("fsite", {})
-    physics_cfg = cfg.get("physics", {})
-    if not isinstance(fsite_cfg, dict):
-        fsite_cfg = {}
-    if not isinstance(physics_cfg, dict):
-        physics_cfg = {}
-
-    fsite = dict(physics_cfg)
-    fsite.update(fsite_cfg)
-    fsite["n_ele"] = int(fsite.get("n_ele", n_ele))
-    fsite["U"] = float(fsite.get("U", 0.0))
-    fsite["Jh"] = float(fsite.get("Jh", 0.0))
-    fsite["F2"] = float(fsite.get("F2", 0.0))
-    fsite["F4"] = float(fsite.get("F4", 0.0))
-    fsite["F6"] = float(fsite.get("F6", 0.0))
-    fsite["zeta"] = float(fsite.get("zeta", 0.0))
-    if "offset" in fsite:
-        fsite["offset"] = float(fsite["offset"])
-    return {"fsite": fsite}
-
-
 def compute_intermediate_energies(
     cfg: dict[str, Any],
     state: dict[str, Any],
@@ -51,20 +28,20 @@ def compute_intermediate_energies(
 
     branches = cfg.get("_branches")
     if not isinstance(branches, dict):
-        legacy_branch = _legacy_shared_branch(cfg, n_ele=n_ele)
-        branch_n = legacy_branch
-        branch_nm1 = {"fsite": {**legacy_branch["fsite"], "offset": 0.0}}
-        branch_np1 = {"fsite": {**legacy_branch["fsite"], "offset": 0.0}}
-    else:
-        branch_n = branches.get("n")
-        branch_nm1 = branches.get("nm1")
-        branch_np1 = branches.get("np1")
-        if not isinstance(branch_n, dict) or not isinstance(branch_nm1, dict) or not isinstance(branch_np1, dict):
-            raise InputError(
-                "FXE-INPUT-003",
-                "cfg._branches must contain n, nm1, and np1 branch payloads",
-                actual={"present": sorted(branches)},
-            )
+        raise InputError(
+            "FXE-INPUT-003",
+            "cfg._branches is required to compute intermediate energies",
+            actual={"present": False},
+        )
+    branch_n = branches.get("n")
+    branch_nm1 = branches.get("nm1")
+    branch_np1 = branches.get("np1")
+    if not isinstance(branch_n, dict) or not isinstance(branch_nm1, dict) or not isinstance(branch_np1, dict):
+        raise InputError(
+            "FXE-INPUT-003",
+            "cfg._branches must contain n, nm1, and np1 branch payloads",
+            actual={"present": sorted(branches)},
+        )
 
     def _energy(lsjm: dict[str, Any], branch: dict[str, Any], *, include_offset: bool = True) -> NDArray[np.floating]:
         fsite = branch["fsite"]

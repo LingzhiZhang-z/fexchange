@@ -549,7 +549,7 @@ def ensure_l3_sopt(
     n_k = int(state["l2"]["n_k"])
     labels = labels_abcd_lex(n_k)
     validate_labels_abcd(labels, n_k=n_k)
-    result = build_L3(state["l2"], E_u_np1, E_u_nm1, n_ele=n_ele)
+    result = build_L3(state["l2"], E_u_np1, E_u_nm1)
     if n_k == 2:
         result.update(spin12_map(result["Heff_mu_abcd"]))
     state["l3"] = result

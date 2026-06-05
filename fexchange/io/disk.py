@@ -129,8 +129,8 @@ def _require_stage_token(field_name: str, value: str, stage: str) -> str:
 # Atomic write (05-00 §9)
 # ---------------------------------------------------------------------------
 
-def atomic_write_npz(path: Path, **arrays: NDArray) -> str:
-    """Atomically write arrays to .npz and return content hash."""
+def atomic_write_npz(path: Path, **arrays: NDArray) -> None:
+    """Atomically write arrays to .npz."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".npz.tmp")
     try:
@@ -145,10 +145,9 @@ def atomic_write_npz(path: Path, **arrays: NDArray) -> str:
             f"Atomic write failed: {path}",
             paths={"target": str(path)},
         )
-    return _file_hash(path)
 
 
-def atomic_write_json(path: Path, data: dict) -> str:
+def atomic_write_json(path: Path, data: dict) -> None:
     """Atomically write JSON metadata."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".json.tmp")
@@ -164,7 +163,6 @@ def atomic_write_json(path: Path, data: dict) -> str:
             f"Atomic write failed: {path}",
             paths={"target": str(path)},
         )
-    return _file_hash(path)
 
 
 def _json_default(obj: Any) -> Any:
@@ -175,37 +173,6 @@ def _json_default(obj: Any) -> Any:
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     raise TypeError(f"Not JSON serializable: {type(obj)}")
-
-
-# ---------------------------------------------------------------------------
-# Read-first cache (05-00 §9)
-# ---------------------------------------------------------------------------
-
-def read_or_compute_npz(
-    path: Path,
-    compute_fn,
-    *,
-    expected_keys: list[str] | None = None,
-) -> dict[str, NDArray]:
-    """
-    Read-first cache: if path exists and valid, load; else compute and write.
-
-    compute_fn() must return dict[str, NDArray].
-    """
-    if path.exists():
-        try:
-            data = dict(np.load(str(path)))
-            if expected_keys and not all(k in data for k in expected_keys):
-                logger.warning("Cache miss (missing keys): %s", path)
-            else:
-                logger.info("Cache hit: %s", path)
-                return data
-        except Exception:
-            logger.warning("Cache invalid: %s", path)
-
-    result = compute_fn()
-    atomic_write_npz(path, **result)
-    return result
 
 
 def load_npz_checked(
@@ -297,36 +264,8 @@ def _file_hash(path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Index record (05-00 §11)
+# Index error record (05-00 §11)
 # ---------------------------------------------------------------------------
-
-def append_index_record(
-    output_root: str,
-    record: dict[str, Any],
-) -> None:
-    """Append one line to index.jsonl."""
-    index_path = Path(output_root) / "index.jsonl"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    for field in (
-        "key",
-        "module",
-        "level",
-        "path",
-        "n",
-        "r42",
-        "r62",
-        "U",
-        "Jh",
-        "zeta",
-        "hopping_name",
-        "kramer_name",
-        "content_hash",
-    ):
-        record.setdefault(field, None)
-    record.setdefault("created_at", datetime.datetime.now(datetime.timezone.utc).isoformat())
-    with open(index_path, "a") as f:
-        f.write(json.dumps(record, default=_json_default) + "\n")
-
 
 def append_error_record(output_root: str, payload: dict[str, Any]) -> None:
     """Append one-line JSON error payload to outputs/index_errors.jsonl."""
