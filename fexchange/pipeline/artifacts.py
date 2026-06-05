@@ -82,12 +82,13 @@ def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, A
     if not stage_dir.exists():
         return None
     try:
+        meta = load_json_checked(stage_dir / "meta.json")
+        validate_meta(meta)
         payload = load_npz_checked(
             stage_dir / f"{level}.npz",
             ["V_fock", "coef_F0", "coef_F2", "coef_F4", "coef_F6"],
+            expected_hash=meta.get("content_hash"),
         )
-        meta = load_json_checked(stage_dir / "meta.json")
-        validate_meta(meta)
         result = {
             "V_fock": np.asarray(payload["V_fock"], dtype=np.complex128),
             "labels": meta.get("labels", []),
@@ -122,11 +123,15 @@ def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, A
 
 def try_load_ion_ed(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
-        payload = load_npz_checked(stage_dir / "states.npz", ["V_fock_ed", "energies"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("IONED key mismatch")
+        payload = load_npz_checked(
+            stage_dir / "states.npz",
+            ["V_fock_ed", "energies"],
+            expected_hash=meta.get("content_hash"),
+        )
         V = np.asarray(payload["V_fock_ed"], dtype=np.complex128)
         result: dict[str, Any] = {
             "V_fock": V,
@@ -152,10 +157,19 @@ def try_load_ion_ed(stage_dir: Path, *, expected_key: str | None = None) -> dict
 
 def try_load_l0(stage_dir: Path, *, n_ele: int) -> dict[str, Any] | None:
     try:
-        x = load_npz_checked(stage_dir / f"f_create_{n_ele}_to_{n_ele + 1}.npz", ["data"])["data"]
-        y = load_npz_checked(stage_dir / f"f_create_{n_ele - 1}_to_{n_ele}.npz", ["data"])["data"]
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
+        hashes = meta.get("content_hash", {})
+        if not isinstance(hashes, dict):
+            hashes = {}
+        name_x = f"f_create_{n_ele}_to_{n_ele + 1}.npz"
+        name_y = f"f_create_{n_ele - 1}_to_{n_ele}.npz"
+        x = load_npz_checked(
+            stage_dir / name_x, ["data"], expected_hash=hashes.get(name_x)
+        )["data"]
+        y = load_npz_checked(
+            stage_dir / name_y, ["data"], expected_hash=hashes.get(name_y)
+        )["data"]
         return {
             "X": np.asarray(x, dtype=np.complex128),
             "Y": np.asarray(y, dtype=np.complex128),
@@ -169,11 +183,11 @@ def try_load_l0(stage_dir: Path, *, n_ele: int) -> dict[str, Any] | None:
 
 def try_load_l1(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
-        d = load_npz_checked(stage_dir / "data.npz", ["A", "B"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("L1 key mismatch")
+        d = load_npz_checked(stage_dir / "data.npz", ["A", "B"], expected_hash=meta.get("content_hash"))
         A = np.asarray(d["A"], dtype=np.complex128)
         B = np.asarray(d["B"], dtype=np.complex128)
         return {
@@ -191,11 +205,11 @@ def try_load_l1(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
 
 def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
-        d = load_npz_checked(stage_dir / "data.npz", ["M_A", "M_B"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("L2 key mismatch")
+        d = load_npz_checked(stage_dir / "data.npz", ["M_A", "M_B"], expected_hash=meta.get("content_hash"))
         M_A = np.asarray(d["M_A"], dtype=np.complex128)
         M_B = np.asarray(d["M_B"], dtype=np.complex128)
         return {
@@ -213,11 +227,15 @@ def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
 
 def try_load_l3_sopt(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
-        d = load_npz_checked(stage_dir / "data.npz", ["h_mu_abcd", "Heff_mu_abcd"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("SOPT L3 key mismatch")
+        d = load_npz_checked(
+            stage_dir / "data.npz",
+            ["h_mu_abcd", "Heff_mu_abcd"],
+            expected_hash=meta.get("content_hash"),
+        )
         h = np.asarray(d["h_mu_abcd"], dtype=np.complex128)
         heff = np.asarray(d["Heff_mu_abcd"], dtype=np.complex128)
         result = {"h_mu_abcd": h, "Heff_mu_abcd": heff, "n_k": int(h.shape[0])}
@@ -236,8 +254,20 @@ def try_load_l0_fopt(stage_dir: Path, *, n_ele: int) -> dict[str, Any] | None:
         f = try_load_l0(stage_dir, n_ele=n_ele)
         if f is None:
             return None
-        p56 = load_npz_checked(stage_dir / "p_create_5_to_6.npz", ["data"])["data"]
-        p45 = load_npz_checked(stage_dir / "p_create_4_to_5.npz", ["data"])["data"]
+        meta = load_json_checked(stage_dir / "meta.json")
+        hashes = meta.get("content_hash", {})
+        if not isinstance(hashes, dict):
+            hashes = {}
+        p56 = load_npz_checked(
+            stage_dir / "p_create_5_to_6.npz",
+            ["data"],
+            expected_hash=hashes.get("p_create_5_to_6.npz"),
+        )["data"]
+        p45 = load_npz_checked(
+            stage_dir / "p_create_4_to_5.npz",
+            ["data"],
+            expected_hash=hashes.get("p_create_4_to_5.npz"),
+        )["data"]
         return {
             "f": f,
             "p": {
@@ -261,11 +291,15 @@ def try_load_l1_fopt(
     expected_key: str | None = None,
 ) -> dict[str, Any] | None:
     try:
-        f_payload = load_npz_checked(f_dir / "data.npz", ["F_n_np1", "F_nm1_n"])
         meta = load_json_checked(f_dir / "meta.json")
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("FOPT L1 key mismatch")
+        f_payload = load_npz_checked(
+            f_dir / "data.npz",
+            ["F_n_np1", "F_nm1_n"],
+            expected_hash=meta.get("content_hash"),
+        )
         f_vertex = {
             "F_n_np1": np.asarray(f_payload["F_n_np1"], dtype=np.complex128),
             "F_nm1_n": np.asarray(f_payload["F_nm1_n"], dtype=np.complex128),
@@ -273,8 +307,14 @@ def try_load_l1_fopt(
         }
         p_vertices: dict[int, dict[str, Any]] = {}
         for ligand, dirs in p_dirs.items():
-            p56 = load_npz_checked(dirs["P_5_6"] / "data.npz", ["data"])["data"]
-            p45 = load_npz_checked(dirs["P_4_5"] / "data.npz", ["data"])["data"]
+            p56_meta = load_json_checked(dirs["P_5_6"] / "meta.json")
+            p45_meta = load_json_checked(dirs["P_4_5"] / "meta.json")
+            p56 = load_npz_checked(
+                dirs["P_5_6"] / "data.npz", ["data"], expected_hash=p56_meta.get("content_hash")
+            )["data"]
+            p45 = load_npz_checked(
+                dirs["P_4_5"] / "data.npz", ["data"], expected_hash=p45_meta.get("content_hash")
+            )["data"]
             p_vertices[ligand] = {
                 "P_5_6": np.asarray(p56, dtype=np.complex128),
                 "P_4_5": np.asarray(p45, dtype=np.complex128),
@@ -288,9 +328,13 @@ def try_load_l1_fopt(
 
 def try_load_ligand(stage_dir: Path) -> dict[str, Any] | None:
     try:
-        d = load_npz_checked(stage_dir / "data.npz", ["V_fock", "coef_Delta", "coef_U_p", "coef_lambda_p"])
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
+        d = load_npz_checked(
+            stage_dir / "data.npz",
+            ["V_fock", "coef_Delta", "coef_U_p", "coef_lambda_p"],
+            expected_hash=meta.get("content_hash"),
+        )
         return {
             "V_fock": np.asarray(d["V_fock"], dtype=np.complex128),
             "coef_Delta": np.asarray(d["coef_Delta"], dtype=float),
@@ -308,12 +352,21 @@ def try_load_ligand(stage_dir: Path) -> dict[str, Any] | None:
 
 def try_load_l2_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dict[tuple[int, int, str], dict[str, Any]] | None:
     try:
+        meta = load_json_checked(stage_dir / "meta.json")
+        validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("FOPT L2 key mismatch")
+        hashes = meta.get("content_hash", {})
+        if not isinstance(hashes, dict):
+            hashes = {}
         result: dict[tuple[int, int, str], dict[str, Any]] = {}
         for fs in (1, 2):
             for lig in (1, 2):
+                name = f"V_plus_f{fs}_lig{lig}.npz"
                 d = load_npz_checked(
-                    stage_dir / f"V_plus_f{fs}_lig{lig}.npz",
+                    stage_dir / name,
                     ["fn_p6", "fn_p5", "fnm1_p6"],
+                    expected_hash=hashes.get(name),
                 )
                 for sector in ("fn_p6", "fn_p5", "fnm1_p6"):
                     arr = np.asarray(d[sector], dtype=np.complex128)
@@ -324,10 +377,6 @@ def try_load_l2_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
                         "dim_low_f": int(arr.shape[2]),
                         "dim_low_p": int(arr.shape[3]),
                     }
-        meta = load_json_checked(stage_dir / "meta.json")
-        validate_meta(meta)
-        if expected_key is not None and meta.get("key") != expected_key:
-            raise ValueError("FOPT L2 key mismatch")
         return result
     except Exception as exc:
         logger.warning("Invalid cached FOPT L2 at %s (%s), recomputing", stage_dir, exc)
@@ -336,6 +385,10 @@ def try_load_l2_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
 
 def try_load_l3_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
     try:
+        meta = load_json_checked(stage_dir / "meta.json")
+        validate_meta(meta)
+        if expected_key is not None and meta.get("key") != expected_key:
+            raise ValueError("FOPT L3 key mismatch")
         d = load_npz_checked(
             stage_dir / "data.npz",
             [
@@ -348,11 +401,8 @@ def try_load_l3_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
                 "mapping_residual_processes",
                 "n_k",
             ],
+            expected_hash=meta.get("content_hash"),
         )
-        meta = load_json_checked(stage_dir / "meta.json")
-        validate_meta(meta)
-        if expected_key is not None and meta.get("key") != expected_key:
-            raise ValueError("FOPT L3 key mismatch")
         h = np.asarray(d["h_eff_4"], dtype=np.complex128)
         return {
             "h_eff_4": h,
@@ -389,7 +439,7 @@ def persist_stateset(
     }
     if "coef_zeta" in result:
         payload["coef_zeta"] = result["coef_zeta"]
-    atomic_write_npz(stage_dir / f"{level}.npz", **payload)
+    content_hash = atomic_write_npz(stage_dir / f"{level}.npz", **payload)
 
     module_name = "representations.lsms" if level == "LMSM" else "representations.lsjm"
     meta = build_meta(
@@ -418,6 +468,7 @@ def persist_stateset(
             "j_order_id": result.get("j_order_id"),
             "n_orb": result.get("n_orb"),
             "n_ele": result.get("n_ele"),
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -440,7 +491,7 @@ def persist_ion_ed(
         "M": np.asarray(result.get("M", []), dtype=float),
         "energy_group": np.asarray(result.get("energy_group", []), dtype=np.int64),
     }
-    atomic_write_npz(stage_dir / "states.npz", **payload)
+    content_hash = atomic_write_npz(stage_dir / "states.npz", **payload)
     meta = build_meta(
         module="spectrum.ion_ed",
         level="IONED",
@@ -472,6 +523,7 @@ def persist_ion_ed(
             "n_ele": int(result.get("n_ele", n_ele)),
             "n_orb": int(result.get("n_orb", 14)),
             "physics": physics,
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -484,8 +536,10 @@ def persist_l0(
     *,
     n_ele: int,
 ) -> None:
-    atomic_write_npz(stage_dir / f"f_create_{n_ele}_to_{n_ele + 1}.npz", data=result["X"])
-    atomic_write_npz(stage_dir / f"f_create_{n_ele - 1}_to_{n_ele}.npz", data=result["Y"])
+    name_x = f"f_create_{n_ele}_to_{n_ele + 1}.npz"
+    name_y = f"f_create_{n_ele - 1}_to_{n_ele}.npz"
+    hash_x = atomic_write_npz(stage_dir / name_x, data=result["X"])
+    hash_y = atomic_write_npz(stage_dir / name_y, data=result["Y"])
     meta = build_meta(
         module="sopt.precompute",
         level="L0",
@@ -496,7 +550,8 @@ def persist_l0(
         basis_id=f"fock14_n{n_ele}_lex_v1",
         index_definition="data(kappa,high,low)",
         logical_shape=[*result["X"].shape],
-        payload_files=[f"f_create_{n_ele}_to_{n_ele + 1}.npz", f"f_create_{n_ele - 1}_to_{n_ele}.npz"],
+        payload_files=[name_x, name_y],
+        extra={"content_hash": {name_x: hash_x, name_y: hash_y}},
     )
     atomic_write_json(stage_dir / "meta.json", meta)
 
@@ -509,8 +564,21 @@ def persist_l0_fopt(
     n_ele: int,
 ) -> None:
     persist_l0(stage_dir, cfg, result["f"], n_ele=n_ele)
-    atomic_write_npz(stage_dir / "p_create_5_to_6.npz", data=result["p"]["P_raw_5_6"])
-    atomic_write_npz(stage_dir / "p_create_4_to_5.npz", data=result["p"]["P_raw_4_5"])
+    hash_p56 = atomic_write_npz(stage_dir / "p_create_5_to_6.npz", data=result["p"]["P_raw_5_6"])
+    hash_p45 = atomic_write_npz(stage_dir / "p_create_4_to_5.npz", data=result["p"]["P_raw_4_5"])
+    # persist_l0 wrote meta.json with the f-file hashes; augment it in place with
+    # the ligand P-file hashes so try_load_l0_fopt can verify every payload.
+    meta = load_json_checked(stage_dir / "meta.json")
+    content_hash = dict(meta.get("content_hash", {}))
+    content_hash["p_create_5_to_6.npz"] = hash_p56
+    content_hash["p_create_4_to_5.npz"] = hash_p45
+    meta["content_hash"] = content_hash
+    payload_files = list(meta.get("payload_files", []))
+    for name in ("p_create_5_to_6.npz", "p_create_4_to_5.npz"):
+        if name not in payload_files:
+            payload_files.append(name)
+    meta["payload_files"] = payload_files
+    atomic_write_json(stage_dir / "meta.json", meta)
 
 
 def persist_ligand(
@@ -520,7 +588,7 @@ def persist_ligand(
     *,
     soc: bool,
 ) -> None:
-    atomic_write_npz(
+    content_hash = atomic_write_npz(
         stage_dir / "data.npz",
         V_fock=result["V_fock"],
         coef_Delta=result["coef_Delta"],
@@ -541,6 +609,7 @@ def persist_ligand(
         extra={
             "n_ele": int(result["n_ele"]),
             "soc": bool(soc),
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -571,7 +640,7 @@ def persist_l1_fopt(
                 "J0": main_subspace.get("J0"),
                 "n_j": main_subspace.get("n_j"),
             }
-    atomic_write_npz(
+    content_hash = atomic_write_npz(
         f_dir / "data.npz",
         F_n_np1=f_vertex["F_n_np1"],
         F_nm1_n=f_vertex["F_nm1_n"],
@@ -590,6 +659,7 @@ def persist_l1_fopt(
         extra={
             "fn_ground_subspace_id": subspace_id,
             "main_subspace_meta": subspace_meta,
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(f_dir / "meta.json", meta)
@@ -597,7 +667,7 @@ def persist_l1_fopt(
     for ligand, p_vertex in result["p"].items():
         for key, filename_key in (("P_5_6", "P_5_6"), ("P_4_5", "P_4_5")):
             stage_dir = p_dirs[ligand][filename_key]
-            atomic_write_npz(stage_dir / "data.npz", data=p_vertex[key])
+            p_content_hash = atomic_write_npz(stage_dir / "data.npz", data=p_vertex[key])
             p_meta = build_meta(
                 module="fopt.precompute",
                 level="L1",
@@ -609,6 +679,7 @@ def persist_l1_fopt(
                 index_definition="data(kappa,high,low)",
                 logical_shape=[*p_vertex[key].shape],
                 payload_files=["data.npz"],
+                extra={"content_hash": p_content_hash},
             )
             atomic_write_json(stage_dir / "meta.json", p_meta)
 
@@ -622,10 +693,12 @@ def persist_l2_fopt(
     r42: float,
     r62: float,
 ) -> None:
+    content_hash: dict[str, str] = {}
     for fs in (1, 2):
         for lig in (1, 2):
-            atomic_write_npz(
-                stage_dir / f"V_plus_f{fs}_lig{lig}.npz",
+            name = f"V_plus_f{fs}_lig{lig}.npz"
+            content_hash[name] = atomic_write_npz(
+                stage_dir / name,
                 fn_p6=result[(fs, lig, "fn_p6")]["V_plus"],
                 fn_p5=result[(fs, lig, "fn_p5")]["V_plus"],
                 fnm1_p6=result[(fs, lig, "fnm1_p6")]["V_plus"],
@@ -646,6 +719,7 @@ def persist_l2_fopt(
         index_definition="V_plus(f_out,p_out,f_in,p_in), with the f^n leg projected to k",
         logical_shape=[],
         payload_files=[f"V_plus_f{fs}_lig{lig}.npz" for fs in (1, 2) for lig in (1, 2)],
+        extra={"content_hash": content_hash},
     )
     atomic_write_json(stage_dir / "meta.json", meta)
 
@@ -666,7 +740,7 @@ def persist_l3_fopt(
     j_mu_processes = np.asarray(result["J_mu_processes"], dtype=float)
     residual = np.asarray(result["mapping_residual"], dtype=float)
     residual_processes = np.asarray(result["mapping_residual_processes"], dtype=float)
-    atomic_write_npz(
+    content_hash = atomic_write_npz(
         stage_dir / "data.npz",
         h_eff_4=h,
         h_eff_4_processes=h_processes,
@@ -703,6 +777,7 @@ def persist_l3_fopt(
         payload_files=["data.npz"],
         extra={
             "human_readable_files": ["exchange.txt"],
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -718,7 +793,7 @@ def persist_l1(
     r62: float,
     soc0: dict[str, Any],
 ) -> None:
-    atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
+    content_hash = atomic_write_npz(stage_dir / "data.npz", A=result["A"], B=result["B"])
     subspace_id = str(soc0.get("subspace_id", "soc_lowest_hunds_v1"))
     subspace_meta = dict(soc0.get("meta", {}))
     if subspace_id == "soc_lowest_hunds_v1":
@@ -750,6 +825,7 @@ def persist_l1(
             "fn_ground_subspace_id": subspace_id,
             "main_subspace_meta": subspace_meta,
             "soc0_meta": subspace_meta if subspace_id == "soc_lowest_hunds_v1" else {},
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -764,7 +840,7 @@ def persist_l2(
     r42: float,
     r62: float,
 ) -> None:
-    atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
+    content_hash = atomic_write_npz(stage_dir / "data.npz", M_A=result["M_A"], M_B=result["M_B"])
     meta = build_meta(
         module="sopt.contraction",
         level="L2",
@@ -785,6 +861,7 @@ def persist_l2(
             "axis_order_id": {"M_A": "uvab_v1", "M_B": "rsab_v1"},
             "n_j": int(result.get("n_j", 0)),
             "n_k": int(result.get("n_k", np.asarray(result["M_A"]).shape[2])),
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)
@@ -808,7 +885,7 @@ def persist_l3_sopt(
     if "J_mu" in result:
         payload["J_mu"] = result["J_mu"]
         payload["mapping_residual"] = np.asarray(result["mapping_residual"], dtype=float)
-    atomic_write_npz(stage_dir / "data.npz", **payload)
+    content_hash = atomic_write_npz(stage_dir / "data.npz", **payload)
     human_readable_files: list[str] = []
     if "J_mu" in result and "mapping_residual" in result:
         write_exchange_matrix_txt(
@@ -838,6 +915,7 @@ def persist_l3_sopt(
             "jmu_available": "J_mu" in result,
             "mapping_residual": result.get("mapping_residual"),
             "human_readable_files": human_readable_files,
+            "content_hash": content_hash,
         },
     )
     atomic_write_json(stage_dir / "meta.json", meta)

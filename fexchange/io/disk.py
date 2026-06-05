@@ -129,8 +129,8 @@ def _require_stage_token(field_name: str, value: str, stage: str) -> str:
 # Atomic write (05-00 §9)
 # ---------------------------------------------------------------------------
 
-def atomic_write_npz(path: Path, **arrays: NDArray) -> None:
-    """Atomically write arrays to .npz."""
+def atomic_write_npz(path: Path, **arrays: NDArray) -> str:
+    """Atomically write arrays to .npz and return content hash."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".npz.tmp")
     try:
@@ -145,6 +145,7 @@ def atomic_write_npz(path: Path, **arrays: NDArray) -> None:
             f"Atomic write failed: {path}",
             paths={"target": str(path)},
         )
+    return _file_hash(path)
 
 
 def atomic_write_json(path: Path, data: dict) -> None:
