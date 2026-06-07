@@ -8,7 +8,8 @@ Outputs (relative to repo root, default to `data/data-DFT/kramer/`, override via
 Convention (§7.2 of multi-system prompt v9+):
   |ψ_+⟩ = cos θ |−1/2⟩ + i sin θ |+5/2⟩
   |ψ_-⟩ = cos θ |+1/2⟩ + i sin θ |−5/2⟩  (T-conjugate)
-Basis order: [|+5/2⟩, |+3/2⟩, |+1/2⟩, |−1/2⟩, |−3/2⟩, |−5/2⟩] (descending M).
+Basis order: [|−5/2⟩, |−3/2⟩, |−1/2⟩, |+1/2⟩, |+3/2⟩, |+5/2⟩] (ascending M,
+matching fexchange core/space_j and pipeline._load_stevens).
 """
 from __future__ import annotations
 
@@ -90,40 +91,40 @@ def gen_ce_yboctl_baseline(out_dir: Path) -> None:
 def gen_theta_W(theta_deg: float) -> np.ndarray:
     """Construct W (6×2) for given θ per §7.2 convention.
 
-    Basis [|+5/2⟩, |+3/2⟩, |+1/2⟩, |−1/2⟩, |−3/2⟩, |−5/2⟩]:
-      W[:,0] = (i sin θ, 0, 0, cos θ, 0, 0)
-      W[:,1] = (0, 0, cos θ, 0, 0, i sin θ)
+    Basis (ascending M) [|−5/2⟩, |−3/2⟩, |−1/2⟩, |+1/2⟩, |+3/2⟩, |+5/2⟩]:
+      ψ_+ = cos θ |−1/2⟩ + i sin θ |+5/2⟩
+      ψ_- = cos θ |+1/2⟩ + i sin θ |−5/2⟩   (T-conjugate)
     """
     th = math.radians(theta_deg)
     c, s = math.cos(th), math.sin(th)
     W = np.zeros((N_J, 2), dtype=np.complex128)
-    W[0, 0] = 1j * s   # |+5/2⟩ component of ψ_+
-    W[3, 0] = c        # |−1/2⟩ component of ψ_+
-    W[2, 1] = c        # |+1/2⟩ component of ψ_-
-    W[5, 1] = 1j * s   # |−5/2⟩ component of ψ_-
+    W[2, 0] = c        # |−1/2⟩ component of ψ_+  (ascending index 2)
+    W[5, 0] = 1j * s   # |+5/2⟩ component of ψ_+  (ascending index 5)
+    W[3, 1] = c        # |+1/2⟩ component of ψ_-  (ascending index 3)
+    W[0, 1] = 1j * s   # |−5/2⟩ component of ψ_-  (ascending index 0)
     return W
 
 
 def _compute_g_tensor_from_W(W: np.ndarray, J_val: float = J) -> tuple[float, float, float]:
-    """g-tensor diagonal entries from W in |J,M⟩ basis (descending M).
+    """g-tensor diagonal entries from W in |J,M⟩ basis (ascending M).
 
     For pseudospin-1/2: g_α = 2 ⟨ψ_+| 2 g_J J_α |ψ_+⟩ for α = x,y,z (signed).
     g_J for J=5/2 multiplet — use Landé factor 6/7 for Ce ²F_{5/2}, 2/7 for Sm ⁶H_{5/2}.
     Here we just report g_J · (effective spin operator) projection without Landé multiplication,
     to be applied per RE downstream.
     """
-    # J_z, J_+, J_- in basis (descending M): diag J_z = [5/2, 3/2, 1/2, -1/2, -3/2, -5/2]
-    Mvals = np.array([2.5, 1.5, 0.5, -0.5, -1.5, -2.5])
+    # J_z, J_+, J_- in basis (ascending M): diag J_z = [-5/2, -3/2, -1/2, 1/2, 3/2, 5/2]
+    Mvals = np.array([-2.5, -1.5, -0.5, 0.5, 1.5, 2.5])
     Jz = np.diag(Mvals).astype(np.complex128)
     Jp = np.zeros((N_J, N_J), dtype=np.complex128)
     Jm = np.zeros((N_J, N_J), dtype=np.complex128)
     for i in range(N_J - 1):
-        # J_+ |M⟩ = sqrt(J(J+1)-M(M+1)) |M+1⟩
-        # In descending basis: M[i] decreases as i increases; J_+ raises M, so connects |M_lower⟩ → |M_upper⟩
-        M_from = Mvals[i + 1]
+        # J_+ |M⟩ = sqrt(J(J+1)-M(M+1)) |M+1⟩. Ascending: index i has M=Mvals[i],
+        # and |M+1⟩ is index i+1, so J_+ connects i → i+1.
+        M_from = Mvals[i]
         coeff = math.sqrt(J_val * (J_val + 1) - M_from * (M_from + 1))
-        Jp[i, i + 1] = coeff
-        Jm[i + 1, i] = coeff
+        Jp[i + 1, i] = coeff
+        Jm[i, i + 1] = coeff
     Jx = 0.5 * (Jp + Jm)
     Jy = -0.5j * (Jp - Jm)
     # g components: 2 |⟨ψ_+| J_α |ψ_+⟩|  (without Landé factor — caller multiplies)

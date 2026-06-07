@@ -5,9 +5,11 @@ This file defines the single-file runtime input contract.
 ## 1) Scope (MUST)
 MUST:
 - Runtime inputs must come from one TOML file.
-- Required top-level keys are `schema_version`, `standard_version`, `run_id`,
-  and `title`.
-- Required tables are `[paths]`, `[runtime]`, `[checks]`, and `[fsite]`.
+- Required top-level keys are `schema_version` and `standard_version`.
+- Optional top-level provenance keys are `run_id` and `title`.
+- Required tables are `[paths]`, `[runtime]`, and `[fsite]`.
+- `[checks]` is optional runtime metadata; implementations may ignore it unless
+  a later standard assigns a specific runtime gate to a field inside it.
 - `[model]` is optional and defaults to `scheme = "RS"`.
 - `model.scheme` must be `RS` or `ED`.
 - `[inputs]` is required for `end_level >= L2`.
@@ -15,6 +17,10 @@ MUST:
 - `[units]` is optional metadata only. Runtime numeric fields and hopping
   files are consumed as raw values with no internal unit conversion; users must
   keep all energy-like inputs in one consistent unit.
+- `[sweep]` is reserved for the `fexchange sweep` front-end
+  (`./standards/en/05-io/05-05-SWEEP_INPUT.md`). It is not a valid top-level
+  section for `fexchange run`; the sweep front-end strips it before validating
+  each materialized single-run input against this file.
 
 Validation:
 - Missing input file is `FXE-INPUT-001`.
@@ -29,12 +35,12 @@ MUST:
 - `runtime.run_name` is required when `end_level >= L1`, because `L1/F` and all
   downstream artifacts are run-scoped for every scheme and Kramers route (RS and
   ED, stevens and manual).
-- `runtime.kramer_name` is required for `end_level >= L2`, because L2 writes
-  Kramers-dependent projected factors. In `stevens` mode it labels the
-  projector input; in `manual` mode it labels the external Kramers basis.
 - `runtime.kramer_source` is optional and defaults to `stevens`.
   Accepted normalized values are `stevens` and `manual`; runtime loaders may
   accept legacy aliases `steven` and `mannual`.
+- `runtime.kramer_name` is no longer a runtime contract field. If a legacy input
+  carries it, implementations may keep it as inert provenance, but it must not
+  affect validation, artifact paths, keys, or computation.
 - Both branches terminate at `L3`. FOPT `L3` includes total/process raw
   `h_eff_4` outputs and total/process spin-1/2 exchange outputs. Runtime FOPT
   exchange output requires a two-dimensional projected local space.
@@ -45,7 +51,6 @@ Code form:
 branch = "fopt"
 end_level = "L3"
 run_name = "lab_A"
-kramer_name = "proj_a"
 kramer_source = "stevens"
 ```
 
@@ -124,22 +129,25 @@ lambda_p = 0.0
 ## 5) Inputs Table (MUST)
 MUST:
 - `[inputs].hopping_file` is required for `end_level >= L2`.
-- `[inputs].projector_file` is required for `end_level >= L2` when
-  `runtime.kramer_source = "stevens"`.
+- `[inputs].kramer_file` is the unified doublet input path.
+- `[inputs].kramer_file` is required for `end_level >= L2` when
+  `runtime.kramer_source = "stevens"`; in this mode it carries the projector
+  `W` from the SOC-lowest LSJM subspace into the target doublet/quasi-doublet.
 - `[inputs].kramer_file` is required for `end_level >= L1` when
-  `runtime.kramer_source = "manual"`.
+  `runtime.kramer_source = "manual"`; in this mode it carries the external
+  Kramers basis in Fock-determinant form.
 - `[inputs].hcef_file` is optional. When present with `model.scheme = "ED"`,
   it is used as a one-body CEF matrix in adjacent-sector IONED.
 - Runtime matrix text files use multi-block format with `[key]` headers.
 - SOPT hopping must contain block `[t_mu]` with shape `(14, 14)`.
 - FOPT hopping must contain blocks `[t_f1_lig1]`, `[t_f1_lig2]`,
   `[t_f2_lig1]`, `[t_f2_lig2]`, each shape `(14, 6)`.
-- Projector text input (`.txt` / `.dat`) must use one block per doublet
+- Stevens-mode `kramer_file` text input (`.txt` / `.dat`) must use one block per doublet
   state, named `[W_state_0]`, `[W_state_1]`, … `[W_state_{n_k-1}]`. Each
   block holds exactly `n_j` rows of `real imag` (one column of `W`).
   State indices must be contiguous starting at 0; columns are stacked in
   numeric order to form `W` with shape `(n_j, n_k)`.
-- Projector binary input (`.npy` / `.npz`) is a rank-2 array (key `W` for
+- Stevens-mode `kramer_file` binary input (`.npy` / `.npz`) is a rank-2 array (key `W` for
   `.npz`) with `shape[0] == n_j`.
 - Manual Kramers text input starts with `fn <n>` and then uses exactly two
   blocks, `[K_state_0]` and `[K_state_1]`. Each data row has exactly 16 fields:
@@ -155,24 +163,28 @@ Code form:
 ```toml
 [inputs]
 hopping_file = "data/hopping/wan_v1.txt"
-projector_file = "data/projector/kr_a.txt"
+kramer_file = "data/projector/kr_a.txt"      # stevens projector W
 hcef_file = "data/hcef/hcef_14x14.txt"
-kramer_file = "data/kramer/manual_kramer.txt"
+# or, in manual mode:
+# kramer_file = "data/kramer/manual_kramer.txt"
 ```
 
 ## 6) Paths Table (MUST)
 MUST:
 - `[paths].output_root` is required and anchors core artifacts and global index
   files.
-- `[paths].output_run` is optional. When omitted, it defaults to
-  `<output_root>/<runtime.run_name>`. When set, run-scoped artifacts
-  (`IONED`, `L1/F`, `L2`, `L3`, `source.txt`, `run.log`) are written there.
+- `[paths].output_run` is optional and is interpreted as the base directory for
+  run-scoped artifacts. When omitted, the base is `output_root`; when set, that
+  value replaces `output_root` as the base. The resolved run anchor is always
+  `<base>/<runtime.run_name>`.
+- Run-scoped artifacts (`IONED`, `L1/F`, `L2`, `L3`, `source.txt`, `run.log`)
+  are written under the resolved run anchor.
 
 Code form:
 ```toml
 [paths]
 output_root = "./outputs"
-output_run = "./outputs/custom_run_dir"
+output_run = "./outputs/custom_base"  # resolved run anchor adds runtime.run_name
 ```
 
 ## 7) ED Scheme Example (MUST)
@@ -209,7 +221,7 @@ scheme = "RS"
 
 [inputs]
 hopping_file = "data/hopping/fopt.txt"
-projector_file = "data/projector/W.txt"
+kramer_file = "data/projector/W.txt"
 
 [ligand.1]
 Delta = 4.0
@@ -223,13 +235,12 @@ lambda_p = 0.0
 
 [paths]
 output_root = "./outputs"
-# output_run = "./outputs/demo"  # optional; defaults to output_root/run_name
+# output_run = "./outputs/base"  # optional base; run_name is appended
 
 [runtime]
 branch = "fopt"
 end_level = "L3"
 run_name = "demo"
-kramer_name = "proj_a"
 
 [checks]
 strict_mode = true

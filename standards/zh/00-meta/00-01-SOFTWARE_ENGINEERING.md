@@ -51,7 +51,7 @@ fexchange/
   sopt/
     __init__.py
     precompute.py          # 04-01: L0 + L1
-    contraction.py         # 04-02: L2 + L3 + L4
+    contraction.py         # 04-02: L2 + L3
     spin12.py              # 04-03: 自旋-1/2 映射
   fopt/
     __init__.py
@@ -69,6 +69,10 @@ fexchange/
     resolve.py             # 依赖解析
     stages.py              # 阶段执行编排
     validation.py          # pipeline 级校验
+  sweep/
+    __init__.py            # parameter sweep public exports
+    expand.py              # 05-05: pure sweep-table expansion
+    runner.py              # 05-05: serial/MPI sweep orchestration
   utils/
     __init__.py
     numerics.py            # 06-00: 容差表、dtype 策略
@@ -88,6 +92,8 @@ MUST:
 - 3j/CG 符号：`sympy >= 1.12`（`sympy.physics.wigner`；唯一 3j/CG 实现）。
 - 测试：`pytest >= 7.0`。
 - 无其它硬性运行时依赖。
+- MPI sweep support 是可选依赖，仅当安装 optional `mpi` extra 时使用
+  `mpi4py >= 3.1`。
 
 Code form:
 ```toml
@@ -101,22 +107,29 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mpi    = ["mpi4py>=3.1"]
 dev    = ["pytest>=7.0"]
 ```
 
 Validation:
 - `pip install .` 仅需核心依赖即可成功。
-- 当前参考实现不假定并行运行时依赖。
+- `pip install .[mpi]` 支持在 MPI launcher 下运行 `fexchange sweep`。
 
 ## 4) 入口点与 CLI（MUST）
 MUST:
-- 提供一个 CLI 命令：`fexchange run <run_input.toml>`。
-- 该命令按 `./standards/en/05-io/05-04-RUN_INPUT.md` 读取 TOML 文件，
+- 提供两个 CLI 命令：
+  - `fexchange run <run_input.toml>`
+  - `fexchange sweep <base_run_input_with_sweep.toml>`
+- `fexchange run` 按 `./standards/en/05-io/05-04-RUN_INPUT.md` 读取一个 TOML 文件，
   执行指定级别窗口，按 `./standards/en/05-io/05-00-IO.md` 写入输出。
+- `fexchange sweep` 按 `./standards/en/05-io/05-05-SWEEP_INPUT.md` 读取一个带
+  `[sweep]` 表的 base TOML，在内存中 materialize 每个 case，并通过与
+  `fexchange run` 相同的 runtime pipeline 执行每个 case。
 
 Code form:
 ```text
 fexchange run ./run_input.toml
+fexchange sweep ./sweep_base.toml
 ```
 
 Validation:
@@ -142,7 +155,7 @@ tests/
   test_ground_doublets.py  # 03-02/03-03: Kramers / 非 Kramers 双重态
   test_sopt_l0.py          # 04-01: X/Y 符号一致性
   test_sopt_l1.py          # 04-01: A/B 顶点维度
-  test_sopt_l2_l4.py       # 04-02: 零跃迁检查、Heff 厄米性
+  test_sopt_l2_l3.py       # 04-02: 零跃迁检查、Heff 厄米性
   test_run_input.py        # 05-04: TOML 输入 schema 校验
   test_wannier90.py        # 05-03: 解析冒烟测试
 ```
@@ -183,7 +196,8 @@ Validation:
 MUST:
 - 使用 Python `logging` 模块输出运行时信息。
 - 每个阶段须发出结构化摘要，包含：
-  `level`、`key`、`elapsed_s`、`numerics_meta`，以及实际使用到的后端运行时元数据。
+  `level`、`key`、`elapsed_s`，以及实际使用到的数值/runtime metadata。
+  `numerics_meta` 是一个允许的容器名，不是强制字段名。
 - 随机种子（若有）须记录；优先使用无随机性的确定性算法。
 
 Code form:

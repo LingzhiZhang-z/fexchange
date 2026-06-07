@@ -300,14 +300,16 @@ W = evecs[:, :n_k]                        # (n_j, n_k)
 
 Validation:
 - $W^\dagger W = I_{n_k}$ within `eps_orth`.
-- In `manual`, `W = I_{n_k}` and no external `projector_file` is required.
+- In `manual`, `W = I_{n_k}` and no external stevens projector payload is
+  required; the manual doublet is supplied by `inputs.kramer_file` before L2.
 - For Kramers doublet: TR-pair and gauge checks from module 02-05.
 - `W.shape = (n_j, n_k)` where `n_j` matches L1 output $j$-axis dimension.
-- `kramer_name` must be recorded in metadata.
+- `inputs.kramer_file` must be recorded in metadata/provenance.
 
 ## 0.1) External Runtime Input Schema for $L2/L3$ (MUST)
 MUST:
-- Hopping (`t_mu`) and Kramer projector (`W`, `kramer_labels`) are external L2 runtime inputs.
+- Hopping (`t_mu`) and the unified `kramer_file` doublet/projector input are
+  external runtime inputs.
 - Global header gate from `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` is mandatory:
   `schema_version`, `standard_version`, `basis_id`, `orbital_order_id`, `unit`.
 - One run computes one bond only; no `mu` axis is allowed in input hopping payload.

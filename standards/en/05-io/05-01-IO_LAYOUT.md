@@ -31,7 +31,7 @@ Code form:
       P/n-4_to_5_{soc|nsoc}/
       P/n-5_to_6_{soc|nsoc}/
 
-  <output_run>/  # defaults to <output_root>/<run_name>
+  <output_run>/<run_name>/  # output_run is an optional base override
     source.txt
     IONED/
       n-{n-1}/states.npz
@@ -64,7 +64,7 @@ Code form:
 ## 4) Optional Snapshot Files (Audit-Only)
 You may store:
 - `hopping/{hopping_name}/input_hopping.npz`
-- `kramer/{kramer_name}/input_kramer.npz`
+- `kramer/input_kramer.npz`
 
 These are only for reproducibility/audit and consistency checks.
 They are not computational source inputs.
@@ -90,7 +90,7 @@ default_dtype_complex = complex128
 Recommended line fields for `./outputs/index.jsonl`:
 - `key,module,level,path,created_at`
 - `n,r42,r62,U,Jh,zeta`
-- `hopping_name,kramer_name`
+- `hopping_name,kramer_file`
 - `content_hash`
 
 ## 7) Conflict Handling

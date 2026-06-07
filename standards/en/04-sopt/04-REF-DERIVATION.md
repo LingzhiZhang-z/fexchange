@@ -73,7 +73,7 @@ hopping npz required keys:
   schema_version, standard_version, basis_id, orbital_order_id, unit
 
 kramer npz required keys:
-  W, kramer_labels, kramer_name, n_j,
+  W, kramer_labels, n_j,
   schema_version, standard_version, basis_id, orbital_order_id, unit
 
 labels npz/json required keys:

@@ -117,7 +117,7 @@ def _load_hcef_1b(cfg: dict[str, Any], *, n_orb: int) -> np.ndarray | None:
     return h
 
 
-def _load_manual_kramer(path: Path, *, n_ele: int, n_orb: int) -> dict[str, Any]:
+def _load_manual(path: Path, *, n_ele: int, n_orb: int) -> dict[str, Any]:
     if not path.exists():
         raise IOError_("FXE-IO-001", f"Required input file missing: {path}", paths={"path": str(path)})
     try:
@@ -274,7 +274,7 @@ def _load_manual_kramer(path: Path, *, n_ele: int, n_orb: int) -> dict[str, Any]
 
 def _select_main_subspace(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> dict[str, Any]:
     if _uses_manual_kramer(cfg):
-        return _load_manual_kramer(Path(str(cfg["inputs"]["kramer_file"])), n_ele=n_ele, n_orb=n_orb)
+        return _load_manual(Path(str(cfg["inputs"]["kramer_file"])), n_ele=n_ele, n_orb=n_orb)
     soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])
     soc0["subspace_id"] = "soc_lowest_hunds_v1"
     return soc0
@@ -506,7 +506,7 @@ def ensure_l2_sopt(
     if _uses_manual_kramer(cfg):
         W = np.eye(int(state["l1"]["n_j"]), dtype=np.complex128)
     else:
-        W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=state["l1"]["n_j"])
+        W = _load_stevens(Path(cfg["inputs"]["kramer_file"]), n_j=state["l1"]["n_j"])
     check_orthonormal(W, label="W_input", module="projection")
     t_mu = _load_hopping_sopt(Path(cfg["inputs"]["hopping_file"]), n_orb=n_orb)
     state["t_mu"] = t_mu
@@ -589,6 +589,8 @@ def ensure_ligand(cfg: dict[str, Any], state: dict[str, Any]) -> None:
                 "ligand",
                 ligand_soc=soc_token,
                 ligand_n=n_p,
+                run_name=str(cfg.get("runtime", {}).get("run_name", "")),
+                output_run=cfg["paths"]["output_run"],
             )
             loaded = try_load_ligand(stage_dir)
             if loaded is not None:
@@ -695,7 +697,7 @@ def ensure_l2_fopt(
     if _uses_manual_kramer(cfg):
         W = np.eye(int(n_j), dtype=np.complex128)
     else:
-        W = _load_projector(Path(cfg["inputs"]["projector_file"]), n_j=n_j)
+        W = _load_stevens(Path(cfg["inputs"]["kramer_file"]), n_j=n_j)
     check_orthonormal(W, label="W_input", module="projection")
     t = _load_hopping_fopt(Path(cfg["inputs"]["hopping_file"]), n_orb_f=n_orb, n_orb_p=6)
     state["t_per_pair"] = t
@@ -813,7 +815,7 @@ def _load_hopping_fopt(path: Path, *, n_orb_f: int, n_orb_p: int) -> dict[tuple[
     )
 
 
-def _load_projector(path: Path, *, n_j: int) -> np.ndarray:
+def _load_stevens(path: Path, *, n_j: int) -> np.ndarray:
     """Load projector W.
 
     Text format (.txt / .dat): one block per doublet state, named
@@ -890,6 +892,8 @@ def _ligand_soc_token(cfg: dict[str, Any], ligand: int) -> str:
 
 def _p_l1_dirs(cfg: dict[str, Any]) -> dict[int, dict[str, Path]]:
     output_root = cfg["paths"]["output_root"]
+    run_name = str(cfg.get("runtime", {}).get("run_name", ""))
+    output_run = cfg["paths"]["output_run"]
     result: dict[int, dict[str, Path]] = {}
     for ligand in (1, 2):
         soc_token = _ligand_soc_token(cfg, ligand)
@@ -898,11 +902,15 @@ def _p_l1_dirs(cfg: dict[str, Any]) -> dict[int, dict[str, Path]]:
                 output_root,
                 "L1_P",
                 p_transition=f"n-5_to_6_{soc_token}",
+                run_name=run_name,
+                output_run=output_run,
             ),
             "P_4_5": build_stage_path(
                 output_root,
                 "L1_P",
                 p_transition=f"n-4_to_5_{soc_token}",
+                run_name=run_name,
+                output_run=output_run,
             ),
         }
     return result

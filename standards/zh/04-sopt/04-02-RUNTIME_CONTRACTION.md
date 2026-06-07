@@ -1,10 +1,11 @@
 # 04-02-RUNTIME_CONTRACTION
 
-本文件定义 SOPT 运行时中的 $L2$、$L3$ 与 $L4$。
+本文件定义 SOPT 运行时中的 $L2$ 与 $L3$。
 磁盘 I/O 布局与格式由 `./standards/en/05-io/05-00-IO.md` 统一定义。
 写作形式遵循 `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`。
 本文件以串行实现为基准且与后端无关；若未来加入并行运行时，也必须保持本文件定义的张量契约不变。
-全局执行顺序由 `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md` 固定为 $L0 \to L1 \to L2 \to L3 \to L4$。
+全局 final-output 执行顺序由 `./standards/en/04-sopt/04-00-SOPT_FORMALISM.md`
+固定为 $L0 \to L1 \to L2 \to L3$。
 
 ## -1) 公式理解区（先读，非实现规范）
 本节只用于数学理解，不是实现契约。
@@ -153,41 +154,86 @@ $$
 该变换是严格等价变换（不引入近似）：只做求和顺序重排与因式分组。
 
 ## 0) 变量分类（子模块级，MUST）
-本文件覆盖 $L2/L3/L4$，采用三类变量语义：
+本文件覆盖 $L2/L3$，采用三类变量语义：
 - 输入变量：来自外部接口或上游层输出。
 - 中间变量：仅在当前层内部计算使用，不作为该层对外输出。
 - 输出变量：该层对下游层/调用者提供的接口变量。
 
 分层定义：
-- $L2$：输入 `{A, B, t_mu}`；中间 `{workspace}`；输出 `{M_A, M_B}`。
-- $L3$：输入 `{M_A, M_B, E_u}`；中间 `{E_uv, E_rs, workspace}`；输出 `{h_pre_j_mu}`。
-- $L4$：输入 `{h_pre_j_mu, W, labels_abcd, labels_order_id}`；中间 `{h_pre_mu}`；输出 `{h_mu_abcd, Heff_mu_abcd}`。
+- $L2$：输入 `{A, B, t_mu, W}`；中间 `{workspace}`；输出 projected basis 中的
+  `{M_A, M_B}`。
+- $L3$：输入 `{M_A, M_B, E_u, labels_abcd, labels_order_id}`；中间
+  `{E_uv, E_rs, h_mu_abcd}`；输出 `{h_mu_abcd, Heff_mu_abcd}`，并且当
+  projected local space 为 `2 x 2` 时，可选输出 `{J_mu, mapping_residual}`。
 
 ## 0.0.0) $E_u$ 中间态能量来源（MUST）
-`E_u` 是 $L3$ 的运行时派生输入，不是独立的持久化产物。
-它在 $L3$ 入口处，由相邻扇区（$f^{n-1}$、$f^{n+1}$）的 LSJM 能量系数数组
-（`E_terms.npz`）及 $F^0 = U$（来自 `[sopt].U`）构造。
-按项目约定，基态参考固定为 $E_0=0$，运行时不再施加额外平移：
+`E_u` 是运行时派生的 denominator input，不是独立的持久化工件。
+它在 $L3$ 入口处，由相邻扇区（$f^{n-1}$、$f^{n+1}$）的 LSJM energy coefficient
+arrays（`E_terms.npz`）和 branch-resolved `F^0/F^2/F^4/F^6/\zeta/offset`
+参数构造。
+Denominator reference 由 `[fsite].energy_reference` 控制。
 
 Math:
 $$
-E_u^{(m)}[u] = F^0\cdot\mathrm{coef\_F0}[u]
-+ F^2\cdot\mathrm{coef\_F2}[u]
-+ F^4\cdot\mathrm{coef\_F4}[u]
-+ F^6\cdot\mathrm{coef\_F6}[u]
-+ \zeta\cdot\mathrm{coef\_zeta}[u],
+E_u^{(m)}[u] = \mathrm{offset}^{(m)}
++ F^{0,(m)}\cdot\mathrm{coef\_F0}[u]
++ F^{2,(m)}\cdot\mathrm{coef\_F2}[u]
++ F^{4,(m)}\cdot\mathrm{coef\_F4}[u]
++ F^{6,(m)}\cdot\mathrm{coef\_F6}[u]
++ \zeta^{(m)}\cdot\mathrm{coef\_zeta}[u],
 \quad m\in\{n+1,\,n-1\}.
 $$
 
+主扇区 reference：
+
+Math:
+$$
+E_{\mathrm{ref}} =
+\begin{cases}
+0, & \texttt{energy\_reference = "zero"} \\
+\mathrm{offset}^{(n)}
++ F^{0,(n)}\cdot\mathrm{coef\_F0}[u_0]
++ F^{2,(n)}\cdot\mathrm{coef\_F2}[u_0]
++ F^{4,(n)}\cdot\mathrm{coef\_F4}[u_0]
++ F^{6,(n)}\cdot\mathrm{coef\_F6}[u_0],
+& \texttt{energy\_reference = "lsjm\_ground"}
+\end{cases}
+$$
+
+其中 `u0` 是从 LSJM 中选出的 `f^n` reference state。
+
 Code form:
 ```text
-E_u_np1 = E_lsjm_np1
-E_u_nm1 = E_lsjm_nm1
+E_u_np1 = E_lsjm_np1 - E_ref
+E_u_nm1 = E_lsjm_nm1 - E_ref
 ```
+
+如果 side branch 使用 target minimum gap 而不是 explicit `offset`，
+branch-local offset 在 denominator construction time 隐式解析：
+
+Math:
+$$
+E_u^{(n+1)}[u] =
+U^+ + E_{\mathrm{raw}}^{(n+1)}[u]
+- \min_v E_{\mathrm{raw}}^{(n+1)}[v].
+$$
+
+Math:
+$$
+E_u^{(n-1)}[u] =
+U^- + E_{\mathrm{raw}}^{(n-1)}[u]
+- \min_v E_{\mathrm{raw}}^{(n-1)}[v].
+$$
+
+这里 `Uplus` 只在 `[fsite_np1]` 有效，`Uminus` 只在 `[fsite_nm1]`
+有效，并且二者各自与对应的 explicit `offset` 互斥。`E_raw` 使用同一套
+branch-local `F^0/F^2/F^4/F^6/\zeta` 参数重构，不施加 branch offset。
 
 来源产物：
 - 扇区 $n-1$、$n+1$ 的 LSJM 输出中的 `E_terms.npz`（磁盘路径参见 `./standards/en/05-io/05-00-IO.md`）。
-- $F^0 = U$ 来自 `[sopt].U`，$F^2/F^4/F^6$ 来自 `[physics]`，$\zeta$ 来自 `[sopt].zeta`。
+- Branch defaults 来自主 `[fsite]`；branch overrides 来自 `[fsite_nm1]/[fsite_np1]`。
+- `offset` 是 branch-local，未设置 target minimum gap 时默认 `0`。
+- 当 `energy_reference = "lsjm_ground"` 时，`E_ref` 使用主扇区（`f^n`）LSJM 输出。
 - `E_u` 不作为独立的磁盘产物持久化，而是在 $L3$ 入口处即时计算。
 
 Validation:
@@ -244,13 +290,16 @@ W = evecs[:, :n_k]                        # (n_j, n_k)
 
 Validation:
 - $W^\dagger W = I_{n_k}$（在 `eps_orth` 以内）。
+- 在 `manual` 中，`W = I_{n_k}`，不需要外部 stevens projector payload；
+  manual doublet 已在 L2 前由 `inputs.kramer_file` 提供。
 - Kramers 双重态须通过模块 02-05 的 TR 配对与规范检查。
 - `W.shape = (n_j, n_k)` 其中 `n_j` 与 L1 输出的 $j$ 轴维度一致。
-- `kramer_name` 须记录在元数据中。
+- `inputs.kramer_file` 必须记录在 metadata/provenance 中。
 
-## 0.1) $L2/L3/L4$ 外部运行时输入 Schema（MUST）
+## 0.1) $L2/L3$ 外部运行时输入 Schema（MUST）
 MUST:
-- hopping（`t_mu`）与 Kramer 投影（`W`, `kramer_labels`）必须由外部运行时输入提供。
+- hopping（`t_mu`）与统一的 `kramer_file` doublet/projector 输入必须由外部
+  运行时输入提供。
 - 必须满足 `./standards/en/06-utils/06-00-RUNTIME_NUMERICS.md` 的全局头字段闸门：
   `schema_version`, `standard_version`, `basis_id`, `orbital_order_id`, `unit`。
 - 单次运行只计算一个 bond；输入 hopping 载荷中不允许 `mu` 轴。
@@ -283,12 +332,14 @@ require is_lex_sorted(labels_abcd, key=(a,b,c,d))
 Validation:
 - 任意 schema/绑定不一致都必须在收缩前硬失败。
 - `W` 正交检查：`W^dag W = I`，阈值为 `eps_orth`。
-- 在 $L4$ 开始前，必须执行 `W.shape[0] == h_pre_j_mu.shape[0]` 绑定检查。
+- 在 reference projection path 中，projection 前必须执行
+  `W.shape[0] == h_pre_j_mu.shape[0]` 绑定检查。
 - `labels_abcd` 的顺序/唯一性校验失败必须硬失败。
 
 ## 1) Level 2: 路线因子 $M_A/M_B$（Phi 形式，MUST）
 MUST:
-- 本层在 site 绑定与 hopping 收缩后构造路线因子。
+- 本层在 site 绑定、hopping 收缩以及用 $W$ 投影外部 $f^n$ LSJM legs 后构造
+  projected route factors。
 - 使用符号 $M_A$ 与 $M_B$（不使用 $\Phi$）。
 - 本层不显式构造/落盘 $K_{j_3 j_4,j_1 j_2}^{pq,p'q'}$。
 
@@ -378,21 +429,25 @@ L2 持久化输出定义为：
 
 Math:
 $$
-M_{A,uv;j_1j_2}^{(\mu)} \equiv M_{A,uv;j_1j_2}^{R,(\mu)},
+M_{A,uv;ab}^{(\mu)}
+\equiv
+\sum_{j_1j_2}M_{A,uv;j_1j_2}^{R,(\mu)}W_{j_1a}W_{j_2b},
 \qquad
-M_{B,rs;j_1j_2}^{(\mu)} \equiv M_{B,rs;j_1j_2}^{R,(\mu)}.
+M_{B,rs;ab}^{(\mu)}
+\equiv
+\sum_{j_1j_2}M_{B,rs;j_1j_2}^{R,(\mu)}W_{j_1a}W_{j_2b}.
 $$
 
-持久化轴顺序固定为：
-- `M_A` 轴顺序：`(u, v, j1, j2)`，`axis_order_id = "uvj1j2_v1"`。
-- `M_B` 轴顺序：`(r, s, j1, j2)`，`axis_order_id = "rsj1j2_v1"`。
+持久化轴顺序固定：
+- `M_A` 轴顺序：`(u, v, a, b)`，`axis_order_id = "uvab_v1"`。
+- `M_B` 轴顺序：`(r, s, a, b)`，`axis_order_id = "rsab_v1"`。
 
 Code form:
 ```text
 build M_A over (u,v) blocks for this bond
 build M_B over (r,s) blocks for this bond
-persist M_A as M_A[u,v,j1,j2]  # uvj1j2_v1
-persist M_B as M_B[r,s,j1,j2]  # rsj1j2_v1
+persist M_A as M_A[u,v,a,b]  # uvab_v1
+persist M_B as M_B[r,s,a,b]  # rsab_v1
 ```
 
 Validation:
@@ -400,10 +455,10 @@ Validation:
 - 实现必须按 `(u,v)` 与 `(r,s)` 分块流式计算；完整 dense 物化仅允许用于调试模式。
 - 持久化 metadata 必须记录 `M_A/M_B` 的 `axis_order_id`。
 
-## 2) Level 3: 带分母中间态求和得到 $h_{pre,j}^{(\mu)}$（MUST）
+## 2) Denominator Summation to $h_{\mu}^{(\mu)}$（MUST）
 MUST:
-- 本层执行带分母求和并输出 $h_{pre,j}^{(\mu)}$。
-- 本层与“先构造 $K$ 再和 $t$ 收缩”的旧路径代数等价。
+- 本计算将 projected L2 route factors 与 denominators 求和，并构造 $h_{\mu}^{(\mu)}$。
+- 本层与旧的“先构造 $K$ 再和 $t$ 收缩”路径代数等价。
 - 本层从 `E_u` 构造 $E_{uv}$ 与 $E_{rs}$；这两个量不在 $L2$ 定义。
 
 分母定义（在 $L3$）：
@@ -421,113 +476,92 @@ $$
 $$
 
 若实现使用复合索引 $m=(u,v)$、$n=(r,s)$，则
-$\Delta_{uv}$ 与 $\Delta_{rs}$ 可实现为分母向量 `denom_A[m]`、`denom_B[n]`。
+\Delta_{uv}$ 与 $\Delta_{rs}$ 可实现为分母向量 `denom_A[m]`、`denom_B[n]`。
 
 Math:
 $$
-h_{\mathrm{pre},j_3j_4,j_1j_2}^{(\mu)}
+h_{cd,ab}^{(\mu)}
 =
 \sum_{u,v}
 \frac{
-\left(M_{A,uv;j_3j_4}^{(\mu)}\right)^*
-M_{A,uv;j_1j_2}^{(\mu)}
+\left(M_{A,uv;cd}^{(\mu)}\right)^*
+M_{A,uv;ab}^{(\mu)}
 }{\Delta_{uv}}
 +
 \sum_{r,s}
 \frac{
-\left(M_{B,rs;j_3j_4}^{(\mu)}\right)^*
-M_{B,rs;j_1j_2}^{(\mu)}
+\left(M_{B,rs;cd}^{(\mu)}\right)^*
+M_{B,rs;ab}^{(\mu)}
 }{\Delta_{rs}}.
 $$
 
 Code form:
 ```text
-h_pre_j_mu = sum_uv( conj(M_A) * M_A / Delta_uv ) + sum_rs( conj(M_B) * M_B / Delta_rs )
+h_mu_abcd = sum_uv( conj(M_A) * M_A / Delta_uv ) + sum_rs( conj(M_B) * M_B / Delta_rs )
 ```
 
 等价矩阵收缩（推荐实现）：
 Code form:
 ```text
-# flatten (j3,j4)->a, (j1,j2)->b
-YA = M_A.reshape(Nuv, J2)
+# flatten (c,d)->row, (a,b)->col
+YA = M_A.reshape(Nuv, K2)
 w_uv = 1.0 / Delta_uv
 hA = YA.conj().T @ (w_uv[:,None] * YA)
 
-YB = M_B.reshape(Nrs, J2)
+YB = M_B.reshape(Nrs, K2)
 w_rs = 1.0 / Delta_rs
 hB = YB.conj().T @ (w_rs[:,None] * YB)
 
-h_pre_j_mu = (hA + hB).reshape(J,J,J,J)
+h_mu_abcd = (hA + hB).reshape(n_k,n_k,n_k,n_k)
 ```
 
 Validation:
 - 分母必须遵循 $\Delta=E_0-E_{\mathrm{intermediate}}$ 的定义。
-- 零 hopping 检查：若 `t=0`，则 `h_pre_j_mu=0`。
+- 零 hopping 检查：若 `t=0`，则 `h_mu_abcd=0`。
 
-Output（MUST）:
-- 本层必须独立输出 $h_{\mathrm{pre},j}^{(\mu)}$（`h_pre_j_mu`）。
+Output:
+- `h_pre_j_mu` 是 reference-only tensor，不是 standalone runtime artifact。
 
-## 3) Level 4: 固定 Kramers 基并生成最终输出（MUST）
+## 3) Level 3: 固定 Kramers 基并生成最终输出（MUST）
 MUST:
-- 必须在 $L3$ 之后做 $W$ 外层投影。
 - 最终对外接口必须使用 $a,b,c,d$ 语义。
-- $W$ 必须表示从 $f^n$ 的 SOC 最低能 LSJM 子空间到 CEF/Kramers 基的映射。
+- Runtime $L3$ 不得消费或重新加载 $W$；projector 已经在 $L2$ 应用。
 
 Math:
 $$
-h_{\mathrm{pre},cd,ab}^{(\mu)}
-=
-\sum_{j_3,j_4,j_1,j_2}
-(W_{j_3 c})^*(W_{j_4 d})^*
-h_{\mathrm{pre},j_3j_4,j_1j_2}^{(\mu)}
-W_{j_1 a}W_{j_2 b}.
-$$
-
-Math:
-$$
-H_{\mathrm{eff},cd,ab}^{(\mu)} = h_{\mathrm{pre},cd,ab}^{(\mu)}.
+H_{\mathrm{eff},cd,ab}^{(\mu)} = h_{cd,ab}^{(\mu)}.
 $$
 
 Code form:
 ```text
-h_pre_mu = project_with_W(h_pre_j_mu, W)
-h_mu_abcd = h_pre_mu
 Heff_mu_abcd = h_mu_abcd
 ```
 
 运行时路径（MUST）：
-- 规范的运行时 $L3 \to L4$ 路径是**融合**实现（`build_L4_fast`）：直接从
-  `{M_A, M_B, E_u, W}` 计算 `outputs_L4`——先用 `W` 投影每个 route factor 的
-  外部 LSJM legs，再在投影后的（$n_k$）空间执行相同的带分母 Gram 收缩。
-  该路径上运行时 MUST NOT 物化 `h_pre_j_mu`。
-- 上方 Code form（物化的 `project_with_W(h_pre_j_mu, W)`，即
-  `build_L4(build_L3(...), W)`）是**参考实现（reference）**。它不在运行时
-  路径上，作用有二：(a) 融合路径的代数等价 oracle；(b) 显式
-  `L3`→`L4` 检视。
-- 融合路径 MUST 与参考路径代数相等，并在容差内数值校验（测试套件以
-  `1e-12` 钉死）。等式成立的原因：$W$ 只作用于外部 $j$-legs，分母仅是
-  $(u,v)/(r,s)$ 的标量权重，故投影与中间态求和可交换。
-- 单独执行 `L3` 时，仍 MUST 按 §2 输出 `h_pre_j_mu`；正是该义务使 SOPT
-  保留两条路径。
+- 规范 runtime path 在 L2 中计算 projected `M_A/M_B`，随后直接从
+  `{M_A, M_B, E_u}` 计算 `outputs_L3`。Runtime MUST NOT 物化 `h_pre_j_mu`。
+- 物化的 `build_L4_legacy(build_L3_legacy(...), W)` 路径是 reference implementation。
+  它不在 runtime path 上，只作为 algebraic-equivalence oracle。
+- fused path MUST 与 reference path 代数相等，并在容差内数值校验（测试套件以
+  `1e-12` 钉死）。等式成立的原因：$W$ 只作用于外部 $j$-legs，分母只是
+  $(u,v)/(r,s)$ 权重，因此 projection 与 intermediate-state sum 可交换。
 
 适用性（informative）：
-- 当 $n_k \ll n_j$ 时（生产场景：最低 Kramers 双重态 $n_k=2$ vs
-  $n_j=2J+1$），融合路径在内存/计算上大幅节省，因为 $n_j^4$ 的
-  `h_pre_j_mu` 张量根本不被构造。当 $n_k \approx n_j$（$W$ 近方阵）时
-  基本持平或略慢——此时投影被摊到每个中间态对上，而非在聚合张量上做
-  一次。两种情形下正确性均不受影响。
-- 与 FOPT 的对比：FOPT 在 $L3$ 内部消化 $W$、没有独立的 $L4$（单一融合
-  路径、无物化参考实现），因为 FOPT 没有 standalone-$L3$ 的
-  `h_pre_j_mu` 义务。SOPT 保留参考路径，正是为满足该义务并锚定等价测试。
+- 当 $n_k \ll n_j$ 时（生产场景：最低 Kramers doublet $n_k=2$ vs
+  $n_j=2J+1$），fused path 能显著节省内存/计算，因为 $n_j^4$ 的
+  `h_pre_j_mu` tensor 不会被构造。当 $n_k \approx n_j$（$W$ 近方阵）时，
+  它大体持平或略慢，因为 projection 分摊到每个 intermediate-state pair，
+  而不是在聚合 tensor 上做一次。两种情况下正确性都不受影响。
+- 与 FOPT 对比：SOPT 和 FOPT 都在 $L2$ 内消费 $W$，并保持 L3 projector-free。
 
 Validation:
 - Hermitian 检查：$\mathrm{Heff}^{(\mu)}=\left(\mathrm{Heff}^{(\mu)}\right)^\dagger$（容差内）。
-- $W$ 投影维度必须与 $h_{\mathrm{pre},j}^{(\mu)}$ 匹配。
+- Projected L2 trailing dimensions 必须匹配 `(n_k, n_k)`。
 
 ## 4) 并行执行与 Root 写入策略（MUST）
 MUST:
 - MPI/并行布局属于运行环境，不属于输入文件内容。
-- 工作 rank 可以计算 `L2/L3/L4` 张量的互斥分片。
+- 工作 rank 可以计算 `L2/L3` 张量的互斥分片。
 - 落盘前必须先将分片 gather/reduce 到 root rank。
 - 由 root rank 组装完整张量后写入 `data.npz` 与 `meta.json`。
 - 非 root rank 禁止写持久化阶段工件。
@@ -551,8 +585,7 @@ Validation:
 ## 5) 运行时 I/O（汇总）
 Code form:
 ```text
-inputs_L2_L4   = {A, B, E_u, t_mu, W, labels_abcd, labels_order_id}
+inputs_L2_L3   = {A, B, E_u, t_mu, W, labels_abcd, labels_order_id}
 outputs_L2     = {M_A, M_B}
-outputs_L3     = {h_pre_j_mu}
-outputs_L4     = {h_mu_abcd, Heff_mu_abcd}
+outputs_L3     = {h_mu_abcd, Heff_mu_abcd}
 ```

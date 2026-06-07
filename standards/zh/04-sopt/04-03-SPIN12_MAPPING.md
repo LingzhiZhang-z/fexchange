@@ -6,8 +6,10 @@
 写作形式遵循 `./standards/en/00-meta/00-00-SPEC_WRITING_CONVENTION.md`。
 
 ## 0) 适用范围（MUST）
-- 输入来自 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md` 的 $L4$ 输出。
-- 本模块是后处理映射，不改变 `L0..L4` 的定义。
+- 输入来自 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md` 的 SOPT final-$L3$
+  输出，或来自 `./standards/en/04-fopt/04-00-FOPT_FORMALISM.md` 的 FOPT `L3`
+  total/process projected `h_eff_4` 输出。
+- 本模块是后处理映射，不改变 `L0..L3`。
 - 仅在每个 site 的低能空间为二维（Kramers 赝自旋-$\tfrac{1}{2}$）时适用。
 
 ## 1) 输入契约（MUST）
@@ -95,35 +97,11 @@ $$
 $J_x\equiv J_{xx}$，$J_y\equiv J_{yy}$，$J_z\equiv J_{zz}$。
 对角元保持原值，不做额外重映射。
 
-### 3.2 派生分解（MUST，由 $J$ 计算）
-除原始 $J$ 外，04-03 模块必须同时输出以下由原始 $J$ 计算得到的派生量：
-- 各向同性项：
-  $J_{\mathrm{iso}}=\frac{1}{3}(J_x+J_y+J_z)$，
-- 默认键向 Kitaev 参数：
-  默认按 $z$-bond，定义
-  $K^{(z\text{-bond})}=J_z-J_{\mathrm{iso}}$，
-- DM 向量：
-  $D_x=\frac{1}{2}(J_{yz}-J_{zy})$，
-  $D_y=\frac{1}{2}(J_{zx}-J_{xz})$，
-  $D_z=\frac{1}{2}(J_{xy}-J_{yx})$，
-- 对称各向异性：
-  $\Gamma=\frac{1}{2}(J+J^\mathsf{T})-J_{\mathrm{diag}}$，其中
-  $J_{\mathrm{diag}}=\mathrm{diag}(J_x,J_y,J_z)$。
-
-说明：
-- 本模块中的 `K_mu` 表示 Kitaev 型交换参数，不是 $L2$ 的核张量 `K`。
-
-### 3.3 非交换项（MUST 定义，模型拟合可选）
-恒等项和单站点项不属于交换主模型
-$\sum_{\alpha\beta}J_{\alpha\beta}S_i^\alpha S_j^\beta$。
-其定义为
-
-Math:
-$$
-\mathrm{const}^{(\mu)} = C_{00}^{(\mu)},\quad
-h_{i,\alpha}^{(\mu)} = 2C_{\alpha 0}^{(\mu)},\quad
-h_{j,\alpha}^{(\mu)} = 2C_{0\alpha}^{(\mu)}.
-$$
+### 3.2 派生分解（当前 Runtime 范围外）
+当前 runtime 只导出原始 exchange matrix $J_{\alpha\beta}^{(\mu)}$ 和第 5 节的
+mapping residual。
+任何进一步分解（`J_iso`, `K`, `D`, `Gamma`, local fields, constants）均不属于
+当前 runtime output contract。
 
 ## 4) 规范/基约定（MUST）
 - 耦合参数依赖局域 Kramers 规范选择。
@@ -133,7 +111,7 @@ $$
 ## 5) 校验（MUST）
 对每个 $\mu$：
 - 输入 $\mathrm{Heff}^{(\mu)}$ 必须满足厄米性。
-- 由输出 $(J,J_{\mathrm{iso}},K,\mathbf D,\Gamma,\mathrm{const},\mathbf h_i,\mathbf h_j)$ 重构
+- 由导出的 $J$ 重构
   $\widetilde H^{(\mu)}$，并检查
 
 Math:
@@ -145,16 +123,20 @@ r_\mu
 }{
 \left\|\mathrm{Heff}^{(\mu)}\right\|_F
 }
-\le \varepsilon_{\mathrm{map}}.
 $$
 
+- 标量常数项 $C_{00}^{(\mu)} I\otimes I$ 不导出，只可保留用于 residual check。
+- Local-field terms $C_{0\alpha}^{(\mu)}$、$C_{\alpha0}^{(\mu)}$ 和其他
+  non-exchange leakage 不导出为 exchange。它们必须通过 failed
+  `mapping_residual` check 保持可见；实现不得把它们折进
+  $J_{\alpha\beta}^{(\mu)}$。
+- 要求 `mapping_residual <= eps_map`。这表示 projected Hamiltonian 除 scalar
+  shift 外是 exchange-only。
 - 导出实耦合中的虚部泄漏必须低于容差。
-- 若导出默认 $z$-bond 的 `K`，必须检查
-  $K = J_z - J_{\mathrm{iso}}$。
 
 ## 6) 运行时 I/O（汇总）
 Code form:
 ```text
 inputs_33  = {Heff_mu_abcd, labels_abcd, kramer_basis_id}
-outputs_33 = {J_mu[3,3], J_iso_mu, K_mu, D_mu[3], Gamma_mu[3,3], const_mu, h_i_mu[3], h_j_mu[3], residual_mu}
+outputs_33 = {J_mu[3,3], mapping_residual}
 ```

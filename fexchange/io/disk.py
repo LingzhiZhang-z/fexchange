@@ -80,18 +80,7 @@ def build_stage_path(
         return root / "core" / "L0"
     elif stage in ("LMSM", "LSJM"):
         return root / "core" / stage / core_dir_token(n, r42, r62, scheme)
-    elif stage == "ligand":
-        soc_token = _require_stage_token("ligand_soc", ligand_soc, stage)
-        if ligand_n <= 0:
-            raise IOError_(
-                "FXE-IO-001",
-                "Missing required path token ligand_n for stage ligand",
-                actual={"ligand_n": ligand_n},
-            )
-        return root / "core" / "ligand" / soc_token / f"n-{ligand_n}"
-    elif stage == "L1_P":
-        return root / "core" / "L1" / "P" / _require_stage_token("p_transition", p_transition, stage)
-    elif stage in ("IONED", "L1_F", "L1", "L2", "L3", "spin12"):
+    elif stage in ("IONED", "L1_F", "L1", "L2", "L3", "spin12", "ligand", "L1_P"):
         run_token = _require_stage_token("run_name", run_name, stage)
         run_root = (
             Path(output_run.strip())
@@ -108,6 +97,17 @@ def build_stage_path(
         return run_root / "IONED" / f"n-{n}"
     elif stage in ("L1_F", "L1"):
         return run_root / "L1" / "F"
+    elif stage == "L1_P":
+        return run_root / "L1" / "P" / _require_stage_token("p_transition", p_transition, stage)
+    elif stage == "ligand":
+        soc_token = _require_stage_token("ligand_soc", ligand_soc, stage)
+        if ligand_n <= 0:
+            raise IOError_(
+                "FXE-IO-001",
+                "Missing required path token ligand_n for stage ligand",
+                actual={"ligand_n": ligand_n},
+            )
+        return run_root / "ligand" / soc_token / f"n-{ligand_n}"
     elif stage == "L2":
         return run_root / "L2"
     elif stage == "L3":
@@ -181,10 +181,23 @@ def load_npz_checked(
     required_keys: list[str],
     *,
     expected_hash: str | None = None,
+    require_hash: bool = False,
 ) -> dict[str, NDArray]:
-    """Load NPZ and enforce required-key contract."""
+    """Load NPZ and enforce required-key contract.
+
+    With ``require_hash=True`` a missing ``expected_hash`` is itself an error: the
+    meta does not vouch for this payload (e.g. a crash between writing the npz and
+    its meta), so a cache loader must recompute rather than load it with the
+    integrity check silently skipped. Raw, non-cache loads leave it ``False``.
+    """
     if not path.exists():
         raise IOError_("FXE-IO-001", f"Required artifact missing: {path}", paths={"path": str(path)})
+    if require_hash and expected_hash is None:
+        raise IOError_(
+            "FXE-IO-002",
+            f"cache artifact has no recorded content_hash; refusing to load unverified: {path}",
+            paths={"path": str(path)},
+        )
     if expected_hash is not None:
         actual_hash = _file_hash(path)
         if actual_hash != expected_hash:

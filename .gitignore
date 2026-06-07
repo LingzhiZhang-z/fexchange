@@ -12,6 +12,7 @@ CLAUDE.md
 data/
 data_test/
 tmp/
+test/
 tests/
 fexchange/tools/tests
 .venv

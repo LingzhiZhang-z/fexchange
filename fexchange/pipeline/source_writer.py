@@ -70,7 +70,6 @@ def build_resolved_inputs_summary(
         "energy_reference": fsite.get("energy_reference", "lsjm_ground"),
         "kramer_source": runtime.get("kramer_source", "stevens"),
         "hopping_file": inputs.get("hopping_file", ""),
-        "projector_file": inputs.get("projector_file", ""),
         "kramer_file": inputs.get("kramer_file", ""),
         "hcef_file": inputs.get("hcef_file", ""),
     }

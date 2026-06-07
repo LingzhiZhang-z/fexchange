@@ -88,6 +88,7 @@ def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, A
             stage_dir / f"{level}.npz",
             ["V_fock", "coef_F0", "coef_F2", "coef_F4", "coef_F6"],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         result = {
             "V_fock": np.asarray(payload["V_fock"], dtype=np.complex128),
@@ -131,6 +132,7 @@ def try_load_ion_ed(stage_dir: Path, *, expected_key: str | None = None) -> dict
             stage_dir / "states.npz",
             ["V_fock_ed", "energies"],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         V = np.asarray(payload["V_fock_ed"], dtype=np.complex128)
         result: dict[str, Any] = {
@@ -164,12 +166,10 @@ def try_load_l0(stage_dir: Path, *, n_ele: int) -> dict[str, Any] | None:
             hashes = {}
         name_x = f"f_create_{n_ele}_to_{n_ele + 1}.npz"
         name_y = f"f_create_{n_ele - 1}_to_{n_ele}.npz"
-        x = load_npz_checked(
-            stage_dir / name_x, ["data"], expected_hash=hashes.get(name_x)
-        )["data"]
-        y = load_npz_checked(
-            stage_dir / name_y, ["data"], expected_hash=hashes.get(name_y)
-        )["data"]
+        # require_hash=True: a missing content_hash (e.g. a crash between writing the
+        # npz and the merged meta) forces a recompute, not an unverified load.
+        x = load_npz_checked(stage_dir / name_x, ["data"], expected_hash=hashes.get(name_x), require_hash=True)["data"]
+        y = load_npz_checked(stage_dir / name_y, ["data"], expected_hash=hashes.get(name_y), require_hash=True)["data"]
         return {
             "X": np.asarray(x, dtype=np.complex128),
             "Y": np.asarray(y, dtype=np.complex128),
@@ -187,7 +187,7 @@ def try_load_l1(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("L1 key mismatch")
-        d = load_npz_checked(stage_dir / "data.npz", ["A", "B"], expected_hash=meta.get("content_hash"))
+        d = load_npz_checked(stage_dir / "data.npz", ["A", "B"], expected_hash=meta.get("content_hash"), require_hash=True)
         A = np.asarray(d["A"], dtype=np.complex128)
         B = np.asarray(d["B"], dtype=np.complex128)
         return {
@@ -209,7 +209,7 @@ def try_load_l2(stage_dir: Path, *, expected_key: str | None = None) -> dict[str
         validate_meta(meta)
         if expected_key is not None and meta.get("key") != expected_key:
             raise ValueError("L2 key mismatch")
-        d = load_npz_checked(stage_dir / "data.npz", ["M_A", "M_B"], expected_hash=meta.get("content_hash"))
+        d = load_npz_checked(stage_dir / "data.npz", ["M_A", "M_B"], expected_hash=meta.get("content_hash"), require_hash=True)
         M_A = np.asarray(d["M_A"], dtype=np.complex128)
         M_B = np.asarray(d["M_B"], dtype=np.complex128)
         return {
@@ -235,6 +235,7 @@ def try_load_l3_sopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
             stage_dir / "data.npz",
             ["h_mu_abcd", "Heff_mu_abcd"],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         h = np.asarray(d["h_mu_abcd"], dtype=np.complex128)
         heff = np.asarray(d["Heff_mu_abcd"], dtype=np.complex128)
@@ -258,15 +259,12 @@ def try_load_l0_fopt(stage_dir: Path, *, n_ele: int) -> dict[str, Any] | None:
         hashes = meta.get("content_hash", {})
         if not isinstance(hashes, dict):
             hashes = {}
+        # require_hash=True: a p-file with no recorded hash forces a recompute.
         p56 = load_npz_checked(
-            stage_dir / "p_create_5_to_6.npz",
-            ["data"],
-            expected_hash=hashes.get("p_create_5_to_6.npz"),
+            stage_dir / "p_create_5_to_6.npz", ["data"], expected_hash=hashes.get("p_create_5_to_6.npz"), require_hash=True
         )["data"]
         p45 = load_npz_checked(
-            stage_dir / "p_create_4_to_5.npz",
-            ["data"],
-            expected_hash=hashes.get("p_create_4_to_5.npz"),
+            stage_dir / "p_create_4_to_5.npz", ["data"], expected_hash=hashes.get("p_create_4_to_5.npz"), require_hash=True
         )["data"]
         return {
             "f": f,
@@ -299,6 +297,7 @@ def try_load_l1_fopt(
             f_dir / "data.npz",
             ["F_n_np1", "F_nm1_n"],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         f_vertex = {
             "F_n_np1": np.asarray(f_payload["F_n_np1"], dtype=np.complex128),
@@ -310,10 +309,10 @@ def try_load_l1_fopt(
             p56_meta = load_json_checked(dirs["P_5_6"] / "meta.json")
             p45_meta = load_json_checked(dirs["P_4_5"] / "meta.json")
             p56 = load_npz_checked(
-                dirs["P_5_6"] / "data.npz", ["data"], expected_hash=p56_meta.get("content_hash")
+                dirs["P_5_6"] / "data.npz", ["data"], expected_hash=p56_meta.get("content_hash"), require_hash=True
             )["data"]
             p45 = load_npz_checked(
-                dirs["P_4_5"] / "data.npz", ["data"], expected_hash=p45_meta.get("content_hash")
+                dirs["P_4_5"] / "data.npz", ["data"], expected_hash=p45_meta.get("content_hash"), require_hash=True
             )["data"]
             p_vertices[ligand] = {
                 "P_5_6": np.asarray(p56, dtype=np.complex128),
@@ -334,6 +333,7 @@ def try_load_ligand(stage_dir: Path) -> dict[str, Any] | None:
             stage_dir / "data.npz",
             ["V_fock", "coef_Delta", "coef_U_p", "coef_lambda_p"],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         return {
             "V_fock": np.asarray(d["V_fock"], dtype=np.complex128),
@@ -367,6 +367,7 @@ def try_load_l2_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
                     stage_dir / name,
                     ["fn_p6", "fn_p5", "fnm1_p6"],
                     expected_hash=hashes.get(name),
+                    require_hash=True,
                 )
                 for sector in ("fn_p6", "fn_p5", "fnm1_p6"):
                     arr = np.asarray(d[sector], dtype=np.complex128)
@@ -402,6 +403,7 @@ def try_load_l3_fopt(stage_dir: Path, *, expected_key: str | None = None) -> dic
                 "n_k",
             ],
             expected_hash=meta.get("content_hash"),
+            require_hash=True,
         )
         h = np.asarray(d["h_eff_4"], dtype=np.complex128)
         return {
@@ -535,13 +537,33 @@ def persist_l0(
     result: dict[str, Any],
     *,
     n_ele: int,
+    module: str = "sopt.precompute",
+    extra_hashes: dict[str, str] | None = None,
+    extra_payload_files: tuple[str, ...] = (),
 ) -> None:
     name_x = f"f_create_{n_ele}_to_{n_ele + 1}.npz"
     name_y = f"f_create_{n_ele - 1}_to_{n_ele}.npz"
     hash_x = atomic_write_npz(stage_dir / name_x, data=result["X"])
     hash_y = atomic_write_npz(stage_dir / name_y, data=result["Y"])
+    # L0 is a shared anchor (SOPT and FOPT both write core/L0). Merge with any
+    # existing content_hash so rewriting the f-files never drops another writer's
+    # payload hashes -- e.g. a SOPT persist must not erase FOPT's p_create_*.npz
+    # hashes, which would make try_load_l0_fopt verify those p-files with
+    # expected_hash=None (integrity check silently skipped).
+    meta_path = stage_dir / "meta.json"
+    content_hash: dict[str, str] = {}
+    if meta_path.exists():
+        try:
+            prior = load_json_checked(meta_path).get("content_hash", {})
+            if isinstance(prior, dict):
+                content_hash.update(prior)
+        except Exception:
+            pass
+    content_hash.update({name_x: hash_x, name_y: hash_y})
+    if extra_hashes:
+        content_hash.update(extra_hashes)
     meta = build_meta(
-        module="sopt.precompute",
+        module=module,
         level="L0",
         key=level_key("L0", n_ele=n_ele, r42=0.0, r62=0.0, cfg=cfg),
         inputs_summary={"n": n_ele},
@@ -550,10 +572,10 @@ def persist_l0(
         basis_id=f"fock14_n{n_ele}_lex_v1",
         index_definition="data(kappa,high,low)",
         logical_shape=[*result["X"].shape],
-        payload_files=[name_x, name_y],
-        extra={"content_hash": {name_x: hash_x, name_y: hash_y}},
+        payload_files=[name_x, name_y, *extra_payload_files],
+        extra={"content_hash": content_hash},
     )
-    atomic_write_json(stage_dir / "meta.json", meta)
+    atomic_write_json(meta_path, meta)
 
 
 def persist_l0_fopt(
@@ -563,22 +585,24 @@ def persist_l0_fopt(
     *,
     n_ele: int,
 ) -> None:
-    persist_l0(stage_dir, cfg, result["f"], n_ele=n_ele)
+    # Write the p-files first, then let persist_l0 write ALL four payload hashes in
+    # a single meta.json. One-shot (vs the old write-then-augment) means there is no
+    # crash window where meta lists only the f-hashes and the p-files would later
+    # load with expected_hash=None. module is tagged fopt.precompute here.
     hash_p56 = atomic_write_npz(stage_dir / "p_create_5_to_6.npz", data=result["p"]["P_raw_5_6"])
     hash_p45 = atomic_write_npz(stage_dir / "p_create_4_to_5.npz", data=result["p"]["P_raw_4_5"])
-    # persist_l0 wrote meta.json with the f-file hashes; augment it in place with
-    # the ligand P-file hashes so try_load_l0_fopt can verify every payload.
-    meta = load_json_checked(stage_dir / "meta.json")
-    content_hash = dict(meta.get("content_hash", {}))
-    content_hash["p_create_5_to_6.npz"] = hash_p56
-    content_hash["p_create_4_to_5.npz"] = hash_p45
-    meta["content_hash"] = content_hash
-    payload_files = list(meta.get("payload_files", []))
-    for name in ("p_create_5_to_6.npz", "p_create_4_to_5.npz"):
-        if name not in payload_files:
-            payload_files.append(name)
-    meta["payload_files"] = payload_files
-    atomic_write_json(stage_dir / "meta.json", meta)
+    persist_l0(
+        stage_dir,
+        cfg,
+        result["f"],
+        n_ele=n_ele,
+        module="fopt.precompute",
+        extra_hashes={
+            "p_create_5_to_6.npz": hash_p56,
+            "p_create_4_to_5.npz": hash_p45,
+        },
+        extra_payload_files=("p_create_5_to_6.npz", "p_create_4_to_5.npz"),
+    )
 
 
 def persist_ligand(

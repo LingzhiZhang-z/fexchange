@@ -72,6 +72,10 @@ fexchange/
     resolve.py              # dependency resolution
     stages.py               # stage execution orchestration
     validation.py           # pipeline-level validation
+  sweep/
+    __init__.py             # parameter sweep public exports
+    expand.py               # 05-05: pure sweep-table expansion
+    runner.py               # 05-05: serial/MPI sweep orchestration
   utils/
     __init__.py
     numerics.py             # 06-00: tolerance table, dtype policy
@@ -91,6 +95,8 @@ MUST:
 - 3j/CG symbols: `sympy >= 1.12` (for `sympy.physics.wigner`; sole 3j/CG implementation).
 - Testing: `pytest >= 7.0`.
 - No other hard runtime dependencies.
+- MPI sweep support is optional and uses `mpi4py >= 3.1` only when the
+  optional `mpi` extra is installed.
 
 Code form:
 ```toml
@@ -104,22 +110,30 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mpi    = ["mpi4py>=3.1"]
 dev    = ["pytest>=7.0"]
 ```
 
 Validation:
 - `pip install .` must succeed with core dependencies only.
-- No parallel runtime dependency is assumed by the current reference implementation.
+- `pip install .[mpi]` enables `fexchange sweep` under an MPI launcher.
 
 ## 4) Entry Point and CLI (MUST)
 MUST:
-- Provide one CLI command: `fexchange run <run_input.toml>`.
-- This command reads the TOML file per `./standards/en/05-io/05-04-RUN_INPUT.md`,
-  executes the specified level window, and writes outputs per `./standards/en/05-io/05-00-IO.md`.
+- Provide two CLI commands:
+  - `fexchange run <run_input.toml>`
+  - `fexchange sweep <base_run_input_with_sweep.toml>`
+- `fexchange run` reads one TOML file per
+  `./standards/en/05-io/05-04-RUN_INPUT.md`, executes the specified level window,
+  and writes outputs per `./standards/en/05-io/05-00-IO.md`.
+- `fexchange sweep` reads one base TOML file with a `[sweep]` table per
+  `./standards/en/05-io/05-05-SWEEP_INPUT.md`, materializes each case in memory,
+  and executes each case through the same runtime pipeline as `fexchange run`.
 
 Code form:
 ```text
 fexchange run ./run_input.toml
+fexchange sweep ./sweep_base.toml
 ```
 
 Validation:
@@ -145,7 +159,7 @@ tests/
   test_ground_doublets.py  # 03-02/03-03: Kramers/non-Kramers doublet
   test_sopt_l0.py          # 04-01: X/Y sign consistency
   test_sopt_l1.py          # 04-01: A/B vertex dimensions
-  test_sopt_l2_l4.py       # 04-02: zero-hop check, Hermiticity of Heff
+  test_sopt_l2_l3.py       # 04-02: zero-hop check, Hermiticity of Heff
   test_run_input.py        # 05-04: TOML input schema validation
   test_wannier90.py        # 05-03: parsing smoke test
 ```

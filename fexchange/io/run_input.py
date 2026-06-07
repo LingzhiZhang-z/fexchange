@@ -21,7 +21,7 @@ from fexchange.utils.errors import InputError, SchemaError
 logger = logging.getLogger("fexchange")
 
 _F_KEYS = ("F2_ratio", "F4_ratio", "F6_ratio")
-_ENERGY_FIELDS = ("U", "Jh", "zeta", "offset", "Uplus", "Uminus")
+_ENERGY_FIELDS = ("U", "Jh", "offset", "Uplus", "Uminus")
 _LIGAND_FIELDS = ("Delta", "U_p", "lambda_p")
 _ALLOWED = frozenset({
     "schema_version",
@@ -44,16 +44,22 @@ _ALLOWED = frozenset({
 
 
 def load_run_input(path: str | Path) -> dict[str, Any]:
-    """Load, validate, normalize, and build branches from a run-input TOML."""
-    path = Path(path)
-    _chk(path.exists(), "001", f"File not found: {path}")
+    """Load, validate, and resolve a run-input TOML."""
+    return load_run_input_from_dict(load_toml(path))
 
-    cfg = _load_toml(path)
+
+def load_run_input_from_dict(cfg: dict[str, Any], *, output_run_base: str | None = None) -> dict[str, Any]:
+    """Validate and resolve an in-memory run-input dict.
+
+    Public entry point sharing all processing that :func:`load_run_input`
+    performs after the TOML file is parsed. Lets callers (e.g. the sweep
+    front-end) supply a fully in-memory config without touching disk.
+    """
     _validate_structure(cfg)
-    _normalize(cfg)
+    _resolve_paths_runtime_model(cfg, output_run_base=output_run_base)
+    _coerce_scalar_inputs(cfg)
     _validate_fields(cfg)
-    _build_branches(cfg)
-    _assemble_derived(cfg)
+    _materialize_fsite_branches(cfg)
 
     logger.info(
         "Loaded run_id=%s branch=%s window=LMSM->%s",
@@ -62,6 +68,13 @@ def load_run_input(path: str | Path) -> dict[str, Any]:
         cfg["runtime"]["end_level"],
     )
     return cfg
+
+
+def load_toml(path: str | Path) -> dict[str, Any]:
+    """Parse a TOML file into a dict (public thin wrapper over ``_load_toml``)."""
+    path = Path(path)
+    _chk(path.exists(), "001", f"File not found: {path}")
+    return _load_toml(path)
 
 
 def window_includes(cfg: dict[str, Any], level: str) -> bool:
@@ -155,7 +168,7 @@ def _validate_fields(cfg: dict[str, Any]) -> None:
         _chk("inputs" in cfg, "002", f"[inputs] required for window ..{end}")
         _chk(_nonempty(cfg["inputs"].get("hopping_file")), "003", "inputs.hopping_file required")
         if kramer_source == "stevens":
-            _chk(_nonempty(cfg.get("inputs", {}).get("projector_file")), "003", "inputs.projector_file required")
+            _chk(_nonempty(cfg.get("inputs", {}).get("kramer_file")), "003", "inputs.kramer_file required for runtime.kramer_source='stevens'")
     if branch == "fopt":
         _validate_ligands(cfg)
 
@@ -182,6 +195,8 @@ def _validate_fsite(section: dict[str, Any], name: str, *, require_core: bool) -
     for k in _ENERGY_FIELDS:
         if k in section:
             _chk(_num(section[k]), "003", f"{name}.{k} must be numeric")
+    if "zeta" in section:
+        _validate_zeta(section["zeta"], name)
     if name == "fsite":
         _chk("Uplus" not in section and "Uminus" not in section, "003", "Uplus/Uminus are only valid in side fsite branches")
     elif name == "fsite_np1":
@@ -221,23 +236,42 @@ def _validate_ligands(cfg: dict[str, Any]) -> None:
             _chk(_num(lig["lambda_p"]), "003", f"ligand.{idx}.lambda_p must be numeric")
 
 
-def _normalize(cfg: dict[str, Any]) -> None:
+def _resolve_paths_runtime_model(cfg: dict[str, Any], *, output_run_base: str | None = None) -> None:
     paths = cfg["paths"]
     for key in ("output_root", "output_run"):
         if isinstance(paths.get(key), str):
             paths[key] = paths[key].strip()
-    if not _nonempty(paths.get("output_run")):
-        run_name = str(cfg.get("runtime", {}).get("run_name", "")).strip()
-        if _nonempty(paths.get("output_root")) and run_name:
-            paths["output_run"] = str(Path(paths["output_root"]) / run_name)
+    run_name = str(cfg.get("runtime", {}).get("run_name", "")).strip()
+    if run_name:
+        if output_run_base is not None:
+            base = output_run_base
+        elif _nonempty(paths.get("output_run")):
+            base = paths["output_run"]
+        else:
+            base = paths.get("output_root")
+        if _nonempty(base):
+            paths["output_run"] = str(Path(base) / run_name)
 
+    if "model" not in cfg:
+        cfg["model"] = {"scheme": "RS"}
+    cfg["model"]["scheme"] = str(cfg["model"].get("scheme", "RS")).upper()
+    cfg["runtime"]["kramer_source"] = _normalize_kramer_source(cfg["runtime"].get("kramer_source", "stevens"))
+
+
+def _coerce_scalar_inputs(cfg: dict[str, Any]) -> None:
     for sec in ("fsite", "fsite_nm1", "fsite_np1"):
         s = cfg.get(sec)
         if not isinstance(s, dict):
             continue
+        for f in _F_KEYS:
+            if f in s and _num(s[f]):
+                s[f] = float(s[f])
         for f in _ENERGY_FIELDS:
             if f in s and _num(s[f]):
                 s[f] = float(s[f])
+        if "zeta" in s and _num(s["zeta"]):
+            s["zeta"] = float(s["zeta"])
+
     ligands = cfg.get("ligand")
     if isinstance(ligands, dict):
         for lig in ligands.values():
@@ -248,14 +282,8 @@ def _normalize(cfg: dict[str, Any]) -> None:
                     lig[f] = float(lig[f])
             lig.setdefault("lambda_p", 0.0)
 
-    fsite = cfg.get("fsite")
-    if isinstance(fsite, dict):
-        _normalize_fsite_defaults(fsite)
-        fsite.setdefault("offset", 0.0)
-        fsite.setdefault("energy_reference", "lsjm_ground")
 
-
-def _normalize_fsite_defaults(section: dict[str, Any]) -> None:
+def _apply_main_re_preset(section: dict[str, Any]) -> None:
     re = _re(section.get("RE", "auto"))
     section["RE"] = re
     if re != "auto":
@@ -263,49 +291,72 @@ def _normalize_fsite_defaults(section: dict[str, Any]) -> None:
         section.setdefault("F2_ratio", d["F2_per_Jh"])
         section.setdefault("F4_ratio", d["F4_per_Jh"])
         section.setdefault("F6_ratio", d["F6_per_Jh"])
-        section.setdefault("zeta", d["zeta"])
 
 
-def _build_branches(cfg: dict[str, Any]) -> None:
-    fsite = cfg.get("fsite")
-    if not isinstance(fsite, dict):
-        return
-    n = int(fsite["n_ele"])
-    r42, r62 = _resolve_r42_r62(fsite)
-    main = _resolve_main_fsite(fsite, r42, r62, name="n")
+def _apply_side_re_preset(section: dict[str, Any]) -> None:
+    re = _re(section.get("RE", "auto"))
+    section["RE"] = re
+    if re != "auto":
+        d = RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]
+        section.setdefault("F2_ratio", d["F2_per_Jh"])
+        section.setdefault("F4_ratio", d["F4_per_Jh"])
+        section.setdefault("F6_ratio", d["F6_per_Jh"])
+
+
+def _materialize_fsite_branches(cfg: dict[str, Any]) -> None:
+    main = _materialize_main_fsite(cfg["fsite"])
+    cfg["fsite"] = dict(main["fsite"])
+    n = int(cfg["fsite"]["n_ele"])
+    nm1 = _materialize_side_fsite(cfg.get("fsite_nm1"), n - 1, main, side="nm1")
+    np1 = _materialize_side_fsite(cfg.get("fsite_np1"), n + 1, main, side="np1")
+    cfg["fsite_nm1"] = dict(nm1["fsite"])
+    cfg["fsite_np1"] = dict(np1["fsite"])
     cfg["_branches"] = {
-        "nm1": _build_side(cfg, "nm1", n - 1, main),
+        "nm1": nm1,
         "n": main,
-        "np1": _build_side(cfg, "np1", n + 1, main),
+        "np1": np1,
     }
+    cfg["_derived"] = dict(main["derived"])
 
 
-def _assemble_derived(cfg: dict[str, Any]) -> None:
-    if "_branches" in cfg:
-        cfg["_derived"] = dict(cfg["_branches"]["n"]["derived"])
-
-
-def _resolve_main_fsite(section: dict[str, Any], r42: float, r62: float, *, name: str) -> dict[str, Any]:
+def _materialize_main_fsite(section: dict[str, Any]) -> dict[str, Any]:
     payload = dict(section)
-    payload["offset"] = float(payload.get("offset", 0.0))
+    _apply_main_re_preset(payload)
+    payload.setdefault("offset", 0.0)
+    payload.setdefault("energy_reference", "lsjm_ground")
+    payload.setdefault("zeta", 0.0)
+    r42, r62 = _resolve_r42_r62(payload)
+    return _with_slater(payload, r42, r62, name="n")
+
+
+def _materialize_side_fsite(raw_side: Any, n: int, main: dict[str, Any], *, side: str) -> dict[str, Any]:
+    override = dict(raw_side or {}) if isinstance(raw_side, dict) else {}
+    if "RE" in override:
+        _apply_side_re_preset(override)
+
+    payload = dict(main["fsite"])
+    payload.update(override)
+    payload["n_ele"] = n
+    if side == "np1" and "Uplus" in override:
+        payload.pop("offset", None)
+    if side == "nm1" and "Uminus" in override:
+        payload.pop("offset", None)
+
+    r42, r62 = _resolve_r42_r62(payload)
+    return _with_slater(payload, r42, r62, name=side)
+
+
+def _with_slater(payload: dict[str, Any], r42: float, r62: float, *, name: str) -> dict[str, Any]:
+    payload = dict(payload)
+    if "Uplus" in payload or "Uminus" in payload:
+        payload.pop("offset", None)
+    else:
+        payload["offset"] = float(payload["offset"]) if "offset" in payload else 0.0
     payload["energy_reference"] = str(payload.get("energy_reference", "lsjm_ground"))
+    payload["zeta"] = _resolve_zeta(payload.get("zeta", 0.0), name)
     f2, f4, f6 = _slater(r42, r62, float(payload["Jh"]), name)
     payload.update({"F2": f2, "F4": f4, "F6": f6, "r42": r42, "r62": r62})
     return {"fsite": payload, "derived": {"r42": r42, "r62": r62}}
-
-
-def _build_side(cfg: dict[str, Any], side: str, n: int, main: dict[str, Any]) -> dict[str, Any]:
-    override = dict(cfg.get(f"fsite_{side}") or {})
-    if "RE" in override:
-        _normalize_fsite_defaults(override)
-    main_fsite = main["fsite"]
-    merged = dict(main_fsite)
-    merged.update(override)
-    merged["n_ele"] = n
-    if "offset" not in override:
-        merged["offset"] = 0.0
-    r42, r62 = _resolve_r42_r62(merged)
-    return _resolve_main_fsite(merged, r42, r62, name=side)
 
 
 def _resolve_r42_r62(sec: dict[str, Any]) -> tuple[float, float]:
@@ -326,6 +377,26 @@ def _slater(r42: float, r62: float, jh: float, name: str) -> tuple[float, float,
         return 0.0, 0.0, 0.0
     f2 = 6435.0 * jh / denom
     return f2, r42 * f2, r62 * f2
+
+
+def _validate_zeta(value: Any, name: str) -> None:
+    if _num(value):
+        return
+    if isinstance(value, str):
+        _chk(_re(value) != "auto", "003", f"{name}.zeta must be numeric or an RE preset")
+        return
+    _chk(False, "003", f"{name}.zeta must be numeric or an RE preset")
+
+
+def _resolve_zeta(value: Any, name: str) -> float:
+    if _num(value):
+        return float(value)
+    if isinstance(value, str):
+        re = _re(value)
+        _chk(re != "auto", "003", f"{name}.zeta must be numeric or an RE preset")
+        return float(RE_DEFAULTS_BY_N_ELE[RE_TO_N_ELE[re]]["zeta"])
+    _chk(False, "003", f"{name}.zeta must be numeric or an RE preset")
+    raise AssertionError("unreachable")
 
 
 def _chk(cond: bool, code: str, msg: str, **ctx: Any) -> None:

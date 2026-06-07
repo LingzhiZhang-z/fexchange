@@ -1,7 +1,7 @@
 # Baseline Regression Testing
 
-This file records the current baseline regression-testing prompt/contract for
-fresh end-to-end validation runs.
+本文件记录当前 baseline regression-testing prompt/contract，用于 fresh
+端到端验证运行。
 
 # fexchange 测试 Prompt
 

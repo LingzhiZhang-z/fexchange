@@ -5,7 +5,7 @@ Usage:
     # 标准输出
     python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001
 
-    # Projection输出（主程序 projector_file 输入格式），并在stdout打印 gx/gy/gz
+    # Projection输出（主程序 kramer_file 输入格式，stevens 模式），并在stdout打印 gx/gy/gz
     python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001 \
         --format projector -o projector.txt --kramer-name my_cef
 
@@ -212,7 +212,7 @@ def export_for_fexchange(
     basis_id: str = "complex_spherical_j_v1",
     orbital_order_id: str = "f7_m-3..3_v1",
 ) -> None:
-    """导出为主程序 ``inputs.projector_file`` 可直接读取的 projector 格式。"""
+    """导出为主程序 ``inputs.kramer_file``（stevens 模式）可直接读取的 projector 格式。"""
     doublet_info = _extract_ground_doublet(result)
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -253,7 +253,7 @@ def _write_projector_txt(
     basis_id: str,
     orbital_order_id: str,
 ) -> None:
-    """Write multi-block projector text accepted by pipeline._load_projector."""
+    """Write multi-block projector text accepted by pipeline._load_stevens."""
     lines = [
         "# schema_version fxe.cef_projector.v1",
         "# standard_version 2026-02",
@@ -368,7 +368,7 @@ Examples:
   # 标准输出
   python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001
 
-  # Projector文本格式（主程序 projector_file 输入），stdout打印 gx/gy/gz
+  # Projector文本格式（主程序 kramer_file 输入，stevens 模式），stdout打印 gx/gy/gz
   python cef_states.py --point-group Oh --J 4 --B4 0.01 --B6 0.0001 \\
       --format projector -o projector.txt --kramer-name cef_v1
 

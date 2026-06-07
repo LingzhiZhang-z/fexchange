@@ -3,16 +3,22 @@ Key and small helper utilities shared by pipeline modules.
 
 Artifact identity has two regimes (standards/en/05-io/05-00-IO.md §8):
 
-* **Core** levels (``LMSM``/``LSJM``/``L0`` and ``ligand``) are content-addressed
-  and shared across runs. Each sector's LMSM/LSJM is content-addressed by its own
-  ``(n, r42, r62)``, so adjacent sectors ``f^(n-1)``/``f^(n+1)`` may use their own
-  Slater ratios (e.g. neighboring-element presets).
+* **Core** levels (``LMSM``/``LSJM``/``L0``) are content-addressed and shared
+  across runs under ``output_root/core/``. Each sector's LMSM/LSJM is
+  content-addressed by its own ``(n, r42, r62)``, so adjacent sectors
+  ``f^(n-1)``/``f^(n+1)`` may use their own Slater ratios (e.g.
+  neighboring-element presets).
 * **Run-scoped** levels (``IONED``, ``L1``, ``L2``, ``L3``, ``spin12``) are
   identified solely by ``runtime.run_name``. ``L1/F`` is run-scoped for all
   schemes and Kramers routes, so no branch token is needed to disambiguate runs
   whose adjacent-sector ratios differ. Reuse is decided by artifact existence
   under the run path, not by parameter tokens, content digests, or embedded
   parent keys.
+* **Path-addressed run-scoped** stages (``ligand`` and ``L1/P``) live under the
+  run anchor (``output_root/<run_name>/`` alongside ``IONED``/``L1/F``), not in
+  the shared ``core/``. They are not keyed by :func:`level_key` (and are absent
+  from ``_RUN_SCOPED_LEVELS``): reuse is decided purely by their deterministic
+  path (SOC mode + sector for ``ligand``; p-transition token for ``L1/P``).
 """
 
 from __future__ import annotations

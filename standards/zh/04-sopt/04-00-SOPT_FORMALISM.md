@@ -11,16 +11,16 @@
 分层语义：
 - $L0$：Fock 基原始跃迁层（仅在标准 Fock 基上构造跃迁元；不含 site 标签 $i/j$，不依赖外部态文件）。
 - $L1$：局域跃迁顶点构造层（对 $f^{n+1}/f^{n-1}$ 中间态扇区做基变换，并将 $f^n$ 腿投影到 SOC 下最低能 LSJM 子空间）。
-- $L2$：路线因子构造层（由 $A/B$、site 绑定与 hopping 收缩得到 $M_A/M_B$）。
-- $L3$：带分母的中间态求和层（累加得到 $h_{\mathrm{pre},j}^{(\mu)}$）。
-- $L4$：固定 Kramers 基的输出层（做 $W$ 投影并得到单通道 $\mathrm{Heff}^{(\mu)}$）。
+- $L2$：投影后的路线因子构造层（由 $A/B$、site 绑定、hopping 收缩和低能投影矩阵 $W$ 得到 $M_A/M_B$）。
+- $L3$：带分母的固定 Kramers 基输出层（由投影后的 $M_A/M_B$ 生成单通道
+  $\mathrm{Heff}^{(\mu)}$）。
 
 执行顺序：
-- 默认且强制顺序为 $L0 \to L1 \to L2 \to L3 \to L4$（即 $L3 > L4$）。
+- 默认且强制顺序为 $L0 \to L1 \to L2 \to L3$，并以此作为最终输出。
 
 职责边界：
 - $L0/L1$ 的公式细节放在 `./standards/en/04-sopt/04-01-PRECOMPUTE.md`。
-- $L2/L3/L4$ 的公式细节放在 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`。
+- $L2/L3$ 的公式细节放在 `./standards/en/04-sopt/04-02-RUNTIME_CONTRACTION.md`。
 - SOPT 后处理的赝自旋-$\tfrac{1}{2}$ 映射放在 `./standards/en/04-sopt/04-03-SPIN12_MAPPING.md`。
 - 本文件只保留跨层契约与共用符号。
 - 站点标签 $i/j$ 从 $L2$ 才进入；$L0/L1$ 都是 site-agnostic 定义。
@@ -125,17 +125,17 @@ Validation:
 - 中间变量（Intermediate）：仅在当前模块计算过程中临时使用，不作为跨模块对外接口。
 - 输出变量（Output）：当前模块对外提供给下游模块/调用者的变量。
 
-大模块（SOPT 全链路，$L0 \to L4$）：
+大模块（SOPT 全链路，$L0 \to L3$）：
 - 输入变量：`E_u`、`U_np1`、`U_n_soc0`、`U_nm1`、`t_mu`、`W`、`labels_abcd`、`labels_order_id`。
-- 中间变量：`X`、`Y`、`A`、`B`、`E_uv`、`E_rs`、`M_A`、`M_B`、`h_pre_j_mu`。
+- 中间变量：`X`、`Y`、`A`、`B`、`E_uv`、`E_rs`、`M_A`、`M_B`。
 - 输出变量：`h_mu_abcd`、`Heff_mu_abcd`。
 
 小模块（按层级）：
 - $L0$：输入 `{}`；中间 `{sign/workspace}`；输出 `{X, Y}`。
 - $L1$：输入 `{X, Y, U_np1, U_n_soc0, U_nm1}`；中间 `{workspace}`；输出 `{A, B}`。
-- $L2$：输入 `{A, B, t_mu}`；中间 `{workspace}`；输出 `{M_A, M_B}`。
-- $L3$：输入 `{M_A, M_B, E_u}`；中间 `{E_uv, E_rs, workspace}`；输出 `{h_pre_j_mu}`。
-- $L4$：输入 `{h_pre_j_mu, W, labels_abcd, labels_order_id}`；中间 `{h_pre_mu}`；输出 `{h_mu_abcd, Heff_mu_abcd}`。
+- $L2$：输入 `{A, B, t_mu, W}`；中间 `{workspace}`；输出 projected local basis 中的 `{M_A, M_B}`。
+- $L3$：输入 `{M_A, M_B, E_u, labels_abcd, labels_order_id}`；中间
+  `{h_mu_abcd}`；输出 `{h_mu_abcd, Heff_mu_abcd}`。
 
 ## 1) 核心 SOPT 规则
 MUST:
@@ -305,9 +305,9 @@ Validation:
 
 ## 6) 最小 I/O 与运行时校验
 MUST:
-- 调用顺序在本文件中固定为 $L0 \to L1 \to L2 \to L3 \to L4$（即 $L3 > L4$）。
-- 本文件只定义 SOPT 局部分层（`L0..L4`）。
-- 全局运行窗口（`LMSM..L4`）由
+- 最终执行顺序在本文件中固定为 $L0 \to L1 \to L2 \to L3$。
+- 本文件只定义 SOPT 局部分层（`L0..L3`）。
+- 全局运行窗口（`LMSM..L3`）由
   `./standards/en/05-io/05-04-RUN_INPUT.md` 与
   `./standards/en/05-io/05-00-IO.md` 统一定义。
 - $L0$ 必须可由代码在运行时直接生成，不要求外部文件输入。
@@ -316,7 +316,7 @@ MUST:
 - 大模块输入必须包含：`E_u`、`U_np1`、`U_n_soc0`、`U_nm1`、`t_mu`、`W`、`labels_abcd`、`labels_order_id`。
 - 大模块输出必须包含：`h_mu_abcd`、`Heff_mu_abcd`。
 - `Heff_mu_abcd` 可作为 04-03 模块输入，做自旋-$\tfrac{1}{2}$ 后处理映射。
-- 大模块中间变量（`X/Y/A/B/E_uv/E_rs/M_A/M_B/h_pre_j_mu`）默认不得作为最终对外接口。
+- 大模块中间变量（`X/Y/A/B/E_uv/E_rs/M_A/M_B`）默认不得作为最终对外接口。
 - 若采用分层执行，允许将上游层输出作为下游层输入；该情形下它们仍属于大模块语义下的中间变量。
 - $E_{uv}/E_{rs}$ 仅是 $L3$ 内部组合量，由 `E_u` 计算得到，不得作为对外持久化输出。
 - 最终对外输出必须以 $a,b,c,d$ 为索引语义；$u,v,r,s$ 仅作为中间态内部索引，不作为最终输出接口。
@@ -328,7 +328,7 @@ MUST:
 
 Math:
 $$
-\text{Order: } L0 \rightarrow L1 \rightarrow L2 \rightarrow L3 \rightarrow L4.
+\text{Final order: } L0 \rightarrow L1 \rightarrow L2 \rightarrow L3.
 $$
 
 Math:
@@ -339,9 +339,9 @@ $$
 Code form:
 ```text
 module_inputs       = {E_u, U_np1, U_n_soc0, U_nm1, t_mu, W, labels_abcd, labels_order_id}
-module_internal     = {X, Y, A, B, E_uv, E_rs, M_A, M_B, h_pre_j_mu}
+module_internal     = {X, Y, A, B, E_uv, E_rs, M_A, M_B}
 module_outputs      = {h_mu_abcd, Heff_mu_abcd}
-submodule_handoff   = {L0: X/Y, L1: A/B, L2: M_A&M_B, L3: h_pre_j_mu}
+submodule_handoff   = {L0: X/Y, L1: A/B, L2: M_A&M_B, L3: h_mu_abcd&Heff_mu_abcd}
 labels_order_id     = "abcd_lex_v1"
 ```
 
