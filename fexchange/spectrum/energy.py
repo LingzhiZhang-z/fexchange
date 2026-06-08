@@ -67,13 +67,7 @@ def compute_intermediate_energies(
     elif ref_mode == "lsjm_ground":
         lsjm_n = state[f"lsjm_{n_ele}"]
         fsite_n = branch_n["fsite"]
-        soc0 = select_soc_lowest_subspace(
-            lsjm_n,
-            F2=float(fsite_n["F2"]),
-            F4=float(fsite_n["F4"]),
-            F6=float(fsite_n["F6"]),
-            zeta=float(fsite_n["zeta"]),
-        )
+        soc0 = select_soc_lowest_subspace(lsjm_n)
         ref_idx = int(soc0["col_indices"][0])
         E_ref = (
             float(fsite_n.get("offset", 0.0))

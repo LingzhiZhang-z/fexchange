@@ -106,16 +106,14 @@ def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, A
         if "coef_zeta" in payload:
             result["coef_zeta"] = np.asarray(payload["coef_zeta"], dtype=float)
 
-        # Recover LSJM/LSMS physics payload from metadata if present.
         inputs_summary = meta.get("inputs_summary", {})
         if isinstance(inputs_summary, dict):
-            physics: dict[str, float] = {}
-            for key in ("F2", "F4", "F6"):
+            for key in ("r42", "r62"):
                 value = inputs_summary.get(key)
                 if value is not None:
-                    physics[key] = float(value)
-            if physics:
-                result["physics"] = physics
+                    result[key] = float(value)
+        if "r42" not in result or "r62" not in result:
+            raise ValueError("cached stateset missing r42/r62 (stale cache from before the physics-cleanup)")
         return result
     except Exception as exc:
         logger.warning("Invalid cached %s artifact at %s (%s), recomputing", level, stage_dir, exc)
@@ -428,7 +426,6 @@ def persist_stateset(
     level: str,
     n_ele: int,
     cfg: dict[str, Any],
-    physics: dict[str, Any],
     r42: float,
     r62: float,
 ) -> None:
@@ -450,9 +447,8 @@ def persist_stateset(
         key=level_key(level, n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
         inputs_summary={
             "n": n_ele,
-            "F2": physics.get("F2"),
-            "F4": physics.get("F4"),
-            "F6": physics.get("F6"),
+            "r42": r42,
+            "r62": r62,
         },
         tensor_name="V_fock",
         physical_meaning=f"{level} basis states in Fock representation",

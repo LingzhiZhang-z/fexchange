@@ -162,7 +162,8 @@ def build_lsjm(
         "coef_F4": coef_Fk.get(4, np.array([])),
         "coef_F6": coef_Fk.get(6, np.array([])),
         "coef_zeta": coef_zeta,
-        "physics": lsms_result.get("physics", {}),
+        "r42": float(lsms_result["r42"]),
+        "r62": float(lsms_result["r62"]),
         "state_order_id": "lsjm_canonical_v1",
         "j_order_id": "Jasc_Masc_v1",
         "orbital_order_id": "f14_m-3..3_sigma(-1/2,+1/2)_interleaved_v1",
@@ -287,24 +288,25 @@ def _process_term_block(
 def select_soc_lowest_subspace(
     lsjm_result: dict[str, Any],
     *,
-    F2: float | None = None,
-    F4: float | None = None,
-    F6: float | None = None,
+    r42: float | None = None,
+    r62: float | None = None,
     zeta: float = 1.0,
 ) -> dict[str, Any]:
     """
     Identify the SOC-lowest J0 multiplet from LSJM output (04-00 §0.2.1).
 
-    J0 is determined numerically by minimising zeta * coef_zeta over all J in
-    the ground LS term. Hund's third rule is checked as validation.
+    The ground LS term is found by ranking Coulomb energies under the Jh=1
+    reference convention.  Only the Slater ratios r42/r62 matter — the absolute
+    values of U, Jh, F2, F4, F6 are irrelevant because F is proportional to Jh
+    and Jh cancels in the ranking.
+
+    J0 is then determined by minimising zeta * coef_zeta over all J in the
+    ground LS term. Hund's third rule is checked as validation.
 
     Parameters
     ----------
-    F2, F4, F6 : optional Coulomb coefficients. If omitted, they are read from
-                 lsjm_result["physics"].
+    r42, r62 : Slater ratios. If omitted, read from lsjm_result itself.
     zeta : SOC coupling constant sign convention. Default +1.0 (positive).
-           Only the sign matters for ordering; pass a negative value if the
-           convention yields zeta < 0.
 
     Returns dict with U_n_soc0, J0, alpha0, L0, S0, n_j, column_indices.
     """
@@ -325,33 +327,12 @@ def select_soc_lowest_subspace(
             op="select_soc_lowest",
             actual={"keys": sorted(lsjm_result.keys())},
         )
-    if F2 is None and F4 is None and F6 is None:
-        physics = lsjm_result.get("physics", {})
-        if not isinstance(physics, dict) or any(k not in physics for k in ("F2", "F4", "F6")):
-            raise PhysError(
-                "FXE-PHYS-001",
-                "Missing F2/F4/F6 in arguments and lsjm_result['physics']",
-                module="lsjm",
-                stage="LSJM",
-                op="select_soc_lowest",
-                actual={"physics": physics},
-            )
-        F2 = float(physics["F2"])
-        F4 = float(physics["F4"])
-        F6 = float(physics["F6"])
-    elif F2 is None or F4 is None or F6 is None:
-        raise PhysError(
-            "FXE-PHYS-001",
-            "F2/F4/F6 must be provided together",
-            module="lsjm",
-            stage="LSJM",
-            op="select_soc_lowest",
-            actual={"F2": F2, "F4": F4, "F6": F6},
-        )
-    else:
-        F2 = float(F2)
-        F4 = float(F4)
-        F6 = float(F6)
+    _r42 = float(r42 if r42 is not None else lsjm_result["r42"])
+    _r62 = float(r62 if r62 is not None else lsjm_result["r62"])
+    denom = 286.0 + 195.0 * _r42 + 250.0 * _r62
+    F2 = 6435.0 / denom
+    F4 = _r42 * F2
+    F6 = _r62 * F2
 
     # Identify ground LS term by Coulomb energy: E = F2*coef_F2 + F4*coef_F4 + F6*coef_F6
     term_energies: dict[tuple[int, int, int], float] = {}
@@ -490,8 +471,12 @@ def build_lsjm_spectrum(
     coef_F6 = lsjm_result["coef_F6"]
     coef_zeta = lsjm_result["coef_zeta"]
 
-    physics = lsjm_result.get("physics", {})
-    F2, F4, F6 = float(physics["F2"]), float(physics["F4"]), float(physics["F6"])
+    _r42 = float(lsjm_result["r42"])
+    _r62 = float(lsjm_result["r62"])
+    denom = 286.0 + 195.0 * _r42 + 250.0 * _r62
+    F2 = 6435.0 / denom
+    F4 = _r42 * F2
+    F6 = _r62 * F2
 
     multiplets: dict[tuple[int, int, int, int], dict[str, Any]] = {}
     for idx, lab in enumerate(labels):

@@ -250,7 +250,8 @@ def build_lsms(
         "coef_F4": coef_Fk[4],
         "coef_F6": coef_Fk[6],
         "hint_rank_matrix_map": hint_rank_matrix_map,
-        "physics": {"U": U, "Jh": Jh, "r42": r42, "r62": r62, "F2": F2, "F4": F4, "F6": F6},
+        "r42": float(r42),
+        "r62": float(r62),
         "state_order_id": "lsms_canonical_v1",
         "orbital_order_id": "f14_m-3..3_sigma(-1/2,+1/2)_interleaved_v1",
     }
@@ -399,12 +400,12 @@ def _generate_multiplet(
 # LSMS energy spectrum (per-term Coulomb energy)
 # ---------------------------------------------------------------------------
 
-def build_lsms_spectrum(lsms_result: dict[str, Any]) -> list[dict[str, Any]]:
+def build_lsms_spectrum(lsms_result: dict[str, Any], *, r42: float | None = None, r62: float | None = None) -> list[dict[str, Any]]:
     """
     Per-term Coulomb energy spectrum from LSMS output.
 
     Each entry corresponds to one (alpha, L, S) term with its Coulomb energy
-    computed from coef_Fk and physics r42/r62 under Jh=1 convention.
+    computed from coef_Fk under Jh=1 convention.
     Sorted by ascending Coulomb energy.
     """
     labels = lsms_result["labels"]
@@ -412,8 +413,12 @@ def build_lsms_spectrum(lsms_result: dict[str, Any]) -> list[dict[str, Any]]:
     coef_F4 = lsms_result["coef_F4"]
     coef_F6 = lsms_result["coef_F6"]
 
-    physics = lsms_result.get("physics", {})
-    F2, F4, F6 = float(physics["F2"]), float(physics["F4"]), float(physics["F6"])
+    _r42 = float(r42 if r42 is not None else lsms_result["r42"])
+    _r62 = float(r62 if r62 is not None else lsms_result["r62"])
+    denom = 286.0 + 195.0 * _r42 + 250.0 * _r62
+    F2 = 6435.0 / denom
+    F4 = _r42 * F2
+    F6 = _r62 * F2
 
     terms: dict[tuple[int, int, int], dict[str, Any]] = {}
     for idx, lab in enumerate(labels):

@@ -1,0 +1,11 @@
+point_group = "C3v"
+J = 3.5
+mode_q3 = "sin"
+kramer_name = "YbOCl_exp_baseline_Yb_J7_2"
+
+B20 = -0.3163
+B40 = -0.0019
+B43 = 0.7068
+B60 = 0.0001
+B63 = 0.0052
+B66 = -0.0063

@@ -23,7 +23,6 @@ The public output (``analyze_onsite``) is structured per-site/per-pair; see
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from functools import lru_cache
@@ -207,9 +206,8 @@ def fit_stevens_direct_local(
     ratios = _slater_ratio_defaults(int(n_ele))
     soc0 = select_soc_lowest_subspace(
         lsjm,
-        F2=1.0,
-        F4=ratios["r42"],
-        F6=ratios["r62"],
+        r42=ratios["r42"],
+        r62=ratios["r62"],
         zeta=float(zeta),
     )
     U_j0 = soc0["U_n_soc0"]
@@ -244,6 +242,7 @@ def analyze_onsite(
     n_ele: int,
     symmetry: Symmetry = "C3v",
     mode_q3: ModeQ3 = "sin",
+    fit_cef: bool = True,
 ) -> dict[str, Any]:
     """Run the three onsite analyses and return a structured per-site result."""
     blocks = load_onsite_blocks(onsite)
@@ -258,13 +257,15 @@ def analyze_onsite(
     }
     delta = compute_delta_pairs(blocks)
 
-    stevens = fit_stevens_direct_local(
-        blocks["h_f1"],
-        n_ele=int(n_ele),
-        zeta=float(soc_f["f1"]["zeta"]),
-        symmetry=symmetry,
-        mode_q3=mode_q3,
-    )
+    stevens = None
+    if fit_cef:
+        stevens = fit_stevens_direct_local(
+            blocks["h_f1"],
+            n_ele=int(n_ele),
+            zeta=float(soc_f["f1"]["zeta"]),
+            symmetry=symmetry,
+            mode_q3=mode_q3,
+        )
 
     return {
         "schema_version": "fxe.w90_onsite.v2",
@@ -293,7 +294,7 @@ def analyze_onsite(
             key: {"eV": float(value), "meV": 1000.0 * float(value)}
             for key, value in delta.items()
         },
-        "cef": {
+        "cef": None if stevens is None else {
             "point_group": stevens["symmetry"],
             "mode_q3": stevens["mode_q3"],
             "J": float(stevens["J0"]),
@@ -309,19 +310,19 @@ def analyze_onsite(
 # ---------------------------------------------------------------------------
 
 def write_analysis_outputs(result: dict[str, Any], out_dir: str | Path) -> None:
-    """Write the three onsite parameter files (txt, json, cef toml)."""
+    """Write concise text summary and CEF-state TOML."""
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
 
     (target / "onsite_params.txt").write_text("\n".join(_summary_lines(result)) + "\n", encoding="utf-8")
-    (target / "onsite_params.json").write_text(
-        json.dumps(_json_summary(result), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    (target / "cef_REChX_C3v_sin.toml").write_text(
-        "\n".join(_cef_states_toml_lines(result)) + "\n",
-        encoding="utf-8",
-    )
+    cef_toml = target / "cef_REChX_C3v_sin.toml"
+    if result.get("cef") is None:
+        cef_toml.unlink(missing_ok=True)
+    else:
+        cef_toml.write_text(
+            "\n".join(_cef_states_toml_lines(result)) + "\n",
+            encoding="utf-8",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -365,13 +366,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--n-ele", type=int, help="Override f electron count")
     parser.add_argument("--symmetry", choices=("C3v", "Oh"), default="C3v")
     parser.add_argument("--mode-q3", choices=("sin", "cos"), default="sin")
+    parser.add_argument("--no-cef", action="store_true", help="Only extract onsite SOC/Delta; skip LSJM Stevens fit")
     parser.add_argument("--output-dir", type=Path, help="Write parameter / CEF TOML files")
-    parser.add_argument("--json", action="store_true", help="Print JSON summary instead of text")
     args = parser.parse_args(argv)
 
     try:
         n_ele, re_name = resolve_n_ele(n_ele=args.n_ele, re_name=args.RE, onsite=args.onsite)
-        result = analyze_onsite(args.onsite, n_ele=n_ele, symmetry=args.symmetry, mode_q3=args.mode_q3)
+        result = analyze_onsite(
+            args.onsite,
+            n_ele=n_ele,
+            symmetry=args.symmetry,
+            mode_q3=args.mode_q3,
+            fit_cef=not args.no_cef,
+        )
     except FexchangeError as exc:
         print(exc.payload_json(), file=sys.stderr)
         return 1
@@ -380,10 +387,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_dir:
         write_analysis_outputs(result, args.output_dir)
 
-    if args.json:
-        print(json.dumps(_json_summary(result), indent=2, sort_keys=True))
-    else:
-        print("\n".join(_summary_lines(result)))
+    print("\n".join(_summary_lines(result)))
     return 0
 
 
@@ -478,41 +482,48 @@ def _relative_norm(delta: NDArray[np.complexfloating], ref: NDArray[np.complexfl
 def _summary_lines(result: dict[str, Any]) -> list[str]:
     cef = result["cef"]
     lines = [
-        "# w90_onsite SOC / Delta / CEF parameters",
+        "# w90_onsite summary",
         f"RE {result.get('RE') or 'unknown'}",
         f"n_ele {int(result['n_ele'])}",
+        "",
+        "[re_soc]",
     ]
     for label in _F_SITES:
         entry = result["zeta"][label]
         lines.append(f"zeta_{label}_eV {float(entry['eV']):.12e}")
-        lines.append(f"zeta_{label}_meV {float(entry['meV']):.12e}")
+        lines.append(f"zeta_{label}_fit_residual {float(entry['residual']):.12e}")
+        lines.append(f"zeta_{label}_channel_spread_rel {float(entry['channel_spread_rel']):.12e}")
+    zeta_diff = abs(float(result["zeta"]["f1"]["eV"]) - float(result["zeta"]["f2"]["eV"]))
+    lines.append(f"zeta_f1_f2_diff_eV {zeta_diff:.12e}")
+    lines.append("")
+    lines.append("[ligand]")
     for label in _LIG_SITES:
         entry = result["lambda_p"][label]
         lines.append(f"lambda_p_{label}_eV {float(entry['eV']):.12e}")
-        lines.append(f"lambda_p_{label}_meV {float(entry['meV']):.12e}")
-        lines.append(f"lambda_p_{label}_orbital_bandwidth_eV {float(entry['orbital_bandwidth']):.12e}")
+        lines.append(f"lambda_p_{label}_fit_residual {float(entry['residual']):.12e}")
+        lines.append(f"lambda_p_{label}_channel_spread_rel {float(entry['channel_spread_rel']):.12e}")
+    lines.append("")
+    lines.append("[delta]")
     for key, entry in result["delta"].items():
         lines.append(f"delta_{key}_eV {float(entry['eV']):.12e}")
-        lines.append(f"delta_{key}_meV {float(entry['meV']):.12e}")
-    lines.append(f"point_group {cef['point_group']}")
-    lines.append(f"mode_q3 {cef['mode_q3']}")
-    lines.append(f"J {float(cef['J']):.12e}")
-    for name, value in cef["B_params_eV"].items():
-        lines.append(f"{name}_eV {float(value):.12e}")
-        lines.append(f"{name}_meV {float(cef['B_params_meV'][name]):.12e}")
+    delta_lig1_diff = abs(float(result["delta"]["f1_lig1"]["eV"]) - float(result["delta"]["f2_lig1"]["eV"]))
+    delta_lig2_diff = abs(float(result["delta"]["f1_lig2"]["eV"]) - float(result["delta"]["f2_lig2"]["eV"]))
+    lines.append(f"delta_lig1_f1_f2_diff_eV {delta_lig1_diff:.12e}")
+    lines.append(f"delta_lig2_f1_f2_diff_eV {delta_lig2_diff:.12e}")
+    if cef is None:
+        lines.append("")
+        lines.append("[cef]")
+        lines.append("skipped true")
+    else:
+        lines.append("")
+        lines.append("[cef]")
+        lines.append(f"point_group {cef['point_group']}")
+        lines.append(f"mode_q3 {cef['mode_q3']}")
+        lines.append(f"J {float(cef['J']):.12e}")
+        lines.append(f"stevens_fit_residual {float(cef['stevens_fit_residual']):.12e}")
+        for name, value in cef["B_params_meV"].items():
+            lines.append(f"{name}_meV {float(value):.12e}")
     return lines
-
-
-def _json_summary(result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "schema_version": result["schema_version"],
-        "RE": result.get("RE"),
-        "n_ele": int(result["n_ele"]),
-        "zeta": result["zeta"],
-        "lambda_p": result["lambda_p"],
-        "delta": result["delta"],
-        "cef": result["cef"],
-    }
 
 
 def _cef_states_toml_lines(result: dict[str, Any]) -> list[str]:

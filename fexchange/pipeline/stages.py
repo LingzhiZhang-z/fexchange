@@ -53,6 +53,20 @@ from fexchange.utils.checks import check_hermitian, check_orthonormal
 from fexchange.utils.errors import BindError, IOError_, InputError, SchemaError
 
 
+_EPS_RATIO = 1e-10
+
+
+def _verify_ratios(result: dict[str, Any], expected_r42: float, expected_r62: float, label: str) -> None:
+    r42 = float(result.get("r42", expected_r42))
+    r62 = float(result.get("r62", expected_r62))
+    if abs(r42 - expected_r42) > _EPS_RATIO or abs(r62 - expected_r62) > _EPS_RATIO:
+        raise SchemaError(
+            "FXE-SCHEMA-001",
+            f"{label}: cached r42/r62 ({r42}, {r62}) != expected ({expected_r42}, {expected_r62})",
+            actual={"cached_r42": r42, "cached_r62": r62, "expected_r42": expected_r42, "expected_r62": expected_r62},
+        )
+
+
 def _reference_scheme(scheme: str) -> str:
     return "RS" if str(scheme).upper() == "ED" else scheme
 
@@ -275,7 +289,7 @@ def _load_manual(path: Path, *, n_ele: int, n_orb: int) -> dict[str, Any]:
 def _select_main_subspace(cfg: dict[str, Any], state: dict[str, Any], *, n_ele: int, n_orb: int) -> dict[str, Any]:
     if _uses_manual_kramer(cfg):
         return _load_manual(Path(str(cfg["inputs"]["kramer_file"])), n_ele=n_ele, n_orb=n_orb)
-    soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])
+    soc0 = select_soc_lowest_subspace(state[f"lsjm_{n_ele}"])  # r42/r62 read from the lsjm object itself
     soc0["subspace_id"] = "soc_lowest_hunds_v1"
     return soc0
 
@@ -300,20 +314,18 @@ def ensure_lsms_all_three(
         stage_dir = build_stage_path(output_root, "LMSM", n=sec, r42=sec_r42, r62=sec_r62, scheme=core_scheme)
         loaded = try_load_stateset(stage_dir, level="LMSM", n_ele=sec)
         if loaded is not None:
+            _verify_ratios(loaded, sec_r42, sec_r62, f"LMSM cache n={sec}")
             state[key] = loaded
             continue
 
         result = build_lsms(sec, n_orb, r42=sec_r42, r62=sec_r62)
         state[key] = result
-        branch = sector_branch(cfg, sec)
-        fsite = branch["fsite"] if isinstance(branch, dict) else cfg.get("fsite", {})
         persist_stateset(
             stage_dir,
             result,
             level="LMSM",
             n_ele=sec,
             cfg=cfg,
-            physics=fsite,
             r42=sec_r42,
             r62=sec_r62,
         )
@@ -342,20 +354,18 @@ def ensure_lsjm_all_three(
         stage_dir = build_stage_path(output_root, "LSJM", n=sec, r42=sec_r42, r62=sec_r62, scheme=core_scheme)
         loaded = try_load_stateset(stage_dir, level="LSJM", n_ele=sec)
         if loaded is not None:
+            _verify_ratios(loaded, sec_r42, sec_r62, f"LSJM cache n={sec}")
             state[key] = loaded
             continue
 
         result = build_lsjm(state[f"lsms_{sec}"], n_orb)
         state[key] = result
-        branch = sector_branch(cfg, sec)
-        fsite = branch["fsite"] if isinstance(branch, dict) else cfg.get("fsite", {})
         persist_stateset(
             stage_dir,
             result,
             level="LSJM",
             n_ele=sec,
             cfg=cfg,
-            physics=fsite,
             r42=sec_r42,
             r62=sec_r62,
         )

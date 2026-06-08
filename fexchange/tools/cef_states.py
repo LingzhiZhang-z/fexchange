@@ -260,6 +260,9 @@ def _write_projector_txt(
         f"# kramer_name {kramer_name}",
         f"# point_group {result['point_group']}",
         f"# J {float(result['J']):.12e}",
+        f"# gx {float(doublet_info['g_components']['gx']):.12e}",
+        f"# gy {float(doublet_info['g_components']['gy']):.12e}",
+        f"# gz {float(doublet_info['g_components']['gz']):.12e}",
         f"# basis_id {basis_id}",
         f"# orbital_order_id {orbital_order_id}",
         f"# ground_irrep {doublet_info['ground_irrep']}",
@@ -291,11 +294,13 @@ def print_results_llw_style(result: dict[str, Any]) -> None:
     print(f"{'='*60}")
 
     # 能级表（紧凑格式）
-    print(f"\n{'Level':>6} {'Energy(meV)':>14} {'Deg':>5} {'Irrep':>18} {'Wavefunction (compact)'}")
+    e0 = float(result["level_info"][0]["energy"])
+
+    print(f"\n{'Level':>6} {'Delta(meV)':>14} {'Deg':>5} {'Irrep':>18} {'Wavefunction (compact)'}")
     print("-" * 90)
 
     for lvl_idx, level in enumerate(result["level_info"]):
-        E = level["energy"]
+        E = level["energy"] - e0
         deg = level["degeneracy"]
         irrep_str = "/".join(level["irreps"])
 
@@ -315,7 +320,7 @@ def print_results_llw_style(result: dict[str, Any]) -> None:
     multipoles = sorted(multipole_set)
 
     print(f"\n{'='*60}")
-    print(f"Ground State: {ground_irrep_str}  E = {ground['energy']:.6f} meV")
+    print(f"Ground State: {ground_irrep_str}  Delta = 0.000000 meV  (E0 = {ground['energy']:.6f} meV)")
     print(f"{'='*60}")
     print(f"  Degeneracy: {ground['degeneracy']}-fold")
     print(f"  Allowed multipoles: {', '.join(multipoles)}")
