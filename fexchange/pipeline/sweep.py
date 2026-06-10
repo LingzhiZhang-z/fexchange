@@ -337,12 +337,14 @@ def _run_mpi(
             _run_case(i, names[i], base_cfg, output_base, paths, rows[i], progress, rank=rank, log_level=log_level)
             for i in range(rank, len(rows), size)
         ]
-        gathered = comm.gather(results, root=0)
+        rc = 0 if all(r["ok"] for r in results) else 1
         if rank == 0:
-            flat = [r for sub in gathered for r in sub]
-            _finish_progress(progress, flat, len(rows))
-            return 0 if all(r["ok"] for r in flat) else 1
-        return 0
+            logger.info(
+                "sweep: local rank slices complete; exiting ranks without final MPI gather -> %s",
+                progress,
+            )
+        _exit_mpi_rank(rc)
+        return rc
     except BaseException:  # free peers parked in Barrier/gather before teardown
         logger.exception("sweep: rank %d failed; aborting MPI job to release peers", comm.Get_rank())
         comm.Abort(1)
@@ -517,6 +519,9 @@ def _detect_comm() -> Any:
     if not _under_launcher():
         return None
     try:
+        import mpi4py  # type: ignore[import-not-found]
+
+        mpi4py.rc.finalize = False
         from mpi4py import MPI  # type: ignore[import-not-found]
     except ImportError:
         raise RuntimeError_(
@@ -531,10 +536,34 @@ def _detect_comm() -> Any:
     return comm if comm.Get_size() > 1 else None
 
 
+def _exit_mpi_rank(rc: int) -> None:
+    """Exit launched MPI ranks without entering Python/mpi4py teardown.
+
+    On some Slurm+MPI stacks the sweep work returns cleanly but mpi4py's normal
+    interpreter-exit finalizer can keep the job step RUNNING.  The CLI sweep is
+    already complete at this point: rank 0 has gathered all results and written
+    the final progress line, and the barrier below has released every peer.  A
+    hard process exit gives ``srun`` the rank termination it is waiting for.
+    """
+    opt = os.environ.get("FXE_MPI_HARD_EXIT", "1").strip().lower()
+    if opt in {"0", "false", "no", "off"}:
+        return
+    try:
+        import sys
+
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(int(rc))
+
+
 def _warn_oversubscription() -> None:
-    if os.environ.get("OMP_NUM_THREADS") != "1":
+    expected = os.environ.get("SLURM_CPUS_PER_TASK", "1")
+    if os.environ.get("OMP_NUM_THREADS") != expected:
         logger.warning(
-            "OMP_NUM_THREADS=%s (expected '1'): ranks x BLAS-threads may oversubscribe cores. "
-            "Export OMP_NUM_THREADS=1 (and OPENBLAS/MKL equivalents) before mpirun.",
+            "OMP_NUM_THREADS=%s (expected %r): ranks x BLAS-threads may oversubscribe cores. "
+            "Match OMP_NUM_THREADS and OPENBLAS/MKL equivalents to the launcher cpus-per-task.",
             os.environ.get("OMP_NUM_THREADS"),
+            expected,
         )

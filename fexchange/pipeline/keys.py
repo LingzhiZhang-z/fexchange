@@ -8,12 +8,10 @@ Artifact identity has two regimes (standards/en/05-io/05-00-IO.md §8):
   content-addressed by its own ``(n, r42, r62)``, so adjacent sectors
   ``f^(n-1)``/``f^(n+1)`` may use their own Slater ratios (e.g.
   neighboring-element presets).
-* **Run-scoped** levels (``IONED``, ``L1``, ``L2``, ``L3``, ``spin12``) are
-  identified solely by ``runtime.run_name``. ``L1/F`` is run-scoped for all
-  schemes and Kramers routes, so no branch token is needed to disambiguate runs
-  whose adjacent-sector ratios differ. Reuse is decided by artifact existence
-  under the run path, not by parameter tokens, content digests, or embedded
-  parent keys.
+* **Run-scoped** levels (``IONED``, ``L1``, ``L2``, ``L3``, ``spin12``) keep
+  ``runtime.run_name`` in metadata for compatibility. ``IONED`` cache reuse is
+  validated by its resolved single-ion input summary, not by this key; the other
+  listed stages remain run-scoped.
 * **Path-addressed run-scoped** stages (``ligand`` and ``L1/P``) live under the
   run anchor (``output_root/<run_name>/`` alongside ``IONED``/``L1/F``), not in
   the shared ``core/``. They are not keyed by :func:`level_key` (and are absent

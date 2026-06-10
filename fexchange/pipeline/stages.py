@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ from fexchange.spectrum.lsms import build_lsms
 from fexchange.sopt.spin12 import spin12_map
 from fexchange.utils.checks import check_hermitian, check_orthonormal
 from fexchange.utils.errors import BindError, IOError_, InputError, SchemaError
+from fexchange.utils.numerics import EPS_ZERO
 
 
 _EPS_RATIO = 1e-10
@@ -101,6 +103,37 @@ def _sector_fsite(cfg: dict[str, Any], n_ele: int) -> dict[str, Any]:
         "Missing fsite parameters for IONED sector",
         actual={"n_ele": n_ele},
     )
+
+
+def _hcef_1b_sha256(hcef_1b: np.ndarray) -> str:
+    arr = np.ascontiguousarray(np.asarray(hcef_1b, dtype=np.complex128))
+    return hashlib.sha256(arr.view(np.uint8)).hexdigest()
+
+
+def _ion_ed_inputs_summary(
+    *,
+    n_ele: int,
+    n_orb: int,
+    fsite: dict[str, Any],
+    hcef_1b: np.ndarray | None,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "n": n_ele,
+        "n_orb": n_orb,
+        "U": float(fsite.get("U", 0.0)),
+        "F2": float(fsite.get("F2", 0.0)),
+        "F4": float(fsite.get("F4", 0.0)),
+        "F6": float(fsite.get("F6", 0.0)),
+        "zeta": float(fsite["zeta"]),
+        "offset": float(fsite.get("offset", 0.0)),
+    }
+    hcef_norm = 0.0
+    if hcef_1b is not None:
+        hcef_norm = float(np.linalg.norm(np.asarray(hcef_1b, dtype=np.complex128)))
+    summary["includes_hcef"] = bool(hcef_norm > EPS_ZERO)
+    if hcef_norm > EPS_ZERO and hcef_1b is not None:
+        summary["hcef_1b_sha256"] = _hcef_1b_sha256(hcef_1b)
+    return summary
 
 
 def _load_hcef_1b(cfg: dict[str, Any], *, n_orb: int) -> np.ndarray | None:
@@ -389,6 +422,8 @@ def ensure_ion_ed_adjacent(
         if key in state:
             continue
         sec_r42, sec_r62 = sector_ratios(cfg, sec, default_r42=r42, default_r62=r62)
+        fsite = _sector_fsite(cfg, sec)
+        inputs_summary = _ion_ed_inputs_summary(n_ele=sec, n_orb=n_orb, fsite=fsite, hcef_1b=hcef_1b)
         stage_dir = build_stage_path(
             output_root,
             "IONED",
@@ -396,27 +431,33 @@ def ensure_ion_ed_adjacent(
             run_name=run_name,
             output_run=cfg["paths"]["output_run"],
         )
-        expected_key = level_key("IONED", n_ele=sec, r42=sec_r42, r62=sec_r62, cfg=cfg)
-        loaded = try_load_ion_ed(stage_dir, expected_key=expected_key)
+        loaded = try_load_ion_ed(stage_dir, expected_inputs_summary=inputs_summary)
         if loaded is not None:
             state[key] = loaded
             continue
 
-        fsite = _sector_fsite(cfg, sec)
         result = build_ion_ed(
             sec,
-            F0=float(fsite.get("U", 0.0)),
-            F2=float(fsite.get("F2", 0.0)),
-            F4=float(fsite.get("F4", 0.0)),
-            F6=float(fsite.get("F6", 0.0)),
-            zeta=float(fsite["zeta"]),
-            offset=float(fsite.get("offset", 0.0)),
+            F0=float(inputs_summary["U"]),
+            F2=float(inputs_summary["F2"]),
+            F4=float(inputs_summary["F4"]),
+            F6=float(inputs_summary["F6"]),
+            zeta=float(inputs_summary["zeta"]),
+            offset=float(inputs_summary["offset"]),
             n_orb=n_orb,
             lsjm_reference=state.get(f"lsjm_{sec}"),
             hcef_1b=hcef_1b,
         )
         state[key] = result
-        persist_ion_ed(stage_dir, cfg, result, n_ele=sec, r42=sec_r42, r62=sec_r62)
+        persist_ion_ed(
+            stage_dir,
+            cfg,
+            result,
+            n_ele=sec,
+            r42=sec_r42,
+            r62=sec_r62,
+            inputs_summary=inputs_summary,
+        )
         write_run_source_txt(Path(cfg["paths"]["output_run"]), cfg)
 
 

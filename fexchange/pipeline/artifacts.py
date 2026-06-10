@@ -120,12 +120,37 @@ def try_load_stateset(stage_dir: Path, *, level: str, n_ele: int) -> dict[str, A
         return None
 
 
-def try_load_ion_ed(stage_dir: Path, *, expected_key: str | None = None) -> dict[str, Any] | None:
+_IONED_INPUT_FLOAT_KEYS = ("U", "F2", "F4", "F6", "zeta", "offset")
+_IONED_INPUT_EXACT_KEYS = ("n", "n_orb", "includes_hcef", "hcef_1b_sha256")
+
+
+def _verify_ion_ed_inputs_summary(meta: dict[str, Any], expected: dict[str, Any]) -> None:
+    cached = meta.get("inputs_summary", {})
+    if not isinstance(cached, dict):
+        raise ValueError("cached IONED missing inputs_summary")
+
+    for key in _IONED_INPUT_FLOAT_KEYS:
+        if key not in cached or key not in expected:
+            raise ValueError(f"cached IONED missing input {key}")
+        if not np.isclose(float(cached[key]), float(expected[key]), rtol=1e-10, atol=1e-12):
+            raise ValueError(f"IONED input mismatch for {key}: cached {cached[key]} != expected {expected[key]}")
+
+    for key in _IONED_INPUT_EXACT_KEYS:
+        if key not in expected:
+            continue
+        cached_value = cached.get(key)
+        if cached_value is None and key == "n_orb":
+            cached_value = meta.get("n_orb")
+        if cached_value != expected[key]:
+            raise ValueError(f"IONED input mismatch for {key}: cached {cached_value} != expected {expected[key]}")
+
+
+def try_load_ion_ed(stage_dir: Path, *, expected_inputs_summary: dict[str, Any] | None = None) -> dict[str, Any] | None:
     try:
         meta = load_json_checked(stage_dir / "meta.json")
         validate_meta(meta)
-        if expected_key is not None and meta.get("key") != expected_key:
-            raise ValueError("IONED key mismatch")
+        if expected_inputs_summary is not None:
+            _verify_ion_ed_inputs_summary(meta, expected_inputs_summary)
         payload = load_npz_checked(
             stage_dir / "states.npz",
             ["V_fock_ed", "energies"],
@@ -480,8 +505,21 @@ def persist_ion_ed(
     n_ele: int,
     r42: float,
     r62: float,
+    inputs_summary: dict[str, Any] | None = None,
 ) -> None:
     physics = result.get("physics", {})
+    if inputs_summary is None:
+        inputs_summary = {
+            "n": n_ele,
+            "U": float(physics.get("F0", 0.0)),
+            "F2": float(physics.get("F2", 0.0)),
+            "F4": float(physics.get("F4", 0.0)),
+            "F6": float(physics.get("F6", 0.0)),
+            "zeta": float(physics.get("zeta", 0.0)),
+            "offset": float(physics.get("offset", 0.0)),
+            "includes_hcef": bool(physics.get("includes_hcef", False)),
+            "n_orb": int(result.get("n_orb", 14)),
+        }
     payload = {
         "V_fock_ed": result["V_fock_ed"],
         "energies": np.asarray(result["energies"], dtype=float),
@@ -494,16 +532,7 @@ def persist_ion_ed(
         module="spectrum.ion_ed",
         level="IONED",
         key=level_key("IONED", n_ele=n_ele, r42=r42, r62=r62, cfg=cfg),
-        inputs_summary={
-            "n": n_ele,
-            "U": float(physics.get("F0", 0.0)),
-            "F2": float(physics.get("F2", 0.0)),
-            "F4": float(physics.get("F4", 0.0)),
-            "F6": float(physics.get("F6", 0.0)),
-            "zeta": float(physics.get("zeta", 0.0)),
-            "offset": float(physics.get("offset", 0.0)),
-            "includes_hcef": bool(physics.get("includes_hcef", False)),
-        },
+        inputs_summary=inputs_summary,
         tensor_name="V_fock_ed, energies",
         physical_meaning="Full single-ion ED eigenstates of H_int + H_soc (+ H_cef when supplied)",
         basis_id=str(result.get("basis_id", f"fock14_n{n_ele}_lex_v1")),

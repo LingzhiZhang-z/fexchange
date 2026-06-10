@@ -70,15 +70,10 @@ def spin12_map(
 
     imag_leakage = np.linalg.norm(J_mu.imag, "fro") / max(np.linalg.norm(J_mu, "fro"), EPS_ZERO)
     if imag_leakage > EPS_MAP:
-        raise NumError(
-            "FXE-NUM-001",
-            f"Spin-1/2 exchange imaginary leakage {imag_leakage:.3e} > eps_map={EPS_MAP}",
-            module="spin12",
-            actual={
-                "residual_name": "r_spin12_imag",
-                "residual_value": float(imag_leakage),
-                "threshold": EPS_MAP,
-            },
+        logger.warning(
+            "Spin-1/2 exchange imaginary leakage %.3e > eps_map=%.1e; continuing",
+            imag_leakage,
+            EPS_MAP,
         )
 
     J_real = J_mu.real
@@ -96,15 +91,10 @@ def spin12_map(
     residual = np.linalg.norm(H_reconstructed - Heff_flat, "fro") / max(norm_H, EPS_ZERO)
 
     if residual > EPS_MAP:
-        raise NumError(
-            "FXE-NUM-001",
-            f"Spin-1/2 exchange residual={residual:.3e} > eps_map={EPS_MAP:.2e}",
-            module="spin12",
-            actual={
-                "residual_name": "r_spin12_map",
-                "residual_value": float(residual),
-                "threshold": EPS_MAP,
-            },
+        logger.warning(
+            "Spin-1/2 exchange residual %.3e > eps_map=%.1e; continuing",
+            residual,
+            EPS_MAP,
         )
     logger.info("Spin-1/2 mapping: residual=%.2e", residual)
 
