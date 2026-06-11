@@ -16,3 +16,6 @@ test/
 tests/
 fexchange/tools/tests
 .venv
+logs
+scripts/sweep-dft/i8cpu_jobs
+scripts/sweep-dft/f16cpu_jobs

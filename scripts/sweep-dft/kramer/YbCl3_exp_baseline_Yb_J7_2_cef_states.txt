@@ -1,0 +1,19 @@
+# CEF on a C2 site   ion=Yb   J=3.5   units=meV
+#   C2 axis  z = [1,0,-1]  -> code [0.707107, 0.0, -0.707107]
+#   in-plane x = [1,-2,1]  -> code [0.408248, -0.816497, 0.408248]
+#   Stevens factors applied: alpha=3.1750e-02 beta=-1.7320e-03 gamma=1.4800e-04
+
+Energy levels (shifted, ground = 0) [meV]
+  level               E   deg     gap_to_prev
+      0        0.000000     2        0.000000
+      1       21.079878     2       21.079878
+      2       32.036622     2       10.956744
+      3       39.291348     2        7.254727
+
+Ground doublet (degeneracy 2), gap to first excited = 21.079878 meV
+Ground g-values:
+  gx = 3.354633   (along in-plane x [1-21])
+  gy = 1.888875
+  gz = 3.649581   (along C2 axis z [10-1])
+  g_principal = 3.649581, 3.354634, 1.888874
+  (time-reversal pairing residual 6.7e-16)

@@ -1,0 +1,11 @@
+point_group = "C3v"
+J = 4.5
+mode_q3 = "sin"
+kramer_name = "NdOF_exp_baseline_Nd_J9_2"
+
+B20 = 0.81997
+B40 = 0.0084041
+B43 = -0.16517
+B60 = 0.00013199
+B63 = -0.0047985
+B66 = 0.00088383

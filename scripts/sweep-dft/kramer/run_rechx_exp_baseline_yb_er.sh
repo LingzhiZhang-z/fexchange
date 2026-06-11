@@ -8,7 +8,11 @@ output_dir="$repo/data/data-DFT-input/kramer/REChX"
 
 for name in \
   YbOCl_exp_baseline_Yb_J7_2 \
-  ErOCl_exp_baseline_Er_J15_2
+  ErOCl_exp_baseline_Er_J15_2 \
+  NdOF_exp_baseline_Nd_J9_2 \
+  YbOCl_exp_baseline_Dy_J15_2 \
+  ErOCl_exp_baseline_Dy_J15_2 \
+  NdOF_exp_baseline_Dy_J15_2
 do
   "$python_bin" -B -m fexchange.tools.cef_states \
     "$input_dir/$name.toml" \

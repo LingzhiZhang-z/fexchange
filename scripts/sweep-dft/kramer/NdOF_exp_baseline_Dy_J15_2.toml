@@ -1,0 +1,18 @@
+# NdOF experimental C3v CEF transferred to Dy3+.
+# Source B_kq are treated as effective ion-specific Stevens coefficients:
+#   B_kq(source ion) = theta_k(source ion) * A_kq<r^k>
+# Transfer rule:
+#   B_kq(Dy) = B_kq(source ion) * theta_k(Dy) / theta_k(source ion)
+# Source ion: Nd; theta ratios Dy/Nd:
+#   rank-2 = 0.987710018668, rank-4 = 0.203366540708, rank-6 = -0.027244011582
+point_group = "C3v"
+J = 7.5
+mode_q3 = "sin"
+kramer_name = "NdOF_exp_baseline_Dy_J15_2"
+
+B20 = 0.809892584007
+B40 = 0.00170911274476
+B43 = -0.0335900515287
+B60 = -0.00000359593708871
+B63 = 0.000130730389576
+B66 = -0.0000240790747565

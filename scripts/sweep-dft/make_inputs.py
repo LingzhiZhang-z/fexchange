@@ -39,9 +39,9 @@ REX3_KRAMERS = {
     "Ce": (("ohg7", "f1_ce_g7.txt"),),
     "Nd": (("ohg6", "f3_nd_g6.txt"),),
     "Sm": (("ohg7", "f5_sm_g7.txt"),),
-    "Dy": (("ohg6", "f9_dy_g6.txt"), ("ohg7", "f9_dy_g7.txt")),
-    "Er": (("ohg7", "f11_er_g7.txt"),),
-    "Yb": (("ohg6", "f13_yb_g6.txt"),),
+    "Dy": (("ohg6", "f9_dy_g6.txt"), ("ohg7", "f9_dy_g7.txt"), ("c2", "YbCl3_exp_baseline_Dy_J15_2_projector.txt")),
+    "Er": (("ohg7", "f11_er_g7.txt"), ("c2", "YbCl3_exp_baseline_Er_J15_2_projector.txt")),
+    "Yb": (("ohg6", "f13_yb_g6.txt"), ("c2", "YbCl3_exp_baseline_Yb_J7_2_projector.txt")),
 }
 
 RECHX_KRAMERS = {
@@ -53,13 +53,30 @@ RECHX_KRAMERS = {
         "YbOCl_exp_baseline_Yb_J7_2_projector.txt",
     ),
     ("REOF", "DyOF"): (
-        "YbOCl_baseline_Dy_J15_2_projector.txt",
+        "YbOCl_exp_baseline_Dy_J15_2_projector.txt",
+        "ErOCl_exp_baseline_Dy_J15_2_projector.txt",
+        "NdOF_exp_baseline_Dy_J15_2_projector.txt",
+        "DyOF_baseline_Dy_J15_2_projector.txt",     # DyOF's own DFT-extracted (Ising-like) doublet
     ),
     ("REOF", "ErOF"): (
         "YbOCl_baseline_Er_J15_2_projector.txt",
+        "ErOCl_exp_baseline_Er_J15_2_projector.txt",
+        "ErOF_baseline_Er_J15_2_projector.txt",     # ErOF's own DFT-extracted (Ising-like) doublet
+    ),
+    ("REOF", "NdOF"): (
+        "NdOF_exp_baseline_Nd_J9_2_projector.txt",
+    ),
+    ("REOF", "SmOF"): (
+        "CeSm_C3v_Gamma4_J5_2_theta000_projector.txt",
+        "CeSm_C3v_Gamma4_J5_2_theta015_projector.txt",
+        "CeSm_C3v_Gamma4_J5_2_theta030_projector.txt",
+        "CeSm_C3v_Gamma4_J5_2_theta045_projector.txt",
+        "CeSm_C3v_Gamma4_J5_2_theta060_projector.txt",
+        "CeSm_C3v_Gamma4_J5_2_theta075_projector.txt",
     ),
     ("RESI", "NdSI-re"): (
         "YbOCl_baseline_Nd_J9_2_projector.txt",
+        "NdOF_exp_baseline_Nd_J9_2_projector.txt",
     ),
     ("RESI", "SmSI-re"): (
         "CeSm_C3v_Gamma4_J5_2_theta000_projector.txt",
@@ -81,6 +98,10 @@ def main() -> int:
     ap.add_argument("--jh-points", type=int, default=JH_POINTS)
     ap.add_argument("--u-p", type=float, default=U_P)
     ap.add_argument("--samples-only", action="store_true")
+    ap.add_argument("--no-samples", action="store_true")
+    ap.add_argument("--family")
+    ap.add_argument("--material")
+    ap.add_argument("--projector-file")
     args = ap.parse_args()
 
     root = args.input_root.resolve()
@@ -89,15 +110,32 @@ def main() -> int:
 
     materials = material_dirs(root)
 
-    sample_material = root / "RESI" / "NdSI-re"
-    write_samples(sample_material, args.output_root, u_values, ratios, args.u_p)
     if args.samples_only:
+        sample_material = root / "RESI" / "NdSI-re"
+        write_samples(sample_material, args.output_root, u_values, ratios, args.u_p)
+        print("wrote 3 samples under scripts/sweep-dft/samples")
         return 0
+    wrote_samples = False
+    if not args.no_samples:
+        sample_material = root / "RESI" / "NdSI-re"
+        write_samples(sample_material, args.output_root, u_values, ratios, args.u_p)
+        wrote_samples = True
+
+    if args.family:
+        materials = [mat for mat in materials if mat.parent.name == args.family]
+    if args.material:
+        materials = [mat for mat in materials if mat.name == args.material]
 
     n_written = 0
     for mat in materials:
         re = infer_re(mat.name)
         projectors = kramer_choices(mat, re)
+        if args.projector_file:
+            projectors = tuple(
+                item for item in projectors if Path(item[1]).name == args.projector_file or item[0] == args.projector_file
+            )
+            if not projectors:
+                raise ValueError(f"no projector matched --projector-file={args.projector_file!r} for {mat.parent.name}/{mat.name}")
         for bond in bond_dirs(mat):
             for label, kfile in projectors:
                 out_dir = bond / "sweep-dft" / path_token(label)
@@ -116,7 +154,10 @@ def main() -> int:
                     (out_dir / f"{mode}.toml").write_text(text, encoding="utf-8")
                     n_written += 1
     print(f"wrote {n_written} sweep TOMLs under {root}")
-    print("wrote 3 samples under scripts/sweep-dft/samples")
+    if wrote_samples:
+        print("wrote 3 samples under scripts/sweep-dft/samples")
+    else:
+        print("skipped samples")
     return 0
 
 

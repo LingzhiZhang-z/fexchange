@@ -1,0 +1,134 @@
+
+============================================================
+CEF States Calculation
+============================================================
+  Point group: C3v
+  J = 4.5  (2J+1 = 10 states)
+  B_params: {'B20': 0.81997, 'B40': 0.0084041, 'B60': 0.00013199, 'B66': 0.00088383, 'B43': -0.16517, 'B63': -0.0047985}
+============================================================
+
+ Level     Delta(meV)   Deg              Irrep Wavefunction (compact)
+------------------------------------------------------------------------------------------
+     0       0.000000     2             Gamma4  +0.40|-2.5> (+0.00-0.63i)|0.5> -0.67|3.5>
+     1       1.619908     2      Gamma5/Gamma6  +0.03|-4.5> (-0.00-0.03i)|-1.5> -0.91|1.5> (+0.00+0.41i)|4.5> ...
+     2      15.698430     2             Gamma4  +0.91|-2.5> (+0.00+0.36i)|0.5> +0.21|3.5>
+     3      19.293964     2             Gamma4  (+0.00-0.11i)|-2.5> -0.69|0.5> (+0.00-0.71i)|3.5>
+     4      80.993953     2      Gamma5/Gamma6  -0.04|-1.5> (+0.00+0.41i)|1.5> -0.91|4.5>
+
+============================================================
+Ground State: Gamma4  Delta = 0.000000 meV  (E0 = -23.521251 meV)
+============================================================
+  Degeneracy: 2-fold
+  Allowed multipoles: magnetic_dipole, magnetic_octupole
+============================================================
+
+
+============================================================
+Multipole Projections
+============================================================
+
+--- Level 0: Gamma4 (doublet)  E = -23.521251 meV  gauge=kramers ---
+magnetic_dipole:
+  Jx     Yes o0=0.000 ox=0.078 oy=0.000 oz=0.000
+  Jy     Yes o0=0.000 ox=0.000 oy=0.078 oz=0.000
+  Jz     Yes o0=0.000 ox=0.000 oy=0.000 oz=1.366
+electric_quadrupole:
+  O20    No
+  O21c   No
+  O21s   No
+  O22c   No
+  O22s   No
+magnetic_octupole:
+  O30    Yes o0=0.000 ox=0.000 oy=0.000 oz=-16.341
+  O31c   Yes o0=0.000 ox=46.025 oy=0.000 oz=0.000
+  O31s   Yes o0=0.000 ox=0.000 oy=46.025 oz=0.000
+  O32c   Yes o0=0.000 ox=0.000 oy=8.419 oz=0.000
+  O32s   Yes o0=0.000 ox=8.419 oy=0.000 oz=0.000
+  O33c   No
+  O33s   Yes o0=0.000 ox=0.000 oy=0.000 oz=65.775
+
+--- Level 1: Gamma5/Gamma6 (doublet)  E = -21.901343 meV  gauge=kramers ---
+magnetic_dipole:
+  Jx     No
+  Jy     No
+  Jz     Yes o0=0.000 ox=0.000 oy=0.000 oz=1.992
+electric_quadrupole:
+  O20    No
+  O21c   No
+  O21s   No
+  O22c   No
+  O22s   No
+magnetic_octupole:
+  O30    Yes o0=0.000 ox=0.000 oy=-8.317 oz=-56.387
+  O31c   No
+  O31s   No
+  O32c   No
+  O32s   No
+  O33c   Yes o0=0.000 ox=-47.963 oy=0.000 oz=0.000
+  O33s   Yes o0=0.000 ox=0.000 oy=-50.352 oz=24.198
+
+--- Level 2: Gamma4 (doublet)  E = -7.822821 meV  gauge=kramers ---
+magnetic_dipole:
+  Jx     Yes o0=0.000 ox=-1.074 oy=0.000 oz=0.000
+  Jy     Yes o0=0.000 ox=0.000 oy=-1.074 oz=0.000
+  Jz     Yes o0=0.000 ox=0.000 oy=0.000 oz=-1.860
+electric_quadrupole:
+  O20    No
+  O21c   No
+  O21s   No
+  O22c   No
+  O22s   No
+magnetic_octupole:
+  O30    Yes o0=0.000 ox=0.000 oy=0.000 oz=80.767
+  O31c   Yes o0=0.000 ox=-8.294 oy=0.000 oz=0.000
+  O31s   Yes o0=0.000 ox=0.000 oy=-8.294 oz=0.000
+  O32c   Yes o0=0.000 ox=0.000 oy=-10.926 oz=0.000
+  O32s   Yes o0=0.000 ox=-10.926 oy=0.000 oz=0.000
+  O33c   No
+  O33s   Yes o0=0.000 ox=0.000 oy=0.000 oz=-29.774
+
+--- Level 3: Gamma4 (doublet)  E = -4.227287 meV  gauge=kramers ---
+magnetic_dipole:
+  Jx     Yes o0=0.000 ox=1.504 oy=0.000 oz=0.000
+  Jy     Yes o0=0.000 ox=0.000 oy=1.504 oz=0.000
+  Jz     Yes o0=0.000 ox=0.000 oy=0.000 oz=1.994
+electric_quadrupole:
+  O20    No
+  O21c   No
+  O21s   No
+  O22c   No
+  O22s   No
+magnetic_octupole:
+  O30    Yes o0=0.000 ox=0.000 oy=0.000 oz=-37.426
+  O31c   Yes o0=0.000 ox=-22.268 oy=0.000 oz=0.000
+  O31s   Yes o0=0.000 ox=0.000 oy=-22.268 oz=0.000
+  O32c   Yes o0=0.000 ox=0.000 oy=-2.507 oz=0.000
+  O32s   Yes o0=0.000 ox=-2.507 oy=0.000 oz=0.000
+  O33c   No
+  O33s   Yes o0=0.000 ox=0.000 oy=0.000 oz=-36.001
+
+--- Level 4: Gamma5/Gamma6 (doublet)  E = 57.472702 meV  gauge=kramers ---
+magnetic_dipole:
+  Jx     No
+  Jy     No
+  Jz     Yes o0=0.000 ox=0.000 oy=0.000 oz=3.995
+electric_quadrupole:
+  O20    No
+  O21c   No
+  O21s   No
+  O22c   No
+  O22s   No
+magnetic_octupole:
+  O30    Yes o0=0.000 ox=0.000 oy=4.147 oz=89.696
+  O31c   No
+  O31s   No
+  O32c   No
+  O32s   No
+  O33c   Yes o0=0.000 ox=12.037 oy=0.000 oz=0.000
+  O33s   Yes o0=0.000 ox=0.000 oy=11.615 oz=-18.588
+
+============================================================
+
+gx 1.569459222850e-01
+gy 1.569459222850e-01
+gz 2.731832298613e+00

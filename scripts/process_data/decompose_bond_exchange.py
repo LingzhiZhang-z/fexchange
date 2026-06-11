@@ -66,8 +66,16 @@ def decompose(J: np.ndarray, bond: str) -> dict[str, float]:
     return {
         "J": float(Jh),
         "K": float(M[2, 2] - Jh),
+        # the three diagonals in the bond frame (all distinct when no symmetry forces Jaa=Jbb, e.g. NNN)
+        "Jaa": float(M[0, 0]),
+        "Jbb": float(M[1, 1]),
+        "Jcc": float(M[2, 2]),
         "Gamma": float(0.5 * (M[0, 1] + M[1, 0])),
         "Gamma_prime": float(0.25 * (M[0, 2] + M[2, 0] + M[1, 2] + M[2, 1])),
+        # the two Gamma' partners separately (equal under ideal C3; split under C2m)
+        "Gamma_ab": float(0.5 * (M[0, 1] + M[1, 0])),
+        "Gamma_ac": float(0.5 * (M[0, 2] + M[2, 0])),
+        "Gamma_bc": float(0.5 * (M[1, 2] + M[2, 1])),
         "D_a": float(0.5 * (M[1, 2] - M[2, 1])),
         "D_b": float(0.5 * (M[2, 0] - M[0, 2])),
         "D_c": float(0.5 * (M[0, 1] - M[1, 0])),

@@ -1,0 +1,28 @@
+# RECl3 honeycomb CEF, C2 site (C2 axis along [10-1], in-plane x along [1-21]).
+# B_params are the YbCl3 experimental coefficients divided by theta_k (= A_k^q<r^k>),
+# the ion-independent crystal-field environment; apply_stevens re-applies the ion's
+# Stevens factor so the same A-parameters transfer across the isostructural family.
+J = 7.5
+units = "meV"
+ion = "Er"
+apply_stevens = true
+
+[B_params]
+B20 = -2.820
+B22 = -25.956
+B40 = 6.170
+B42 = 42.336
+B44 = -36.335
+B60 = -3.004
+B62 = 10.764
+B64 = 7.482
+B66 = 49.327
+B42i = -0.00642
+B44i = -0.015
+B62i = 0.00856
+B64i = -0.067
+B66i = -0.036
+
+[axis_in_code]
+x = [1, -2, 1]
+z = [1, 0, -1]

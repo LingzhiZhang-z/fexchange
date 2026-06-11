@@ -1,0 +1,18 @@
+# ErOCl experimental C3v CEF transferred to Dy3+.
+# Source B_kq are treated as effective ion-specific Stevens coefficients:
+#   B_kq(source ion) = theta_k(source ion) * A_kq<r^k>
+# Transfer rule:
+#   B_kq(Dy) = B_kq(source ion) * theta_k(Dy) / theta_k(source ion)
+# Source ion: Er; theta ratios Dy/Er:
+#   rank-2 = -2.49960629921, rank-4 = -1.33333333333, rank-6 = 0.5
+point_group = "C3v"
+J = 7.5
+mode_q3 = "sin"
+kramer_name = "ErOCl_exp_baseline_Dy_J15_2"
+
+B20 = -0.0243244187795
+B40 = -0.000589786666667
+B43 = 0.023592
+B60 = 0.00000311225
+B63 = 0.000029541
+B66 = -0.000033788
